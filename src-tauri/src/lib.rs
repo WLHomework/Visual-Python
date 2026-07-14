@@ -5,6 +5,7 @@ use std::os::windows::process::CommandExt;
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::HashSet;
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
@@ -22,6 +23,7 @@ struct PythonEnvironment { path: String, version: String, implementation: String
 struct PythonTasks {
   next_id: AtomicU64,
   active: Arc<Mutex<Option<ActivePythonTask>>>,
+  timed_out: Arc<Mutex<HashSet<u64>>>,
 }
 
 struct ActivePythonTask { id: u64, pid: u32, stdin: ChildStdin }
@@ -107,6 +109,21 @@ fn detect_python() -> Vec<PythonEnvironment> {
 fn validate_python(path: String) -> Result<PythonEnvironment, String> { inspect_python(&path, &[]) }
 
 #[tauri::command]
+fn validate_python_code(code: String, python_path: Option<String>) -> Result<(), String> {
+  let mut command = Command::new(python_path.as_deref().unwrap_or("python"));
+  command.args(["-X", "utf8", "-c", "import sys; compile(sys.stdin.read(), '<visual-python>', 'exec')"])
+    .env("PYTHONIOENCODING", "utf-8")
+    .env("PYTHONUTF8", "1")
+    .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+  #[cfg(target_os = "windows")]
+  command.creation_flags(0x08000000);
+  let mut child = command.spawn().map_err(|e| format!("无法启动 Python：{e}"))?;
+  if let Some(mut stdin) = child.stdin.take() { stdin.write_all(code.as_bytes()).map_err(|e| e.to_string())?; }
+  let output = child.wait_with_output().map_err(|e| e.to_string())?;
+  if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).into_owned()) }
+}
+
+#[tauri::command]
 fn start_python(app: AppHandle, tasks: State<PythonTasks>, code: String, timeout_secs: Option<u64>, python_path: Option<String>) -> Result<u64, String> {
   let mut active = tasks.active.lock().map_err(|_| "Python task state is unavailable")?;
   if active.is_some() { return Err("已有 Python 程序正在运行".into()); }
@@ -129,23 +146,27 @@ fn start_python(app: AppHandle, tasks: State<PythonTasks>, code: String, timeout
   if let Some(stderr) = child.stderr.take() { emit_reader(app.clone(), task_id, "stderr", stderr); }
 
   let active_for_wait = tasks.active.clone();
+  let timed_out_for_wait = tasks.timed_out.clone();
   let app_for_wait = app.clone();
   thread::spawn(move || {
     let exit_code = child.wait().ok().and_then(|status| status.code()).unwrap_or(-1);
     let mut active = active_for_wait.lock().ok();
     let was_active = active.as_ref().and_then(|state| state.as_ref()).is_some_and(|task| task.id == task_id);
     if let Some(state) = active.as_mut() { if state.as_ref().is_some_and(|task| task.id == task_id) { **state = None; } }
-    let _ = app_for_wait.emit("python-finished", PythonFinished { task_id, exit_code, stopped: !was_active, timed_out: false });
+    let timed_out = timed_out_for_wait.lock().ok().is_some_and(|mut tasks| tasks.remove(&task_id));
+    let _ = app_for_wait.emit("python-finished", PythonFinished { task_id, exit_code, stopped: !was_active && !timed_out, timed_out });
   });
 
   let timeout = timeout_secs.unwrap_or(60).clamp(1, 3600);
   let active_for_timeout = tasks.active.clone();
+  let timed_out_tasks = tasks.timed_out.clone();
   let app_for_timeout = app;
   thread::spawn(move || {
     thread::sleep(Duration::from_secs(timeout));
     let timed_out_pid = active_for_timeout.lock().ok().and_then(|active| active.as_ref().filter(|task| task.id == task_id).map(|task| task.pid));
     if let Some(pid) = timed_out_pid {
       let _ = app_for_timeout.emit("python-output", PythonOutput { task_id, stream: "system", data: format!("运行超过 {timeout} 秒，已终止。\n") });
+      if let Ok(mut tasks) = timed_out_tasks.lock() { tasks.insert(task_id); }
       if let Ok(mut active) = active_for_timeout.lock() { *active = None; }
       kill_process_tree(pid);
     }
@@ -180,7 +201,7 @@ pub fn run() {
     .manage(PythonTasks::default())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
-    .invoke_handler(tauri::generate_handler![detect_python, validate_python, start_python, stop_python, send_python_input])
+    .invoke_handler(tauri::generate_handler![detect_python, validate_python, validate_python_code, start_python, stop_python, send_python_input])
     .run(tauri::generate_context!())
     .expect("error while running Visual Python");
 }

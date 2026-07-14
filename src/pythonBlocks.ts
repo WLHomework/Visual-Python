@@ -9,33 +9,45 @@ const locale = Object.fromEntries(
 );
 Blockly.setLocale(locale);
 
-export const visualPythonTheme = Blockly.Theme.defineTheme("visualPython", {
-  name: "visualPython",
+const blockStyles = {
+  logic_blocks: { colourPrimary: "#5968b0", colourSecondary: "#4d5b9d", colourTertiary: "#3f4c89" },
+  loop_blocks: { colourPrimary: "#4b9b62", colourSecondary: "#408b55", colourTertiary: "#357747" },
+  math_blocks: { colourPrimary: "#4f72b8", colourSecondary: "#4363a5", colourTertiary: "#36538f" },
+  text_blocks: { colourPrimary: "#2f9e8f", colourSecondary: "#288e80", colourTertiary: "#207a6f" },
+  list_blocks: { colourPrimary: "#7657b5", colourSecondary: "#684aa5", colourTertiary: "#593d91" },
+  variable_blocks: { colourPrimary: "#b95073", colourSecondary: "#a44163", colourTertiary: "#8e3654" },
+  variable_dynamic_blocks: { colourPrimary: "#b95073", colourSecondary: "#a44163", colourTertiary: "#8e3654" },
+  procedure_blocks: { colourPrimary: "#8762b8", colourSecondary: "#7652a6", colourTertiary: "#644391" },
+};
+
+const createVisualTheme = (name: string, workspace: string, toolbox: string, foreground: string, flyout: string, scrollbar: string) => Blockly.Theme.defineTheme(name, {
+  name,
   base: Blockly.Themes.Classic,
-  blockStyles: {
-    logic_blocks: { colourPrimary: "#5968b0", colourSecondary: "#4d5b9d", colourTertiary: "#3f4c89" },
-    loop_blocks: { colourPrimary: "#4b9b62", colourSecondary: "#408b55", colourTertiary: "#357747" },
-    math_blocks: { colourPrimary: "#4f72b8", colourSecondary: "#4363a5", colourTertiary: "#36538f" },
-    text_blocks: { colourPrimary: "#2f9e8f", colourSecondary: "#288e80", colourTertiary: "#207a6f" },
-    list_blocks: { colourPrimary: "#7657b5", colourSecondary: "#684aa5", colourTertiary: "#593d91" },
-    variable_blocks: { colourPrimary: "#b95073", colourSecondary: "#a44163", colourTertiary: "#8e3654" },
-    variable_dynamic_blocks: { colourPrimary: "#b95073", colourSecondary: "#a44163", colourTertiary: "#8e3654" },
-    procedure_blocks: { colourPrimary: "#8762b8", colourSecondary: "#7652a6", colourTertiary: "#644391" },
-  },
+  blockStyles,
   componentStyles: {
-    workspaceBackgroundColour: "#ffffff",
-    toolboxBackgroundColour: "#f5f6f8",
-    toolboxForegroundColour: "#465267",
-    flyoutBackgroundColour: "#f9fafb",
-    flyoutForegroundColour: "#263245",
+    workspaceBackgroundColour: workspace,
+    toolboxBackgroundColour: toolbox,
+    toolboxForegroundColour: foreground,
+    flyoutBackgroundColour: flyout,
+    flyoutForegroundColour: foreground,
     flyoutOpacity: 1,
-    scrollbarColour: "#b5bdc8",
-    scrollbarOpacity: 0.65,
+    scrollbarColour: scrollbar,
+    scrollbarOpacity: 0.75,
     insertionMarkerColour: "#2f9e8f",
     insertionMarkerOpacity: 0.35,
     cursorColour: "#2f9e8f",
   },
 });
+
+export type VisualThemeId = "visual-dark" | "visual-light" | "one-dark" | "high-contrast";
+export const visualPythonThemes: Record<VisualThemeId, Blockly.Theme> = {
+  "visual-dark": createVisualTheme("visualDark", "#181c22", "#20252d", "#c3cad4", "#252b34", "#596471"),
+  "visual-light": createVisualTheme("visualLight", "#f7f8fa", "#eef1f5", "#344054", "#ffffff", "#aab2bd"),
+  "one-dark": createVisualTheme("oneDark", "#282c34", "#21252b", "#abb2bf", "#2c313a", "#596273"),
+  "high-contrast": createVisualTheme("highContrast", "#000000", "#0b0b0b", "#ffffff", "#111111", "#ffffff"),
+};
+
+export const visualPythonTheme = visualPythonThemes["visual-dark"];
 
 const colours = {
   inputOutput: "#2f9e8f",
@@ -81,10 +93,14 @@ Blockly.common.defineBlocksWithJsonArray([
   { type: "python_return", message0: "返回 %1", args0: [{ type: "input_value", name: "VALUE" }], previousStatement: null, colour: colours.function },
   { type: "python_raise", message0: "抛出异常 %1", args0: [{ type: "input_value", name: "ERROR" }], previousStatement: null, nextStatement: null, colour: statementColour },
   { type: "python_try_except", message0: "尝试 %1 捕获 %2 命名为 %3 %4", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR", text: "Exception" }, { type: "field_variable", name: "ALIAS", variable: "error" }, { type: "input_statement", name: "EXCEPT" }], previousStatement: null, nextStatement: null, colour: statementColour },
+  { type: "python_try_two_except", message0: "尝试 %1 捕获 %2 命名为 %3 %4 再捕获 %5 命名为 %6 %7 最终 %8", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR1", text: "ValueError" }, { type: "field_input", name: "ALIAS1", text: "error" }, { type: "input_statement", name: "EXCEPT1" }, { type: "field_input", name: "ERROR2", text: "TypeError" }, { type: "field_input", name: "ALIAS2", text: "error" }, { type: "input_statement", name: "EXCEPT2" }, { type: "input_statement", name: "FINALLY" }], previousStatement: null, nextStatement: null, colour: statementColour },
   { type: "python_for_in", message0: "对于 %1 在 %2 中 %3", args0: [{ type: "field_variable", name: "VAR", variable: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null, colour: colours.loop },
   { type: "python_for_enumerate", message0: "枚举 %1 为 %2 , %3 %4", args0: [{ type: "input_value", name: "ITERABLE" }, { type: "field_variable", name: "INDEX", variable: "index" }, { type: "field_variable", name: "VALUE", variable: "item" }, { type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null, colour: colours.loop },
+  { type: "python_while_else", message0: "当 %1 时 %2 否则 %3", args0: [{ type: "input_value", name: "CONDITION" }, { type: "input_statement", name: "DO" }, { type: "input_statement", name: "ELSE" }], previousStatement: null, nextStatement: null, colour: colours.loop },
+  { type: "python_for_else", message0: "对于 %1 在 %2 中 %3 否则 %4", args0: [{ type: "field_variable", name: "VAR", variable: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_statement", name: "DO" }, { type: "input_statement", name: "ELSE" }], previousStatement: null, nextStatement: null, colour: colours.loop },
   { type: "python_pass", message0: "跳过 pass", previousStatement: null, nextStatement: null, colour: colours.loop },
   { type: "python_assert", message0: "断言 %1 消息 %2", args0: [{ type: "input_value", name: "CONDITION" }, { type: "input_value", name: "MESSAGE" }], previousStatement: null, nextStatement: null, colour: statementColour },
+  { type: "python_scope_declaration", message0: "%1 变量 %2", args0: [{ type: "field_dropdown", name: "SCOPE", options: [["全局 global", "global"], ["外层 nonlocal", "nonlocal"]] }, { type: "field_input", name: "NAMES", text: "counter" }], previousStatement: null, nextStatement: null, colour: colours.function },
   { type: "python_function_def", message0: "定义函数 %1 ( %2 ) %3", args0: [{ type: "field_input", name: "NAME", text: "my_function" }, { type: "field_input", name: "PARAMS", text: "value, count=1, *args, **kwargs" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: colours.function },
   { type: "python_class_def", message0: "定义类 %1 继承 %2 %3", args0: [{ type: "field_input", name: "NAME", text: "MyClass" }, { type: "field_input", name: "BASES", text: "object" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: objectColour },
   { type: "python_method_def", message0: "定义方法 %1 ( %2 ) %3", args0: [{ type: "field_input", name: "NAME", text: "method" }, { type: "field_input", name: "PARAMS", text: "self" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: objectColour },
@@ -92,6 +108,21 @@ Blockly.common.defineBlocksWithJsonArray([
   { type: "python_super_call", message0: "调用父类方法 %1 参数 %2", args0: [{ type: "field_input", name: "METHOD", text: "__init__" }, { type: "input_value", name: "ARG" }], previousStatement: null, nextStatement: null, colour: objectColour },
   { type: "python_try_full", message0: "尝试 %1 捕获 %2 命名为 %3 %4 否则 %5 最终 %6", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR", text: "Exception" }, { type: "field_variable", name: "ALIAS", variable: "error" }, { type: "input_statement", name: "EXCEPT" }, { type: "input_statement", name: "ELSE" }, { type: "input_statement", name: "FINALLY" }], previousStatement: null, nextStatement: null, colour: statementColour },
   { type: "python_with", message0: "使用 with %1 命名为 %2 %3", args0: [{ type: "input_value", name: "CONTEXT" }, { type: "field_variable", name: "ALIAS", variable: "resource" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: statementColour },
+  { type: "python_list_comprehension", message0: "列表 [ %1 对于 %2 在 %3 中 如果 %4 ]", args0: [{ type: "input_value", name: "EXPRESSION" }, { type: "field_input", name: "VAR", text: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour },
+  { type: "python_set_comprehension", message0: "集合 { %1 对于 %2 在 %3 中 如果 %4 }", args0: [{ type: "input_value", name: "EXPRESSION" }, { type: "field_input", name: "VAR", text: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour },
+  { type: "python_dict_comprehension", message0: "字典 { %1 : %2 对于 %3 在 %4 中 如果 %5 }", args0: [{ type: "input_value", name: "KEY" }, { type: "input_value", name: "VALUE" }, { type: "field_input", name: "VAR", text: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour },
+  { type: "python_lambda", message0: "lambda 参数 %1 返回 %2", args0: [{ type: "field_input", name: "PARAMS", text: "value" }, { type: "input_value", name: "EXPRESSION" }], inputsInline: true, output: null, colour: colours.function },
+  { type: "python_decorated_definition", message0: "装饰器 @ %1 %2", args0: [{ type: "input_value", name: "DECORATOR" }, { type: "input_statement", name: "DEFINITION" }], previousStatement: null, nextStatement: null, colour: colours.function },
+  { type: "python_range", message0: "range 从 %1 到 %2 步长 %3", args0: [{ type: "input_value", name: "START" }, { type: "input_value", name: "STOP" }, { type: "input_value", name: "STEP" }], inputsInline: true, output: null, colour: colours.loop },
+  { type: "python_length", message0: "%1 的长度", args0: [{ type: "input_value", name: "VALUE" }], output: "Number", colour: colours.inputOutput },
+  { type: "python_convert", message0: "转换 %1 为 %2", args0: [{ type: "input_value", name: "VALUE" }, { type: "field_dropdown", name: "TYPE", options: [["整数 int", "int"], ["浮点数 float", "float"], ["文本 str", "str"], ["布尔值 bool", "bool"], ["列表 list", "list"], ["元组 tuple", "tuple"], ["集合 set", "set"], ["字典 dict", "dict"]] }], inputsInline: true, output: null, colour: colours.inputOutput },
+  { type: "python_string_method", message0: "文本 %1 方法 %2 参数 %3", args0: [{ type: "input_value", name: "TEXT", check: "String" }, { type: "field_dropdown", name: "METHOD", options: [["转大写 upper", "upper"], ["转小写 lower", "lower"], ["去空白 strip", "strip"], ["分割 split", "split"], ["连接 join", "join"]] }, { type: "input_value", name: "ARG" }], inputsInline: true, output: null, colour: colours.inputOutput },
+  { type: "python_list_method", message0: "列表 %1 方法 %2 参数 %3", args0: [{ type: "input_value", name: "LIST" }, { type: "field_dropdown", name: "METHOD", options: [["追加 append", "append"], ["扩展 extend", "extend"], ["移除 remove", "remove"], ["弹出 pop", "pop"], ["排序 sort", "sort"], ["反转 reverse", "reverse"], ["清空 clear", "clear"]] }, { type: "input_value", name: "ARG" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour },
+  { type: "python_dict_get", message0: "字典 %1 获取键 %2 默认值 %3", args0: [{ type: "input_value", name: "DICT" }, { type: "input_value", name: "KEY" }, { type: "input_value", name: "DEFAULT" }], inputsInline: true, output: null, colour: collectionColour },
+  { type: "python_dict_view", message0: "字典 %1 的 %2", args0: [{ type: "input_value", name: "DICT" }, { type: "field_dropdown", name: "METHOD", options: [["键 keys", "keys"], ["值 values", "values"], ["键值对 items", "items"]] }], inputsInline: true, output: null, colour: collectionColour },
+  { type: "python_open_file", message0: "打开文件 %1 模式 %2 编码 %3", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_dropdown", name: "MODE", options: [["读取 r", "r"], ["写入 w", "w"], ["追加 a", "a"], ["二进制读取 rb", "rb"], ["二进制写入 wb", "wb"]] }, { type: "field_input", name: "ENCODING", text: "utf-8" }], inputsInline: true, output: null, colour: colours.module },
+  { type: "python_file_read", message0: "文件 %1 读取 %2", args0: [{ type: "input_value", name: "FILE" }, { type: "input_value", name: "SIZE" }], inputsInline: true, output: null, colour: colours.module },
+  { type: "python_file_write", message0: "文件 %1 写入 %2", args0: [{ type: "input_value", name: "FILE" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.module },
 ]);
 
 Blockly.Blocks.python_sequence_collection = {
@@ -155,14 +186,45 @@ Blockly.Blocks.python_dynamic_dict = {
 type ParameterSpec = { kind: "positional" | "default" | "args" | "kwargs"; name: string };
 type ArgumentSpec = { kind: "positional" | "keyword"; name: string };
 
+const normalizeIdentifier = (name: string, fallback: string, used: Set<string>) => {
+  const base = /^[A-Za-z_]\w*$/.test(name.trim()) ? name.trim() : fallback;
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) candidate = `${base}_${suffix++}`;
+  used.add(candidate);
+  return candidate;
+};
+
+function normalizeParameters(parameters: ParameterSpec[]) {
+  const seenKinds = new Set<"args" | "kwargs">();
+  const usedNames = new Set<string>();
+  const rank = { positional: 0, default: 1, args: 2, kwargs: 3 } as const;
+  return parameters.map((parameter, index) => {
+    const kind = (parameter.kind === "args" || parameter.kind === "kwargs") && seenKinds.has(parameter.kind)
+      ? "positional"
+      : parameter.kind;
+    if (kind === "args" || kind === "kwargs") seenKinds.add(kind);
+    return { kind, name: normalizeIdentifier(parameter.name, "value", usedNames), index };
+  }).sort((left, right) => rank[left.kind] - rank[right.kind] || left.index - right.index)
+    .map(({ kind, name }) => ({ kind, name }));
+}
+
+function normalizeArguments(arguments_: ArgumentSpec[]) {
+  const usedKeywords = new Set<string>();
+  return arguments_.map((argument) => argument.kind === "keyword"
+    ? { kind: "keyword" as const, name: normalizeIdentifier(argument.name, "name", usedKeywords) }
+    : { kind: "positional" as const, name: "" });
+}
+
 function rebuildParameterShape(block: any) {
-  const closingInput = block.inputList.find((input: Blockly.Input) => input.fieldRow.some((field) => field.name === "CLOSE_PAREN"));
-  if (closingInput) closingInput.removeField("CLOSE_PAREN");
   for (let i = 0; block.getInput(`PARAM${i}`); i++) block.removeInput(`PARAM${i}`);
-  const head = block.getInput("HEAD");
-  for (const field of [...head.fieldRow]) {
-    if (field.name === "CLOSE_PAREN" || field.name?.startsWith("PARAM_NAME")) head.removeField(field.name);
-  }
+  const name = block.getFieldValue("NAME") || (block.type.includes("method") ? "method" : "my_function");
+  block.removeInput("HEAD");
+  const head = block.appendDummyInput("HEAD")
+    .appendField(block.type.includes("method") ? "定义方法" : "定义函数")
+    .appendField(new Blockly.FieldTextInput(name), "NAME")
+    .appendField("(");
+  if (block.getInput("BODY")) block.moveInputBefore("HEAD", "BODY");
   block.parameters_.forEach((parameter: ParameterSpec, index: number) => {
     const prefix = parameter.kind === "args" ? "*" : parameter.kind === "kwargs" ? "**" : index ? "," : "";
     const input = parameter.kind === "default" ? block.appendValueInput(`PARAM${index}`) : head;
@@ -177,7 +239,7 @@ function rebuildParameterShape(block: any) {
 const parameterMixin = {
   parameters_: [] as ParameterSpec[],
   saveExtraState(this: any) { return { parameters: this.parameters_.map((parameter: ParameterSpec, i: number) => ({ ...parameter, name: this.getFieldValue(`PARAM_NAME${i}`) || parameter.name })) }; },
-  loadExtraState(this: any, state: { parameters?: ParameterSpec[] }) { this.parameters_ = state.parameters ?? []; rebuildParameterShape(this); },
+  loadExtraState(this: any, state: { parameters?: ParameterSpec[] }) { this.parameters_ = normalizeParameters(state.parameters ?? []); rebuildParameterShape(this); },
   decompose(this: any, workspace: Blockly.WorkspaceSvg) {
     const container = workspace.newBlock("python_parameter_container"); container.initSvg(); let connection = container.getInput("STACK")!.connection!;
     this.parameters_.forEach((parameter: ParameterSpec, i: number) => { const item = workspace.newBlock("python_parameter_item"); item.initSvg(); item.setFieldValue(parameter.kind, "KIND"); item.setFieldValue(this.getFieldValue(`PARAM_NAME${i}`) || parameter.name, "NAME"); connection.connect(item.previousConnection!); connection = item.nextConnection!; });
@@ -186,7 +248,9 @@ const parameterMixin = {
   compose(this: any, container: Blockly.Block) {
     const parameters: ParameterSpec[] = []; const connections: Array<Blockly.Connection | null> = []; let item = container.getInputTargetBlock("STACK");
     while (item) { if (!item.isInsertionMarker()) { parameters.push({ kind: item.getFieldValue("KIND"), name: item.getFieldValue("NAME") || "value" }); connections.push((item as any).valueConnection_ ?? null); } item = item.getNextBlock(); }
-    this.parameters_ = parameters; rebuildParameterShape(this); connections.forEach((connection, i) => connection?.reconnect(this, `PARAM${i}`));
+    const normalized = normalizeParameters(parameters);
+    const orderedConnections = normalized.map((parameter) => connections[parameters.findIndex((item) => item.name === parameter.name)] ?? null);
+    this.parameters_ = normalized; rebuildParameterShape(this); orderedConnections.forEach((connection, i) => connection?.reconnect(this, `PARAM${i}`));
   },
   saveConnections(this: any, container: Blockly.Block) { let item = container.getInputTargetBlock("STACK"); let i = 0; while (item) { if (!item.isInsertionMarker()) { (item as any).valueConnection_ = this.getInput(`PARAM${i}`)?.connection?.targetConnection; i++; } item = item.getNextBlock(); } },
 };
@@ -202,25 +266,33 @@ defineStructuredFunction("python_method_structured", "定义方法", colours.obj
 
 function rebuildArgumentShape(block: any) {
   for (let i = 0; block.getInput(`ARG${i}`); i++) block.removeInput(`ARG${i}`);
+  block.getInput("TAIL") && block.removeInput("TAIL");
+  const target = block.getFieldValue("TARGET") || (block.type.includes("method") ? "items.append" : block.type.includes("new_object") ? "Person" : "function");
+  block.removeInput("HEAD");
+  const head = block.appendDummyInput("HEAD");
+  if (block.type.includes("method")) head.appendField("对象");
+  head.appendField(new Blockly.FieldTextInput(target), "TARGET").appendField("(");
   block.arguments_.forEach((argument: ArgumentSpec, index: number) => {
     const input = block.appendValueInput(`ARG${index}`); if (index) input.appendField(",");
     if (argument.kind === "keyword") input.appendField(new Blockly.FieldTextInput(argument.name), `ARG_NAME${index}`).appendField("=");
+    if (index === block.arguments_.length - 1) input.appendField(")", "CLOSE_PAREN");
   });
-  block.getInput("TAIL") && block.removeInput("TAIL"); block.appendDummyInput("TAIL").appendField(")"); block.setInputsInline(true);
+  if (!block.arguments_.length) head.appendField(")", "CLOSE_PAREN");
+  block.setInputsInline(true);
 }
 const argumentMixin = {
   arguments_: [] as ArgumentSpec[],
   saveExtraState(this: any) { return { arguments: this.arguments_.map((argument: ArgumentSpec, i: number) => ({ ...argument, name: this.getFieldValue(`ARG_NAME${i}`) || argument.name })) }; },
-  loadExtraState(this: any, state: { arguments?: ArgumentSpec[] }) { this.arguments_ = state.arguments ?? []; rebuildArgumentShape(this); },
+  loadExtraState(this: any, state: { arguments?: ArgumentSpec[] }) { this.arguments_ = normalizeArguments(state.arguments ?? []); rebuildArgumentShape(this); },
   decompose(this: any, workspace: Blockly.WorkspaceSvg) { const container = workspace.newBlock("python_argument_container"); container.initSvg(); let connection = container.getInput("STACK")!.connection!; this.arguments_.forEach((argument: ArgumentSpec, i: number) => { const item = workspace.newBlock("python_argument_item"); item.initSvg(); item.setFieldValue(argument.kind, "KIND"); item.setFieldValue(this.getFieldValue(`ARG_NAME${i}`) || argument.name, "NAME"); connection.connect(item.previousConnection!); connection = item.nextConnection!; }); return container; },
-  compose(this: any, container: Blockly.Block) { const args: ArgumentSpec[] = []; const connections: Array<Blockly.Connection | null> = []; let item = container.getInputTargetBlock("STACK"); while (item) { if (!item.isInsertionMarker()) { args.push({ kind: item.getFieldValue("KIND"), name: item.getFieldValue("NAME") || "name" }); connections.push((item as any).valueConnection_ ?? null); } item = item.getNextBlock(); } this.arguments_ = args; rebuildArgumentShape(this); connections.forEach((connection, i) => connection?.reconnect(this, `ARG${i}`)); },
+  compose(this: any, container: Blockly.Block) { const args: ArgumentSpec[] = []; const connections: Array<Blockly.Connection | null> = []; let item = container.getInputTargetBlock("STACK"); while (item) { if (!item.isInsertionMarker()) { args.push({ kind: item.getFieldValue("KIND"), name: item.getFieldValue("NAME") || "name" }); connections.push((item as any).valueConnection_ ?? null); } item = item.getNextBlock(); } this.arguments_ = normalizeArguments(args); rebuildArgumentShape(this); connections.forEach((connection, i) => connection?.reconnect(this, `ARG${i}`)); },
   saveConnections(this: any, container: Blockly.Block) { let item = container.getInputTargetBlock("STACK"); let i = 0; while (item) { if (!item.isInsertionMarker()) { (item as any).valueConnection_ = this.getInput(`ARG${i}`)?.connection?.targetConnection; i++; } item = item.getNextBlock(); } },
 };
 Blockly.Blocks.python_argument_container = { init(this: Blockly.Block) { this.setColour(colours.call); this.appendDummyInput().appendField("调用参数"); this.appendStatementInput("STACK"); this.contextMenu = false; } };
 Blockly.Blocks.python_argument_item = { init(this: Blockly.Block) { this.setColour(colours.call); this.appendDummyInput().appendField(new Blockly.FieldDropdown([["位置参数", "positional"], ["关键字参数", "keyword"]]), "KIND").appendField(new Blockly.FieldTextInput("name"), "NAME"); this.setPreviousStatement(true); this.setNextStatement(true); this.contextMenu = false; } };
 
 function defineStructuredCall(type: string, mode: "value" | "statement", target: "function" | "method" | "class") {
-  Blockly.Blocks[type] = { ...argumentMixin, init(this: any) { this.setColour(target === "function" ? colours.call : colours.object); if (mode === "value") this.setOutput(true); else { this.setPreviousStatement(true); this.setNextStatement(true); } const head = this.appendDummyInput("HEAD"); if (target === "method") head.appendField("对象"); head.appendField(new Blockly.FieldTextInput(target === "class" ? "Person" : target === "method" ? "items.append" : "function"), "TARGET").appendField("("); this.arguments_ = [{ kind: "positional", name: "" }]; rebuildArgumentShape(this); this.setMutator(new Blockly.icons.MutatorIcon(["python_argument_item"], this as Blockly.BlockSvg)); } } as any;
+  Blockly.Blocks[type] = { ...argumentMixin, init(this: any) { this.setColour(target === "function" ? colours.call : colours.object); if (mode === "value") this.setOutput(true); else { this.setPreviousStatement(true); this.setNextStatement(true); } const head = this.appendDummyInput("HEAD"); if (target === "method") head.appendField("对象"); head.appendField(new Blockly.FieldTextInput(target === "class" ? "Person" : target === "method" ? "items.append" : "function"), "TARGET").appendField("("); this.arguments_ = []; rebuildArgumentShape(this); this.setMutator(new Blockly.icons.MutatorIcon(["python_argument_item"], this as Blockly.BlockSvg)); } } as any;
 }
 defineStructuredCall("python_call_structured", "value", "function");
 defineStructuredCall("python_call_statement_structured", "statement", "function");
@@ -318,6 +390,7 @@ pythonGenerator.forBlock.python_try_except = (block, generator) => {
   const exceptCode = generator.statementToCode(block, "EXCEPT") || `${generator.INDENT}pass\n`;
   return `try:\n${tryCode}except ${safeIdentifier(block.getFieldValue("ERROR"), "Exception")} as ${variableName(generator, block, "ALIAS", "error")}:\n${exceptCode}`;
 };
+pythonGenerator.forBlock.python_try_two_except = (block, generator) => `try:\n${suite(generator, block, "TRY")}except ${safeIdentifier(block.getFieldValue("ERROR1"), "ValueError")} as ${safeIdentifier(block.getFieldValue("ALIAS1"), "error")}:\n${suite(generator, block, "EXCEPT1")}except ${safeIdentifier(block.getFieldValue("ERROR2"), "TypeError")} as ${safeIdentifier(block.getFieldValue("ALIAS2"), "error")}:\n${suite(generator, block, "EXCEPT2")}finally:\n${suite(generator, block, "FINALLY")}`;
 pythonGenerator.forBlock.python_sequence_collection = (block, generator) => {
   const count = (block as Blockly.Block & { itemCount_?: number }).itemCount_ ?? 0;
   const items = Array.from({ length: count }, (_, i) => value(generator, block, `ITEM${i}`));
@@ -333,10 +406,16 @@ pythonGenerator.forBlock.python_dynamic_dict = (block, generator) => {
 };
 pythonGenerator.forBlock.python_for_in = (block, generator) => `for ${variableName(generator, block, "VAR", "item")} in ${value(generator, block, "ITERABLE", "[]")}:\n${suite(generator, block, "DO")}`;
 pythonGenerator.forBlock.python_for_enumerate = (block, generator) => `for ${variableName(generator, block, "INDEX", "index")}, ${variableName(generator, block, "VALUE", "item")} in enumerate(${value(generator, block, "ITERABLE", "[]")}):\n${suite(generator, block, "DO")}`;
+pythonGenerator.forBlock.python_while_else = (block, generator) => `while ${value(generator, block, "CONDITION", "False")}:\n${suite(generator, block, "DO")}else:\n${suite(generator, block, "ELSE")}`;
+pythonGenerator.forBlock.python_for_else = (block, generator) => `for ${variableName(generator, block, "VAR", "item")} in ${value(generator, block, "ITERABLE", "[]")}:\n${suite(generator, block, "DO")}else:\n${suite(generator, block, "ELSE")}`;
 pythonGenerator.forBlock.python_pass = () => "pass\n";
 pythonGenerator.forBlock.python_assert = (block, generator) => {
   const message = generator.valueToCode(block, "MESSAGE", Order.NONE);
   return `assert ${value(generator, block, "CONDITION", "False")}${message ? `, ${message}` : ""}\n`;
+};
+pythonGenerator.forBlock.python_scope_declaration = (block) => {
+  const names = block.getFieldValue("NAMES").split(",").map((name: string) => safeIdentifier(name, "")).filter(Boolean).join(", ");
+  return names ? `${block.getFieldValue("SCOPE")} ${names}\n` : "";
 };
 pythonGenerator.forBlock.python_function_def = (block, generator) => `def ${safeIdentifier(block.getFieldValue("NAME"), "my_function")}(${safeParameters(block.getFieldValue("PARAMS"))}):\n${suite(generator, block, "BODY")}`;
 pythonGenerator.forBlock.python_method_def = pythonGenerator.forBlock.python_function_def;
@@ -348,6 +427,53 @@ pythonGenerator.forBlock.python_set_attribute = (block, generator) => `${value(g
 pythonGenerator.forBlock.python_super_call = (block, generator) => `super().${safeIdentifier(block.getFieldValue("METHOD"), "__init__")}(${value(generator, block, "ARG", "")})\n`;
 pythonGenerator.forBlock.python_try_full = (block, generator) => `try:\n${suite(generator, block, "TRY")}except ${safeIdentifier(block.getFieldValue("ERROR"), "Exception")} as ${variableName(generator, block, "ALIAS", "error")}:\n${suite(generator, block, "EXCEPT")}else:\n${suite(generator, block, "ELSE")}finally:\n${suite(generator, block, "FINALLY")}`;
 pythonGenerator.forBlock.python_with = (block, generator) => `with ${value(generator, block, "CONTEXT")} as ${variableName(generator, block, "ALIAS", "resource")}:\n${suite(generator, block, "BODY")}`;
+const optionalValue = (generator: typeof pythonGenerator, block: Blockly.Block, name: string) => generator.valueToCode(block, name, Order.NONE);
+pythonGenerator.forBlock.python_range = (block, generator) => {
+  const start = optionalValue(generator, block, "START");
+  const stop = optionalValue(generator, block, "STOP");
+  const step = optionalValue(generator, block, "STEP");
+  const values = start && stop ? [start, stop, ...(step ? [step] : [])] : [stop || start || "0"];
+  return [`range(${values.join(", ")})`, Order.FUNCTION_CALL];
+};
+pythonGenerator.forBlock.python_length = (block, generator) => [`len(${value(generator, block, "VALUE")})`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_convert = (block, generator) => [`${block.getFieldValue("TYPE")}(${value(generator, block, "VALUE")})`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_string_method = (block, generator) => {
+  const argument = optionalValue(generator, block, "ARG");
+  return [`${value(generator, block, "TEXT", "''", Order.MEMBER)}.${block.getFieldValue("METHOD")}(${argument})`, Order.FUNCTION_CALL];
+};
+pythonGenerator.forBlock.python_list_method = (block, generator) => {
+  const argument = optionalValue(generator, block, "ARG");
+  return `${value(generator, block, "LIST", "[]", Order.MEMBER)}.${block.getFieldValue("METHOD")}(${argument})\n`;
+};
+pythonGenerator.forBlock.python_dict_get = (block, generator) => {
+  const fallback = optionalValue(generator, block, "DEFAULT");
+  return [`${value(generator, block, "DICT", "{}", Order.MEMBER)}.get(${value(generator, block, "KEY")}${fallback ? `, ${fallback}` : ""})`, Order.FUNCTION_CALL];
+};
+pythonGenerator.forBlock.python_dict_view = (block, generator) => [`${value(generator, block, "DICT", "{}", Order.MEMBER)}.${block.getFieldValue("METHOD")}()`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_open_file = (block, generator) => {
+  const mode = block.getFieldValue("MODE");
+  const encoding = block.getFieldValue("ENCODING").trim();
+  const encodingArgument = mode.includes("b") || !encoding ? "" : `, encoding=${JSON.stringify(encoding)}`;
+  return [`open(${value(generator, block, "PATH", "''")}, ${JSON.stringify(mode)}${encodingArgument})`, Order.FUNCTION_CALL];
+};
+pythonGenerator.forBlock.python_file_read = (block, generator) => {
+  const size = optionalValue(generator, block, "SIZE");
+  return [`${value(generator, block, "FILE", "file", Order.MEMBER)}.read(${size})`, Order.FUNCTION_CALL];
+};
+pythonGenerator.forBlock.python_file_write = (block, generator) => `${value(generator, block, "FILE", "file", Order.MEMBER)}.write(${value(generator, block, "VALUE", "''")})\n`;
+const comprehensionCondition = (generator: typeof pythonGenerator, block: Blockly.Block) => {
+  const condition = generator.valueToCode(block, "CONDITION", Order.NONE);
+  return condition ? ` if ${condition}` : "";
+};
+pythonGenerator.forBlock.python_list_comprehension = (block, generator) => [`[${value(generator, block, "EXPRESSION")} for ${safeIdentifier(block.getFieldValue("VAR"), "item")} in ${value(generator, block, "ITERABLE", "[]")}${comprehensionCondition(generator, block)}]`, Order.COLLECTION];
+pythonGenerator.forBlock.python_set_comprehension = (block, generator) => [`{${value(generator, block, "EXPRESSION")} for ${safeIdentifier(block.getFieldValue("VAR"), "item")} in ${value(generator, block, "ITERABLE", "[]")}${comprehensionCondition(generator, block)}}`, Order.COLLECTION];
+pythonGenerator.forBlock.python_dict_comprehension = (block, generator) => [`{${value(generator, block, "KEY")}: ${value(generator, block, "VALUE")} for ${safeIdentifier(block.getFieldValue("VAR"), "item")} in ${value(generator, block, "ITERABLE", "[]")}${comprehensionCondition(generator, block)}}`, Order.COLLECTION];
+pythonGenerator.forBlock.python_lambda = (block, generator) => [`lambda ${safeParameters(block.getFieldValue("PARAMS"))}: ${value(generator, block, "EXPRESSION")}`, Order.LAMBDA];
+pythonGenerator.forBlock.python_decorated_definition = (block, generator) => {
+  const definition = generator.statementToCode(block, "DEFINITION") || `${generator.INDENT}pass\n`;
+  const unindented = definition.replace(new RegExp(`^${generator.INDENT}`, "gm"), "");
+  return `@${value(generator, block, "DECORATOR", "decorator")}\n${unindented}`;
+};
 const structuredParameters = (block: Blockly.Block, generator: typeof pythonGenerator) => {
   const specs = (block as Blockly.Block & { parameters_?: ParameterSpec[] }).parameters_ ?? [];
   return specs.map((spec, i) => {
@@ -374,9 +500,9 @@ pythonGenerator.forBlock.python_new_object_structured = pythonGenerator.forBlock
 export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
   kind: "categoryToolbox",
   contents: [
-    { kind: "category", name: "输入输出", colour: "#2f9e8f", contents: [{ kind: "block", type: "python_print" }, { kind: "block", type: "python_input" }, { kind: "block", type: "python_input_assign" }, { kind: "block", type: "text", fields: { TEXT: "hello python" } }] },
+    { kind: "category", name: "输入输出", colour: "#2f9e8f", contents: [{ kind: "block", type: "python_print" }, { kind: "block", type: "python_input" }, { kind: "block", type: "python_input_assign" }, { kind: "block", type: "python_length" }, { kind: "block", type: "python_convert" }, { kind: "block", type: "text", fields: { TEXT: "hello python" } }] },
     { kind: "category", name: "逻辑", categorystyle: "logic_category", contents: [{ kind: "block", type: "controls_if" }, { kind: "block", type: "logic_compare" }, { kind: "block", type: "logic_operation" }, { kind: "block", type: "logic_negate" }, { kind: "block", type: "logic_boolean" }, { kind: "block", type: "python_none" }, { kind: "block", type: "python_membership" }, { kind: "block", type: "python_identity" }, { kind: "block", type: "python_conditional" }] },
-    { kind: "category", name: "循环", categorystyle: "loop_category", contents: [{ kind: "block", type: "python_for_in" }, { kind: "block", type: "python_for_enumerate" }, { kind: "block", type: "controls_repeat_ext" }, { kind: "block", type: "controls_whileUntil" }, { kind: "block", type: "controls_for" }, { kind: "block", type: "controls_flow_statements" }, { kind: "block", type: "python_pass" }] },
+    { kind: "category", name: "循环", categorystyle: "loop_category", contents: [{ kind: "block", type: "python_for_in" }, { kind: "block", type: "python_for_enumerate" }, { kind: "block", type: "python_for_else" }, { kind: "block", type: "python_while_else" }, { kind: "block", type: "python_range" }, { kind: "block", type: "controls_repeat_ext" }, { kind: "block", type: "controls_whileUntil" }, { kind: "block", type: "controls_for" }, { kind: "block", type: "controls_flow_statements" }, { kind: "block", type: "python_pass" }] },
     { kind: "category", name: "数学", categorystyle: "math_category", contents: [
       { kind: "block", type: "math_number" }, { kind: "block", type: "math_arithmetic" }, { kind: "block", type: "python_floor_divide" }, { kind: "block", type: "math_modulo" }, { kind: "block", type: "python_bitwise" }, { kind: "block", type: "python_bitwise_not" },
       { kind: "block", type: "math_single" }, { kind: "block", type: "math_round" }, { kind: "block", type: "math_constant" }, { kind: "block", type: "math_constrain" },
@@ -385,21 +511,22 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
     { kind: "category", name: "文本", categorystyle: "text_category", contents: [
       { kind: "block", type: "text", fields: { TEXT: "hello python" } },
       { kind: "block", type: "text_join", extraState: { itemCount: 1 } },
-      { kind: "block", type: "text_length" },
+      { kind: "block", type: "text_length" }, { kind: "block", type: "python_string_method" },
     ] },
     { kind: "category", name: "集合", colour: "#7657b5", contents: [
       { kind: "block", type: "python_sequence_collection", fields: { KIND: "list" } },
       { kind: "block", type: "python_sequence_collection", fields: { KIND: "tuple" } },
       { kind: "block", type: "python_sequence_collection", fields: { KIND: "set" } },
       { kind: "block", type: "python_dynamic_dict" },
-      { kind: "block", type: "python_index" }, { kind: "block", type: "python_slice" },
+      { kind: "block", type: "python_list_comprehension" }, { kind: "block", type: "python_set_comprehension" }, { kind: "block", type: "python_dict_comprehension" },
+      { kind: "block", type: "python_index" }, { kind: "block", type: "python_slice" }, { kind: "block", type: "python_list_method" }, { kind: "block", type: "python_dict_get" }, { kind: "block", type: "python_dict_view" },
     ] },
     { kind: "category", name: "变量", categorystyle: "variable_category", custom: "USED_VARIABLES" },
-    { kind: "category", name: "函数", categorystyle: "procedure_category", contents: [{ kind: "block", type: "python_function_structured" }, { kind: "block", type: "python_return" }] },
+    { kind: "category", name: "函数", categorystyle: "procedure_category", contents: [{ kind: "block", type: "python_function_structured" }, { kind: "block", type: "python_lambda" }, { kind: "block", type: "python_decorated_definition" }, { kind: "block", type: "python_scope_declaration" }, { kind: "block", type: "python_return" }] },
     { kind: "category", name: "调用", colour: "#397bc0", contents: [{ kind: "block", type: "python_call_structured" }, { kind: "block", type: "python_call_statement_structured" }] },
     { kind: "category", name: "对象", colour: "#a64ca6", contents: [{ kind: "block", type: "python_class_def" }, { kind: "block", type: "python_method_structured" }, { kind: "block", type: "python_set_attribute" }, { kind: "block", type: "python_super_call" }, { kind: "block", type: "python_new_object_structured" }, { kind: "block", type: "python_attribute" }, { kind: "block", type: "python_method_call_structured" }, { kind: "block", type: "python_method_statement_structured" }] },
-    { kind: "category", name: "异常", colour: "#b95050", contents: [{ kind: "block", type: "python_try_full" }, { kind: "block", type: "python_try_except" }, { kind: "block", type: "python_with" }, { kind: "block", type: "python_raise" }, { kind: "block", type: "python_assert" }] },
-    { kind: "category", name: "模块", colour: "#c58b32", contents: [{ kind: "block", type: "python_import" }, { kind: "block", type: "python_from_import" }, { kind: "block", type: "python_raw_expression" }] },
+    { kind: "category", name: "异常", colour: "#b95050", contents: [{ kind: "block", type: "python_try_full" }, { kind: "block", type: "python_try_except" }, { kind: "block", type: "python_try_two_except" }, { kind: "block", type: "python_with" }, { kind: "block", type: "python_raise" }, { kind: "block", type: "python_assert" }] },
+    { kind: "category", name: "模块", colour: "#c58b32", contents: [{ kind: "block", type: "python_import" }, { kind: "block", type: "python_from_import" }, { kind: "block", type: "python_open_file" }, { kind: "block", type: "python_file_read" }, { kind: "block", type: "python_file_write" }, { kind: "block", type: "python_raw_expression" }] },
   ],
 };
 
@@ -407,16 +534,25 @@ export const starterState = {
   blocks: { languageVersion: 0, blocks: [{ type: "variables_set", x: 90, y: 70, fields: { VAR: { name: "message" } }, inputs: { VALUE: { block: { type: "text", fields: { TEXT: "Hello, Python!" } } } }, next: { block: { type: "python_print", inputs: { VALUE: { block: { type: "variables_get", fields: { VAR: { name: "message" } } } } }, next: { block: { type: "controls_repeat_ext", inputs: { TIMES: { shadow: { type: "math_number", fields: { NUM: 3 } } }, DO: { block: { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "Visual coding" } } } } } } } } } } } }] },
 };
 
+function stripGeneratedVariableDeclarations(code: string): string {
+  const lines = code.split("\n");
+  let index = 0;
+  while (/^[A-Za-z_]\w* = None$/.test(lines[index] || "")) index += 1;
+  if (!index) return code;
+  while (!lines[index]?.trim()) index += 1;
+  return lines.slice(index).join("\n");
+}
+
 export function generatePython(state: object): string {
   const workspace = new Blockly.Workspace();
   Blockly.serialization.workspaces.load(state, workspace);
-  const code = pythonGenerator.workspaceToCode(workspace);
+  const code = stripGeneratedVariableDeclarations(pythonGenerator.workspaceToCode(workspace));
   workspace.dispose();
   return code;
 }
 
 export function generateWorkspacePython(workspace: Blockly.Workspace): string {
-  return pythonGenerator.workspaceToCode(workspace);
+  return stripGeneratedVariableDeclarations(pythonGenerator.workspaceToCode(workspace));
 }
 
 export function registerUsedVariablesToolbox(workspace: Blockly.WorkspaceSvg) {
