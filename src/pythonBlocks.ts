@@ -41,6 +41,7 @@ const createVisualTheme = (name: string, workspace: string, toolbox: string, for
 });
 
 export type VisualThemeId = "visual-dark" | "visual-light" | "one-dark" | "high-contrast";
+export const defaultVisualThemeId: VisualThemeId = "visual-light";
 export const visualPythonThemes: Record<VisualThemeId, Blockly.Theme> = {
   "visual-dark": createVisualTheme("visualDark", "#181c22", "#20252d", "#c3cad4", "#252b34", "#596471"),
   "visual-light": createVisualTheme("visualLight", "#f7f8fa", "#eef1f5", "#344054", "#ffffff", "#aab2bd"),
@@ -48,7 +49,7 @@ export const visualPythonThemes: Record<VisualThemeId, Blockly.Theme> = {
   "high-contrast": createVisualTheme("highContrast", "#000000", "#0b0b0b", "#ffffff", "#111111", "#ffffff"),
 };
 
-export const visualPythonTheme = visualPythonThemes["visual-dark"];
+export const visualPythonTheme = visualPythonThemes[defaultVisualThemeId];
 
 const colours = {
   inputOutput: "#2f9e8f",

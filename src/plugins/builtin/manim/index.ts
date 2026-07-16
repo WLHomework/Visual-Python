@@ -7,6 +7,7 @@ import { registerBasicObjectBlocks } from "./blocks/objects";
 import { registerSceneBlocks } from "./blocks/scene";
 import { registerValueBlocks } from "./blocks/values";
 import { registerManimAngleField } from "./angleField";
+import { registerManimFormulaField } from "./formulaField";
 import { registerManimToolbox } from "./toolbox";
 import { colourForManimBlock } from "./constants";
 import { getManimRenderConfig, isDefaultManimRenderConfig, loadManimRenderConfig, resetManimRenderConfig } from "./renderConfig";
@@ -23,6 +24,7 @@ export const manimPlugin: VisualPythonPlugin = {
   },
   activate(context) {
     registerManimAngleField();
+    registerManimFormulaField();
 
     const colouredContext = new Proxy(context, {
       get(target, property, receiver) {

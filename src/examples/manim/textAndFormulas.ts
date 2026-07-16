@@ -3,6 +3,7 @@ import type { ExampleProject } from "../types";
 const input = (block: object) => ({ block });
 const number = (value: number) => input({ type: "math_number", fields: { NUM: value } });
 const text = (value: string) => input({ type: "text", fields: { TEXT: value } });
+const formula = (value: string) => input({ type: "visual_python_manim_formula_value", fields: { LATEX: value } });
 const reference = (name: string) => ({ type: "visual_python_manim_object_ref", fields: { VAR: name } });
 const shifted = (mobject: object, direction: "UP" | "DOWN", scale: number) => ({
   type: "visual_python_manim_shift",
@@ -43,7 +44,7 @@ export const textAndFormulasExample: ExampleProject = {
               type: "visual_python_manim_assign", fields: { VAR: "formula" },
               inputs: { MOBJECT: input(shifted({
                 type: "visual_python_manim_mathtex_object", fields: { COLOR: "YELLOW" },
-                inputs: { CONTENT: text("x^2 + y^2 = z^2"), FONT_SIZE: number(48) },
+                inputs: { CONTENT: formula("x^2 + y^2 = z^2"), FONT_SIZE: number(48) },
               }, "DOWN", 2)) },
               next: { block: {
                 type: "visual_python_manim_play_list",

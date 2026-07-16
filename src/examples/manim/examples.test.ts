@@ -4,7 +4,7 @@ import { generatePython, generateWorkspacePythonWithBlockMap } from "../../pytho
 import { validatePythonBlockContexts } from "../../pythonSyntaxBlocks";
 import { manimPlugin } from "../../plugins/builtin/manim";
 import { PluginRegistry } from "../../plugins/core/pluginRegistry";
-import { animationOrchestrationExample, arcsSectorsAnnulusExample, axesAndFunctionsExample, basicShapesExample, clearUpdaterExample, dynamicCounterExample, dynamicRedrawExample, emphasisAnimationsExample, entranceAndExitExample, followTargetExample, formulaTransformExample, functionAreaExample, geometryAnnotationsExample, groupsAndLayoutExample, growthAnimationsExample, helloManimExample, linesArrowsVectorsExample, manimExampleCatalog, manimExamples, matrixAndTableExample, motionRotateScaleExample, movingCameraExample, numberLineAndGridExample, objectStylesExample, polygonsAndVerticesExample, positionLayoutExample, sceneObjectManagementExample, shapeTransformExample, textAndFormulasExample, threeDCameraMotionExample, threeDObjectsExample, threeDSolidCollectionExample, threeDSurfaceExample, torusAndArrow3DExample, tracedPathExample, valueTrackerExample } from ".";
+import { animationOrchestrationExample, arcsSectorsAnnulusExample, axesAndFunctionsExample, basicShapesExample, bubbleSortVisualizationExample, circleTangentTheoremExample, clearUpdaterExample, definiteIntegralAreaExample, dynamicCounterExample, dynamicRedrawExample, emphasisAnimationsExample, entranceAndExitExample, followTargetExample, formulaTransformExample, functionAreaExample, geometryAnnotationsExample, groupsAndLayoutExample, growthAnimationsExample, helloManimExample, linearFunctionVisualizationExample, linesArrowsVectorsExample, manimExampleCatalog, manimExamples, matrixAndTableExample, motionRotateScaleExample, movingCameraExample, numberLineAndGridExample, objectStylesExample, polygonsAndVerticesExample, positionLayoutExample, pythagoreanTheoremExample, quadraticFunctionParametersExample, sceneObjectManagementExample, shapeTransformExample, textAndFormulasExample, threeDCameraMotionExample, threeDObjectsExample, threeDSolidCollectionExample, threeDSurfaceExample, torusAndArrow3DExample, tracedPathExample, valueTrackerExample, vectorAdditionExample } from ".";
 
 beforeAll(async () => {
   const registry = new PluginRegistry();
@@ -26,14 +26,54 @@ describe("Manim examples", () => {
   });
 
   it("registers the complete 20-example plan", () => {
-    expect(manimExampleCatalog).toHaveLength(34);
-    expect(manimExamples).toHaveLength(34);
-    expect(manimExampleCatalog.filter((item) => item.example)).toHaveLength(34);
+    expect(manimExampleCatalog).toHaveLength(41);
+    expect(manimExamples).toHaveLength(41);
+    expect(manimExampleCatalog.filter((item) => item.example)).toHaveLength(41);
     expect(manimExampleCatalog.filter((item) => item.difficulty === "intro")).toHaveLength(5);
     expect(manimExampleCatalog.filter((item) => item.difficulty === "basic")).toHaveLength(13);
     expect(manimExampleCatalog.filter((item) => item.difficulty === "intermediate")).toHaveLength(11);
     expect(manimExampleCatalog.filter((item) => item.difficulty === "advanced")).toHaveLength(5);
+    expect(manimExampleCatalog.filter((item) => item.difficulty === "practical")).toHaveLength(7);
     expect(manimExampleCatalog.every((item) => item.difficulty)).toBe(true);
+  });
+
+  it("generates the linear-function visualization project", () => {
+    const code = generatePython(linearFunctionVisualizationExample.workspace);
+    expect(code).toContain("class LinearFunctionVisualization(Scene):");
+    expect(code).toContain("for k in k_values:");
+    expect(code).toContain("for b in b_values:");
+    expect(code).toContain("'stroke_color': GRAY");
+    expect(code).toContain("-2: TEAL");
+  });
+
+  it("generates the practical teaching cases", () => {
+    const pythagoreanCode = generatePython(pythagoreanTheoremExample.workspace);
+    expect(pythagoreanCode).toContain("class PythagoreanTheorem(Scene):");
+    expect(pythagoreanCode).toContain("Polygon(*[[-5, -2, 0], [-1, -2, 0], [-5, 1, 0]], color=YELLOW)");
+    expect(pythagoreanCode).toContain("Transform(formula, result, run_time=1.5)");
+
+    const vectorCode = generatePython(vectorAdditionExample.workspace);
+    expect(vectorCode).toContain("class VectorAddition(Scene):");
+    expect(vectorCode).toContain("axes.c2p(0, 0)");
+    expect(vectorCode).toContain("resultant = Arrow(");
+
+    const quadraticCode = generatePython(quadraticFunctionParametersExample.workspace);
+    expect(quadraticCode).toContain("class QuadraticFunctionParameters(Scene):");
+    expect(quadraticCode).toContain("lambda x: 0.5 * x**2");
+    expect(quadraticCode).toContain("Transform(graph, shifted_graph, run_time=1.8)");
+
+    const bubbleSortCode = generatePython(bubbleSortVisualizationExample.workspace);
+    expect(bubbleSortCode).toContain("class BubbleSortVisualization(Scene):");
+    expect(bubbleSortCode).toContain("Transform(state, state_4, run_time=1)");
+
+    const tangentCode = generatePython(circleTangentTheoremExample.workspace);
+    expect(tangentCode).toContain("class CircleTangentTheorem(Scene):");
+    expect(tangentCode).toContain("RightAngle(radius, tangent, length=0.35, color=WHITE)");
+
+    const integralCode = generatePython(definiteIntegralAreaExample.workspace);
+    expect(integralCode).toContain("class DefiniteIntegralArea(Scene):");
+    expect(integralCode).toContain("lambda x: 0.5 * x**2 + 1");
+    expect(integralCode).toContain("axes.get_area(graph, x_range=[-2, 2], color=BLUE)");
   });
 
   it("generates a runnable Hello Manim scene", () => {

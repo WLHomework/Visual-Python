@@ -1,7 +1,7 @@
 import type { ExampleProject } from "../types";
-import { assign, chain, number, play, ref, sceneWorkspace, text, wait } from "./workspaceHelpers";
+import { assign, chain, formula as formulaValue, number, play, ref, sceneWorkspace, wait } from "./workspaceHelpers";
 
-const formula = (content: string, color: string) => ({ type: "visual_python_manim_mathtex_object", fields: { COLOR: color }, inputs: { CONTENT: text(content), FONT_SIZE: number(56) } });
+const formula = (content: string, color: string) => ({ type: "visual_python_manim_mathtex_object", fields: { COLOR: color }, inputs: { CONTENT: formulaValue(content), FONT_SIZE: number(56) } });
 export const formulaTransformExample: ExampleProject = {
   id: "manim-formula-transform", title: "LaTeX 公式变换", projectName: "manim-formula-transform.vpy", requiredPlugins: ["visual-python.manim"],
   workspace: sceneWorkspace("FormulaTransform", "Scene", chain(

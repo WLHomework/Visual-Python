@@ -1,6 +1,7 @@
 export const input = (block: object) => ({ block });
 export const number = (value: number) => input({ type: "math_number", fields: { NUM: value } });
 export const text = (value: string) => input({ type: "text", fields: { TEXT: value } });
+export const formula = (value: string) => input({ type: "visual_python_manim_formula_value", fields: { LATEX: value } });
 export const raw = (code: string) => input({ type: "python_raw_expression", fields: { CODE: code } });
 export const ref = (name: string) => input({ type: "visual_python_manim_object_ref", fields: { VAR: name } });
 export const direction = (value: string) => input({ type: "visual_python_manim_direction_constant", fields: { VALUE: value } });

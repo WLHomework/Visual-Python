@@ -32,6 +32,7 @@ describe("Manim plugin generators", () => {
     expect(colourForManimBlock("visual_python_manim_fade_in_animation")).toBe(manimBlockColours.animation);
     expect(colourForManimBlock("visual_python_manim_set_fill")).toBe(manimBlockColours.method);
     expect(colourForManimBlock("visual_python_manim_degrees")).toBe(manimBlockColours.value);
+    expect(colourForManimBlock("visual_python_manim_formula_value")).toBe(manimBlockColours.value);
     expect(colourForManimBlock("visual_python_manim_always_redraw")).toBe(manimBlockColours.dynamic);
     expect(colourForManimBlock("visual_python_manim_play")).toBe(manimBlockColours.scene);
     expect(colourForManimBlock("visual_python_manim_camera_frame_animation")).toBe(manimBlockColours.scene);
@@ -39,7 +40,6 @@ describe("Manim plugin generators", () => {
     expect(colourForManimBlock("visual_python_manim_assign")).toBe(manimBlockColours.object);
     expect(colourForManimBlock("visual_python_manim_object_ref")).toBe(manimBlockColours.object);
     expect(colourForManimBlock("visual_python_manim_axes_c2p")).toBe(manimBlockColours.object);
-    expect(colourForManimBlock("visual_python_manim_polygon_object")).toBe(manimBlockColours.object);
     expect(colourForManimBlock("visual_python_manim_assign_add")).toBe(manimBlockColours.object);
     expect(colourForManimBlock("visual_python_manim_scaled_direction")).toBe(manimBlockColours.value);
     expect(colourForManimBlock("visual_python_manim_play_list")).toBe(manimBlockColours.object);
@@ -264,6 +264,45 @@ describe("Manim plugin generators", () => {
         workspace.dispose();
       }
     }
+  });
+
+  it("uses polygon blocks whose inputs match their Manim constructors", () => {
+    expect(Blockly.Blocks.visual_python_manim_polygon_object).toBeUndefined();
+
+    expect(generatePython({
+      blocks: { languageVersion: 0, blocks: [{
+        type: "visual_python_manim_triangle_object",
+        fields: { COLOR: "WHITE" },
+      }] },
+    })).toContain("Triangle(color=WHITE)");
+
+    const regularPolygon = generatePython({
+      blocks: { languageVersion: 0, blocks: [{
+        type: "visual_python_manim_regular_polygon_object",
+        fields: { COLOR: "WHITE" },
+        inputs: {
+          N: number(6),
+          RADIUS: number(1),
+        },
+      }] },
+    });
+    expect(regularPolygon).toContain("n=6,");
+    expect(regularPolygon.match(/n=6/g)).toHaveLength(1);
+  });
+
+  it("generates a safely quoted MathTex formula value", () => {
+    const code = generatePython({
+      blocks: { languageVersion: 0, blocks: [{
+        type: "visual_python_manim_mathtex_object",
+        fields: { COLOR: "WHITE" },
+        inputs: {
+          CONTENT: { block: { type: "visual_python_manim_formula_value", fields: { LATEX: "\\int_{-2}^{2}(0.5x^2+1)\\,dx" } } },
+          FONT_SIZE: number(48),
+        },
+      }] },
+    });
+    expect(code).toContain("MathTex(");
+    expect(code).toContain("'\\\\int_{-2}^{2}(0.5x^2+1)\\\\,dx'");
   });
 
   it("keeps production Manim block registrations unique and toolbox references valid", () => {

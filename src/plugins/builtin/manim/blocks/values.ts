@@ -5,6 +5,15 @@ import { addManimImport, value } from "../helpers";
 
 export const registerValueBlocks = (context: PluginContext) => {
   context.registerBlock({
+    type: "visual_python_manim_formula_value",
+    message0: "数学公式 %1",
+    args0: [{ type: "field_manim_formula", name: "LATEX", value: "x^2 + y^2 = z^2" }],
+    inputsInline: true,
+    output: "String",
+    colour,
+  }, (block, generator) => [generator.quote_(String(block.getFieldValue("LATEX") || "")), Order.ATOMIC]);
+
+  context.registerBlock({
     type: "visual_python_manim_direction_constant",
     message0: "方向常量 %1",
     args0: [{ type: "field_dropdown", name: "VALUE", options: directionOptions }],

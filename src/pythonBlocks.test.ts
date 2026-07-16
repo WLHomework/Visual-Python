@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
-import { buildDefinedFunctionCallToolbox, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, toolbox } from "./pythonBlocks";
+import { buildDefinedFunctionCallToolbox, defaultVisualThemeId, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
 import { getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 
 const variableFields: Record<string, string[]> = {
@@ -32,6 +32,11 @@ const number = (value: number) => ({ block: { type: "math_number", fields: { NUM
 const expression = (code: string) => ({ block: { type: "python_raw_expression", fields: { CODE: code } } });
 
 describe("Python block generators", () => {
+  it("uses the light workspace theme by default", () => {
+    expect(defaultVisualThemeId).toBe("visual-light");
+    expect(visualPythonTheme).toBe(visualPythonThemes[defaultVisualThemeId]);
+  });
+
   it("generates dictionaries, tuples and sets", () => {
     expect(generatePython(state({ type: "python_tuple", inputs: { A: number(1), B: number(2) } }))).toContain("(1, 2)");
     expect(generatePython(state({ type: "python_set", inputs: { A: text("a"), B: text("b") } }))).toContain("{'a', 'b'}");

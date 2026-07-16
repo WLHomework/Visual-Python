@@ -1,15 +1,25 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="visual-light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Visual Python</title>
+    <script>
+      try {
+        const savedTheme = localStorage.getItem("visual-python:theme");
+        if (["visual-dark","visual-light","one-dark","high-contrast"].includes(savedTheme)) document.documentElement.dataset.theme = savedTheme;
+      } catch {}
+    </script>
     <style>
-      html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;background:#263f3b}
-      .boot-screen{height:100%;display:grid;place-items:center;align-content:center;gap:14px;background:#263f3b;color:#eef7f4;font:600 14px Inter,"Segoe UI",sans-serif}
-      .boot-mark{width:42px;height:42px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.24);border-radius:6px;background:#2f9e8f;color:#fff;font-size:15px}
-      .boot-progress{width:96px;height:2px;overflow:hidden;background:rgba(255,255,255,.18)}
-      .boot-progress::after{content:"";display:block;width:38px;height:100%;background:#74d8ba;animation:boot-slide 1s ease-in-out infinite alternate}
+      :root{--boot-bg:#f7f8fa;--boot-text:#263245;--boot-border:rgba(38,50,69,.16);--boot-track:rgba(38,50,69,.14)}
+      :root[data-theme="visual-dark"]{--boot-bg:#181c22;--boot-text:#eef7f4;--boot-border:rgba(255,255,255,.24);--boot-track:rgba(255,255,255,.18)}
+      :root[data-theme="one-dark"]{--boot-bg:#282c34;--boot-text:#e5e9ef;--boot-border:rgba(255,255,255,.22);--boot-track:rgba(255,255,255,.16)}
+      :root[data-theme="high-contrast"]{--boot-bg:#000;--boot-text:#fff;--boot-border:#fff;--boot-track:rgba(255,255,255,.3)}
+      html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;background:var(--boot-bg)}
+      .boot-screen{height:100%;display:grid;place-items:center;align-content:center;gap:14px;background:var(--boot-bg);color:var(--boot-text);font:600 14px Inter,"Segoe UI",sans-serif}
+      .boot-mark{width:42px;height:42px;display:grid;place-items:center;border:1px solid var(--boot-border);border-radius:6px;background:#2f9e8f;color:#fff;font-size:15px}
+      .boot-progress{width:96px;height:2px;overflow:hidden;background:var(--boot-track)}
+      .boot-progress::after{content:"";display:block;width:38px;height:100%;background:#2f9e8f;animation:boot-slide 1s ease-in-out infinite alternate}
       @keyframes boot-slide{from{transform:translateX(0)}to{transform:translateX(58px)}}
     </style>
   </head>

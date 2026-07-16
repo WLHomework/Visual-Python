@@ -12,7 +12,6 @@ export const manimBlockColours = {
 const hasAny = (type: string, parts: string[]) => parts.some((part) => type.includes(part));
 
 const blockColourOverrides: Record<string, string> = {
-  visual_python_manim_polygon_object: manimBlockColours.object,
   visual_python_manim_assign: manimBlockColours.object,
   visual_python_manim_assign_add: manimBlockColours.object,
   visual_python_manim_object_ref: manimBlockColours.object,
@@ -20,6 +19,7 @@ const blockColourOverrides: Record<string, string> = {
   visual_python_manim_play_list: manimBlockColours.object,
   visual_python_manim_animate_method: manimBlockColours.animation,
   visual_python_manim_transform_method: manimBlockColours.object,
+  visual_python_manim_formula_value: manimBlockColours.value,
 };
 
 export const colourForManimBlock = (type: string): string => {
@@ -59,18 +59,6 @@ export const lineOptions = [
   ["DoubleArrow", "DoubleArrow"],
   ["CurvedArrow", "CurvedArrow"],
 ];
-
-export const polygonOptions = [
-  ["Triangle", "Triangle"],
-  ["RegularPolygon", "RegularPolygon"],
-  ["Polygon", "Polygon"],
-];
-
-export const polygonArgumentDefaults: Record<string, string> = {
-  Triangle: "",
-  RegularPolygon: "n=6",
-  Polygon: "LEFT, UP, RIGHT",
-};
 
 export const curvedShapeOptions = [
   ["RoundedRectangle", "RoundedRectangle"],
@@ -200,6 +188,8 @@ export const colorOptions = [
   ["YELLOW", "YELLOW"],
   ["PURPLE", "PURPLE"],
   ["ORANGE", "ORANGE"],
+  ["GRAY", "GRAY"],
+  ["TEAL", "TEAL"],
 ];
 
 export const directionOptions = [

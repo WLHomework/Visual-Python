@@ -1,6 +1,6 @@
 import type { PluginContext } from "../../api/types";
 import { colour, manimBlockColours } from "./constants";
-import { animationListShadow, category, degreesShadow, directionShadow, dynamicMatrixDataShadow, dynamicTableDataShadow, expressionShadow, manimObjectListShadow, numberShadow, pointShadow, polygonVertexListShadow, rangeMinMaxShadow, rangeShadow, textShadow, toolboxBlock } from "./helpers";
+import { animationListShadow, category, degreesShadow, directionShadow, dynamicMatrixDataShadow, dynamicTableDataShadow, expressionShadow, formulaShadow, manimObjectListShadow, numberShadow, pointShadow, polygonVertexListShadow, rangeMinMaxShadow, rangeShadow, textShadow, toolboxBlock } from "./helpers";
 
 const colouredCategory = (categoryColour: string) => (name: string, contents: Array<Record<string, unknown>>) => category(name, contents, categoryColour);
 const sceneCategory = colouredCategory(manimBlockColours.scene);
@@ -23,7 +23,7 @@ export const registerManimToolbox = (context: PluginContext) => {
           FONT_SIZE: numberShadow(48),
         }),
         toolboxBlock("visual_python_manim_mathtex_object", {
-          CONTENT: textShadow("x^2 + y^2 = z^2"),
+          CONTENT: formulaShadow("x^2 + y^2 = z^2"),
           FONT_SIZE: numberShadow(48),
         }),
         toolboxBlock("visual_python_manim_circle_object", { RADIUS: numberShadow(1) }),
@@ -122,9 +122,10 @@ export const registerManimToolbox = (context: PluginContext) => {
             FONT_SIZE: numberShadow(48),
           }),
           toolboxBlock("visual_python_manim_mathtex_object", {
-            CONTENT: textShadow("x^2 + y^2 = z^2"),
+            CONTENT: formulaShadow("x^2 + y^2 = z^2"),
             FONT_SIZE: numberShadow(48),
           }),
+          toolboxBlock("visual_python_manim_formula_value"),
           toolboxBlock("visual_python_manim_text_object", { CONTENT: textShadow("Hello Manim") }),
         ]),
         objectCategory("基础几何", [
@@ -515,7 +516,6 @@ export const registerManimToolbox = (context: PluginContext) => {
       objectCategory("高级 / 通用", [
         objectCategory("通用对象", [
           toolboxBlock("visual_python_manim_shape_object", { ARG: expressionShadow("radius=1") }),
-          toolboxBlock("visual_python_manim_polygon_object", { ARG: expressionShadow("n=6") }),
           toolboxBlock("visual_python_manim_curved_shape_object", { ARG: expressionShadow("corner_radius=0.2, width=3, height=2") }),
           toolboxBlock("visual_python_manim_line_object", {
             START: directionShadow("LEFT"),

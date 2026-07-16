@@ -1,18 +1,28 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="visual-light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Visual Python</title>
+    <script>
+      try {
+        const savedTheme = localStorage.getItem("visual-python:theme");
+        if (["visual-dark","visual-light","one-dark","high-contrast"].includes(savedTheme)) document.documentElement.dataset.theme = savedTheme;
+      } catch {}
+    </script>
     <style>
-      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#263f3b}
-      body{display:grid;place-items:center;color:#eef7f4;font-family:Inter,"Segoe UI",sans-serif;user-select:none}
+      :root{--boot-bg:#f7f8fa;--boot-text:#263245;--boot-muted:#687384;--boot-border:rgba(38,50,69,.16);--boot-track:rgba(38,50,69,.14)}
+      :root[data-theme="visual-dark"]{--boot-bg:#263f3b;--boot-text:#eef7f4;--boot-muted:#b9cfca;--boot-border:rgba(255,255,255,.25);--boot-track:rgba(255,255,255,.16)}
+      :root[data-theme="one-dark"]{--boot-bg:#282c34;--boot-text:#e5e9ef;--boot-muted:#aeb5c0;--boot-border:rgba(255,255,255,.22);--boot-track:rgba(255,255,255,.16)}
+      :root[data-theme="high-contrast"]{--boot-bg:#000;--boot-text:#fff;--boot-muted:#fff;--boot-border:#fff;--boot-track:rgba(255,255,255,.3)}
+      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--boot-bg)}
+      body{display:grid;place-items:center;color:var(--boot-text);font-family:Inter,"Segoe UI",sans-serif;user-select:none}
       main{display:grid;justify-items:center;gap:14px}
-      .mark{width:48px;height:48px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.25);border-radius:6px;background:#2f9e8f;color:#fff;font-size:16px;font-weight:700}
+      .mark{width:48px;height:48px;display:grid;place-items:center;border:1px solid var(--boot-border);border-radius:6px;background:#2f9e8f;color:#fff;font-size:16px;font-weight:700}
       strong{font-size:15px;font-weight:600;letter-spacing:0}
-      small{color:#b9cfca;font-size:11px}
-      .progress{width:132px;height:3px;overflow:hidden;background:rgba(255,255,255,.16)}
-      .progress::after{content:"";display:block;width:48px;height:100%;background:#74d8ba;animation:slide .9s ease-in-out infinite alternate}
+      small{color:var(--boot-muted);font-size:11px}
+      .progress{width:132px;height:3px;overflow:hidden;background:var(--boot-track)}
+      .progress::after{content:"";display:block;width:48px;height:100%;background:#2f9e8f;animation:slide .9s ease-in-out infinite alternate}
       @keyframes slide{from{transform:translateX(0)}to{transform:translateX(84px)}}
     </style>
   </head>

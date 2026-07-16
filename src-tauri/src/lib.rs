@@ -3,11 +3,11 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -245,6 +245,48 @@ struct ManimTasks {
 struct ActiveManimTask {
     pid: u32,
     stopped: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+struct PyrightState {
+    next_id: AtomicU64,
+    active: Arc<Mutex<Option<ActivePyrightProcess>>>,
+}
+
+struct ActivePyrightProcess {
+    id: u64,
+    pid: u32,
+    child: Child,
+    stdin: ChildStdin,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PyrightStartInfo {
+    session_id: u64,
+    root_uri: String,
+    document_uri: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PyrightStatus {
+    session_id: u64,
+    state: &'static str,
+    message: Option<String>,
+}
+
+impl Drop for PyrightState {
+    fn drop(&mut self) {
+        let _ = stop_pyright_process(&self.active);
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PyrightMessage {
+    session_id: u64,
+    message: Value,
 }
 
 const PLUGIN_API_VERSION: &str = "1";
@@ -742,14 +784,36 @@ fn find_latest_mp4(root: &Path) -> Option<PathBuf> {
     latest.map(|(_, path)| path)
 }
 
-fn manim_storage_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let path = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("renders");
+fn manim_storage_dir(app: &AppHandle, storage_path: Option<&str>) -> Result<PathBuf, String> {
+    let custom_path = storage_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let path = match custom_path {
+        Some(value) => {
+            let path = PathBuf::from(value);
+            if !path.is_absolute() {
+                return Err("Manim storage path must be absolute".into());
+            }
+            path
+        }
+        None => app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?
+            .join("renders"),
+    };
     fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    app.asset_protocol_scope()
+        .allow_directory(&path, true)
+        .map_err(|error| error.to_string())?;
     Ok(path)
+}
+
+fn is_manim_render_entry(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix("manim-"))
+        .is_some_and(|stamp| !stamp.is_empty() && stamp.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn directory_size(path: &Path) -> u64 {
@@ -770,34 +834,47 @@ fn directory_size(path: &Path) -> u64 {
     })
 }
 
-fn read_manim_storage_info(app: &AppHandle) -> Result<ManimStorageInfo, String> {
-    let path = manim_storage_dir(app)?;
-    let render_count = fs::read_dir(&path)
-        .map_err(|error| error.to_string())?
-        .flatten()
-        .filter(|entry| {
-            entry
+fn read_manim_storage_info(
+    app: &AppHandle,
+    storage_path: Option<&str>,
+) -> Result<ManimStorageInfo, String> {
+    let path = manim_storage_dir(app, storage_path)?;
+    let entries = fs::read_dir(&path).map_err(|error| error.to_string())?;
+    let mut render_count = 0;
+    let mut size_bytes: u64 = 0;
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if !is_manim_render_entry(&entry_path)
+            || !entry
                 .file_type()
                 .map(|file_type| file_type.is_dir())
                 .unwrap_or(false)
-        })
-        .count() as u64;
+        {
+            continue;
+        }
+        render_count += 1;
+        size_bytes = size_bytes.saturating_add(directory_size(&entry_path));
+    }
     Ok(ManimStorageInfo {
         path: path.to_string_lossy().into_owned(),
-        size_bytes: directory_size(&path),
+        size_bytes,
         render_count,
     })
 }
 
 #[tauri::command]
-fn get_manim_storage_info(app: AppHandle) -> Result<ManimStorageInfo, String> {
-    read_manim_storage_info(&app)
+fn get_manim_storage_info(
+    app: AppHandle,
+    storage_path: Option<String>,
+) -> Result<ManimStorageInfo, String> {
+    read_manim_storage_info(&app, storage_path.as_deref())
 }
 
 #[tauri::command]
 fn clear_manim_render_files(
     app: AppHandle,
     tasks: State<ManimTasks>,
+    storage_path: Option<String>,
 ) -> Result<ManimStorageInfo, String> {
     if tasks
         .active
@@ -807,25 +884,24 @@ fn clear_manim_render_files(
     {
         return Err("Cannot clear render files while Manim is rendering".into());
     }
-    let path = manim_storage_dir(&app)?;
+    let path = manim_storage_dir(&app, storage_path.as_deref())?;
     for entry in fs::read_dir(&path)
         .map_err(|error| error.to_string())?
         .flatten()
     {
         let entry_path = entry.path();
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
-        if file_type.is_dir() {
-            fs::remove_dir_all(&entry_path).map_err(|error| error.to_string())?;
-        } else {
-            fs::remove_file(&entry_path).map_err(|error| error.to_string())?;
+        if !file_type.is_dir() || !is_manim_render_entry(&entry_path) {
+            continue;
         }
+        fs::remove_dir_all(&entry_path).map_err(|error| error.to_string())?;
     }
-    read_manim_storage_info(&app)
+    read_manim_storage_info(&app, storage_path.as_deref())
 }
 
 #[tauri::command]
-fn open_manim_render_folder(app: AppHandle) -> Result<(), String> {
-    let path = manim_storage_dir(&app)?;
+fn open_manim_render_folder(app: AppHandle, storage_path: Option<String>) -> Result<(), String> {
+    let path = manim_storage_dir(&app, storage_path.as_deref())?;
     #[cfg(target_os = "windows")]
     {
         let mut command = Command::new("explorer.exe");
@@ -1155,6 +1231,274 @@ fn delete_external_plugin(app: AppHandle, plugin_path: String) -> Result<(), Str
     delete_external_plugin_dir(Path::new(&plugin_path), &plugins_dir)
 }
 
+fn read_lsp_message<R: BufRead>(reader: &mut R) -> Result<Option<Value>, String> {
+    let mut content_length = None;
+    loop {
+        let mut header = String::new();
+        let read = reader.read_line(&mut header).map_err(|error| error.to_string())?;
+        if read == 0 {
+            return Ok(None);
+        }
+        let header = header.trim_end_matches(['\r', '\n']);
+        if header.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = header.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = Some(
+                    value
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|_| "Pyright returned an invalid Content-Length header")?,
+                );
+            }
+        }
+    }
+    let content_length = content_length.ok_or("Pyright response is missing Content-Length")?;
+    let mut body = vec![0; content_length];
+    reader.read_exact(&mut body).map_err(|error| error.to_string())?;
+    serde_json::from_slice(&body)
+        .map(Some)
+        .map_err(|error| format!("Pyright returned invalid JSON: {error}"))
+}
+
+fn write_lsp_message(writer: &mut ChildStdin, message: &Value) -> Result<(), String> {
+    let body = serde_json::to_vec(message).map_err(|error| error.to_string())?;
+    writer
+        .write_all(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes())
+        .and_then(|_| writer.write_all(&body))
+        .and_then(|_| writer.flush())
+        .map_err(|error| format!("无法向 Pyright 发送消息：{error}"))
+}
+
+fn find_pyright_server(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("VISUAL_PYTHON_PYRIGHT_SERVER") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    let current_dir = std::env::current_dir().unwrap_or_default();
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let candidates = [
+        current_dir.join("node_modules/pyright/langserver.index.js"),
+        current_dir.join("../node_modules/pyright/langserver.index.js"),
+        current_dir.join("../../node_modules/pyright/langserver.index.js"),
+        resource_dir.join("language-server/pyright/langserver.index.js"),
+    ];
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| "找不到 Pyright 语言服务器，请先安装项目依赖".into())
+}
+
+fn find_node_runtime(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("VISUAL_PYTHON_NODE") {
+        return Ok(PathBuf::from(path));
+    }
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let bundled = if cfg!(target_os = "windows") {
+        resource_dir.join("language-server/node.exe")
+    } else {
+        resource_dir.join("language-server/node")
+    };
+    Ok(if bundled.is_file() {
+        bundled
+    } else {
+        PathBuf::from("node")
+    })
+}
+
+fn stop_pyright_process(active: &Arc<Mutex<Option<ActivePyrightProcess>>>) -> Result<(), String> {
+    let mut process = active
+        .lock()
+        .map_err(|_| "Pyright process state is unavailable")?
+        .take();
+    if let Some(process) = process.as_mut() {
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn start_pyright_language_server(
+    app: AppHandle,
+    state: State<PyrightState>,
+    project_path: Option<String>,
+) -> Result<PyrightStartInfo, String> {
+    stop_pyright_process(&state.active)?;
+    let fallback_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("language-service/workspace");
+    let project = project_path.as_deref().map(PathBuf::from);
+    let root = project
+        .as_deref()
+        .and_then(Path::parent)
+        .filter(|path| path.is_dir())
+        .map(Path::to_path_buf)
+        .unwrap_or(fallback_root);
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let document_name = project
+        .as_deref()
+        .and_then(Path::file_stem)
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(|name| format!("{name}.py"))
+        .unwrap_or_else(|| "main.py".into());
+    let document_path = root.join(document_name);
+    let root_uri = url::Url::from_directory_path(&root)
+        .map_err(|_| "无法创建 Pyright 工作区 URI")?
+        .to_string();
+    let document_uri = url::Url::from_file_path(&document_path)
+        .map_err(|_| "无法创建 Python 文档 URI")?
+        .to_string();
+
+    let server = find_pyright_server(&app)?;
+    let node = find_node_runtime(&app)?;
+    let mut command = Command::new(node);
+    command
+        .arg(server)
+        .arg("--stdio")
+        .current_dir(&root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("无法启动 Pyright：{error}"))?;
+    let session_id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+    let pid = child.id();
+    let stdin = child.stdin.take().ok_or("无法连接 Pyright 输入流")?;
+    let stdout = child.stdout.take().ok_or("无法连接 Pyright 输出流")?;
+    let stderr = child.stderr.take().ok_or("无法连接 Pyright 错误流")?;
+    *state
+        .active
+        .lock()
+        .map_err(|_| "Pyright process state is unavailable")? = Some(ActivePyrightProcess {
+        id: session_id,
+        pid,
+        child,
+        stdin,
+    });
+
+    let output_app = app.clone();
+    let output_state = state.active.clone();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            match read_lsp_message(&mut reader) {
+                Ok(Some(message)) => {
+                    let _ = output_app.emit(
+                        "pyright-message",
+                        PyrightMessage {
+                            session_id,
+                            message,
+                        },
+                    );
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let _ = output_app.emit(
+                        "pyright-status",
+                        PyrightStatus {
+                            session_id,
+                            state: "error",
+                            message: Some(error),
+                        },
+                    );
+                    break;
+                }
+            }
+        }
+        if let Ok(mut active) = output_state.lock() {
+            if active
+                .as_ref()
+                .is_some_and(|process| process.id == session_id && process.pid == pid)
+            {
+                if let Some(mut process) = active.take() {
+                    let _ = process.child.wait();
+                }
+            }
+        }
+        let _ = output_app.emit(
+            "pyright-status",
+            PyrightStatus {
+                session_id,
+                state: "stopped",
+                message: None,
+            },
+        );
+    });
+    let error_app = app.clone();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+            let message = line.trim().to_string();
+            if !message.is_empty() {
+                let _ = error_app.emit(
+                    "pyright-status",
+                    PyrightStatus {
+                        session_id,
+                        state: "log",
+                        message: Some(message),
+                    },
+                );
+            }
+            line.clear();
+        }
+    });
+    let _ = app.emit(
+        "pyright-status",
+        PyrightStatus {
+            session_id,
+            state: "started",
+            message: None,
+        },
+    );
+    Ok(PyrightStartInfo {
+        session_id,
+        root_uri,
+        document_uri,
+    })
+}
+
+#[tauri::command]
+fn send_pyright_message(
+    state: State<PyrightState>,
+    session_id: u64,
+    message: Value,
+) -> Result<(), String> {
+    let mut active = state
+        .active
+        .lock()
+        .map_err(|_| "Pyright process state is unavailable")?;
+    let process = active.as_mut().ok_or("Pyright 尚未启动")?;
+    if process.id != session_id {
+        return Err("Pyright 会话已经失效".into());
+    }
+    write_lsp_message(&mut process.stdin, &message)
+}
+
+#[tauri::command]
+fn stop_pyright_language_server(state: State<PyrightState>, session_id: u64) -> Result<(), String> {
+    let matches = state
+        .active
+        .lock()
+        .map_err(|_| "Pyright process state is unavailable")?
+        .as_ref()
+        .is_some_and(|process| process.id == session_id);
+    if matches {
+        stop_pyright_process(&state.active)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn validate_python_code(code: String, python_path: Option<String>) -> Result<(), String> {
     let mut command = Command::new(python_path.as_deref().unwrap_or("python"));
@@ -1329,6 +1673,7 @@ fn render_manim(
     scene_name: String,
     python_path: Option<String>,
     render_config: Option<ManimRenderConfig>,
+    storage_path: Option<String>,
 ) -> Result<(), String> {
     let mut active = tasks
         .active
@@ -1352,12 +1697,7 @@ fn render_manim(
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_millis();
-    let work_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("renders")
-        .join(format!("manim-{stamp}"));
+    let work_dir = manim_storage_dir(&app, storage_path.as_deref())?.join(format!("manim-{stamp}"));
     fs::create_dir_all(&work_dir)
         .map_err(|error| format!("cannot create Manim work directory: {error}"))?;
     let script_path = work_dir.join("scene.py");
@@ -1586,6 +1926,7 @@ pub fn run() {
         .manage(PythonTasks::default())
         .manage(PackageInstallTasks::default())
         .manage(ManimTasks::default())
+        .manage(PyrightState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
@@ -1644,6 +1985,9 @@ pub fn run() {
             read_external_plugin_entry,
             install_external_plugin_zip,
             delete_external_plugin,
+            start_pyright_language_server,
+            send_pyright_message,
+            stop_pyright_language_server,
             validate_python_code,
             start_python,
             stop_python,
@@ -1665,6 +2009,15 @@ mod tests {
     use super::*;
     use serde_json::json;
     use zip::write::SimpleFileOptions;
+
+    #[test]
+    fn recognizes_only_managed_manim_render_entries() {
+        assert!(is_manim_render_entry(Path::new("manim-123456")));
+        assert!(!is_manim_render_entry(Path::new("manim-notes")));
+        assert!(!is_manim_render_entry(Path::new("manim-123-backup")));
+        assert!(!is_manim_render_entry(Path::new("personal-videos")));
+        assert!(!is_manim_render_entry(Path::new("manim")));
+    }
 
     #[test]
     fn finds_existing_vpy_project_argument() {
@@ -1833,5 +2186,25 @@ mod tests {
         assert!(delete_external_plugin_dir(&plugins_dir, &plugins_dir).is_err());
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn parses_language_server_protocol_message() {
+        let body = br#"{"jsonrpc":"2.0","id":7,"result":{"items":[]}}"#;
+        let framed = format!(
+            "Content-Length: {}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n{}",
+            body.len(),
+            String::from_utf8_lossy(body)
+        );
+        let mut reader = std::io::Cursor::new(framed.into_bytes());
+        let message = read_lsp_message(&mut reader).unwrap().unwrap();
+        assert_eq!(message["id"], 7);
+        assert!(message["result"]["items"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_language_server_message_without_length() {
+        let mut reader = std::io::Cursor::new(b"Content-Type: application/json\r\n\r\n{}".to_vec());
+        assert!(read_lsp_message(&mut reader).is_err());
     }
 }

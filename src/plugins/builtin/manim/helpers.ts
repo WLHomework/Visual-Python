@@ -42,6 +42,7 @@ export const pythonCall = (
 export const toolboxBlock = (type: string, inputs?: Record<string, unknown>) => inputs ? { kind: "block", type, inputs } : { kind: "block", type };
 export const category = (name: string, contents: Array<Record<string, unknown>>, categoryColour = colour) => ({ kind: "category", name, colour: categoryColour, contents });
 export const textShadow = (text: string) => ({ shadow: { type: "text", fields: { TEXT: text } } });
+export const formulaShadow = (latex: string) => ({ shadow: { type: "visual_python_manim_formula_value", fields: { LATEX: latex } } });
 export const numberShadow = (num: number) => ({ shadow: { type: "math_number", fields: { NUM: num } } });
 const textBlock = (text: string) => ({ block: { type: "text", fields: { TEXT: text } } });
 const numberBlock = (num: number) => ({ block: { type: "math_number", fields: { NUM: num } } });

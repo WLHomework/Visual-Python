@@ -33,14 +33,21 @@ import { dynamicCounterExample } from "./dynamicCounter";
 import { threeDSolidCollectionExample } from "./threeDSolidCollection";
 import { torusAndArrow3DExample } from "./torusAndArrow3D";
 import { threeDCameraMotionExample } from "./threeDCameraMotion";
+import { linearFunctionVisualizationExample } from "./linearFunctionVisualization";
+import { pythagoreanTheoremExample } from "./pythagoreanTheorem";
+import { quadraticFunctionParametersExample } from "./quadraticFunctionParameters";
+import { vectorAdditionExample } from "./vectorAddition";
+import { bubbleSortVisualizationExample } from "./bubbleSortVisualization";
+import { circleTangentTheoremExample } from "./circleTangentTheorem";
+import { definiteIntegralAreaExample } from "./definiteIntegralArea";
 
-export { animationOrchestrationExample, arcsSectorsAnnulusExample, axesAndFunctionsExample, basicShapesExample, clearUpdaterExample, dynamicCounterExample, dynamicRedrawExample, emphasisAnimationsExample, entranceAndExitExample, followTargetExample, formulaTransformExample, functionAreaExample, geometryAnnotationsExample, groupsAndLayoutExample, growthAnimationsExample, helloManimExample, linesArrowsVectorsExample, matrixAndTableExample, motionRotateScaleExample, movingCameraExample, numberLineAndGridExample, objectStylesExample, polygonsAndVerticesExample, positionLayoutExample, sceneObjectManagementExample, shapeTransformExample, textAndFormulasExample, threeDCameraMotionExample, threeDObjectsExample, threeDSolidCollectionExample, threeDSurfaceExample, torusAndArrow3DExample, tracedPathExample, valueTrackerExample };
+export { animationOrchestrationExample, arcsSectorsAnnulusExample, axesAndFunctionsExample, basicShapesExample, bubbleSortVisualizationExample, circleTangentTheoremExample, clearUpdaterExample, definiteIntegralAreaExample, dynamicCounterExample, dynamicRedrawExample, emphasisAnimationsExample, entranceAndExitExample, followTargetExample, formulaTransformExample, functionAreaExample, geometryAnnotationsExample, groupsAndLayoutExample, growthAnimationsExample, helloManimExample, linearFunctionVisualizationExample, linesArrowsVectorsExample, matrixAndTableExample, motionRotateScaleExample, movingCameraExample, numberLineAndGridExample, objectStylesExample, polygonsAndVerticesExample, positionLayoutExample, pythagoreanTheoremExample, quadraticFunctionParametersExample, sceneObjectManagementExample, shapeTransformExample, textAndFormulasExample, threeDCameraMotionExample, threeDObjectsExample, threeDSolidCollectionExample, threeDSurfaceExample, torusAndArrow3DExample, tracedPathExample, valueTrackerExample, vectorAdditionExample };
 
-export const manimExamples = [helloManimExample, basicShapesExample, textAndFormulasExample, sceneObjectManagementExample, entranceAndExitExample, shapeTransformExample, motionRotateScaleExample, emphasisAnimationsExample, linesArrowsVectorsExample, groupsAndLayoutExample, geometryAnnotationsExample, matrixAndTableExample, axesAndFunctionsExample, functionAreaExample, valueTrackerExample, dynamicRedrawExample, tracedPathExample, movingCameraExample, threeDObjectsExample, threeDSurfaceExample, arcsSectorsAnnulusExample, polygonsAndVerticesExample, formulaTransformExample, positionLayoutExample, objectStylesExample, growthAnimationsExample, animationOrchestrationExample, numberLineAndGridExample, followTargetExample, clearUpdaterExample, dynamicCounterExample, threeDSolidCollectionExample, torusAndArrow3DExample, threeDCameraMotionExample] as const;
+export const manimExamples = [helloManimExample, basicShapesExample, textAndFormulasExample, sceneObjectManagementExample, entranceAndExitExample, shapeTransformExample, motionRotateScaleExample, emphasisAnimationsExample, linesArrowsVectorsExample, groupsAndLayoutExample, geometryAnnotationsExample, matrixAndTableExample, axesAndFunctionsExample, functionAreaExample, valueTrackerExample, dynamicRedrawExample, tracedPathExample, movingCameraExample, threeDObjectsExample, threeDSurfaceExample, arcsSectorsAnnulusExample, polygonsAndVerticesExample, formulaTransformExample, positionLayoutExample, objectStylesExample, growthAnimationsExample, animationOrchestrationExample, numberLineAndGridExample, followTargetExample, clearUpdaterExample, dynamicCounterExample, threeDSolidCollectionExample, torusAndArrow3DExample, threeDCameraMotionExample, linearFunctionVisualizationExample, pythagoreanTheoremExample, vectorAdditionExample, quadraticFunctionParametersExample, bubbleSortVisualizationExample, circleTangentTheoremExample, definiteIntegralAreaExample] as const;
 
 const exampleById = new Map<string, (typeof manimExamples)[number]>(manimExamples.map((example) => [example.id, example]));
 
-export const manimDifficultyOrder = ["intro", "basic", "intermediate", "advanced"] as const;
+export const manimDifficultyOrder = ["intro", "basic", "intermediate", "advanced", "practical"] as const;
 export type ManimDifficulty = (typeof manimDifficultyOrder)[number];
 
 export const manimDifficultyLabels: Record<ManimDifficulty, string> = {
@@ -48,6 +55,7 @@ export const manimDifficultyLabels: Record<ManimDifficulty, string> = {
   basic: "基础",
   intermediate: "进阶",
   advanced: "高级",
+  practical: "实战案例",
 };
 
 const difficultyById: Record<string, ManimDifficulty> = {
@@ -85,6 +93,13 @@ const difficultyById: Record<string, ManimDifficulty> = {
   "manim-3d-solid-collection": "advanced",
   "manim-torus-arrow3d": "advanced",
   "manim-3d-camera-motion": "advanced",
+  "manim-linear-function-visualization": "practical",
+  "manim-pythagorean-theorem": "practical",
+  "manim-vector-addition": "practical",
+  "manim-quadratic-function-parameters": "practical",
+  "manim-bubble-sort-visualization": "practical",
+  "manim-circle-tangent-theorem": "practical",
+  "manim-definite-integral-area": "practical",
 };
 
 const manimExamplePlan: ExampleCatalogItem[] = [
@@ -111,6 +126,13 @@ const manimExamplePlan: ExampleCatalogItem[] = [
 ];
 
 const additionalManimExamples: ExampleCatalogItem[] = [
+  { id: "manim-bubble-sort-visualization", title: "冒泡排序过程演示" },
+  { id: "manim-circle-tangent-theorem", title: "圆与切线关系" },
+  { id: "manim-definite-integral-area", title: "定积分与曲线面积" },
+  { id: "manim-pythagorean-theorem", title: "勾股定理动态证明" },
+  { id: "manim-vector-addition", title: "向量合成与平行四边形法则" },
+  { id: "manim-quadratic-function-parameters", title: "二次函数参数变化" },
+  { id: "manim-linear-function-visualization", title: "一次函数动态讲解" },
   { id: "manim-arcs-sectors-annulus", title: "圆弧、扇形与圆环" },
   { id: "manim-polygons-vertices", title: "多边形与顶点" },
   { id: "manim-formula-transform", title: "LaTeX 公式变换" },

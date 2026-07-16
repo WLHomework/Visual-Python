@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run build:desktop"
   },
   "app": {
     "windows": [
@@ -21,7 +21,7 @@
         "minHeight": 680,
         "resizable": true,
         "decorations": false,
-        "backgroundColor": "#263f3b",
+        "backgroundColor": "#f7f8fa",
         "shadow": true,
         "fullscreen": false,
         "visible": false
@@ -34,7 +34,7 @@
         "height": 260,
         "resizable": false,
         "decorations": false,
-        "backgroundColor": "#263f3b",
+        "backgroundColor": "#f7f8fa",
         "shadow": true,
         "alwaysOnTop": true,
         "center": true,
@@ -80,6 +80,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "resources/language-server/": "language-server/"
+    },
     "windows": {
       "allowDowngrades": false,
       "nsis": {

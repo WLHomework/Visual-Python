@@ -10,5 +10,5 @@ export type ExampleCatalogItem = {
   id: string;
   title: string;
   example?: ExampleProject;
-  difficulty?: "intro" | "basic" | "intermediate" | "advanced";
+  difficulty?: "intro" | "basic" | "intermediate" | "advanced" | "practical";
 };

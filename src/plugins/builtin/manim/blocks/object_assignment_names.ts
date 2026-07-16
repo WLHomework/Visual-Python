@@ -26,7 +26,6 @@ const inferManimObjectVariableName = (block: Blockly.Block | null) => {
   const fieldNameByBlockType: Record<string, string> = {
     visual_python_manim_text_object: "OBJECT",
     visual_python_manim_shape_object: "SHAPE",
-    visual_python_manim_polygon_object: "OBJECT",
     visual_python_manim_curved_shape_object: "OBJECT",
     visual_python_manim_line_object: "OBJECT",
     visual_python_manim_coordinate_object: "SYSTEM",
