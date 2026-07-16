@@ -1,0 +1,8 @@
+{
+  "id": "visual-python.demo",
+  "name": "Demo Print",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "entry": "index.js",
+  "description": "Adds a simple external plugin print block."
+}

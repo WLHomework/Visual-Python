@@ -4,9 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Visual Python</title>
+    <style>
+      html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;background:#263f3b}
+      .boot-screen{height:100%;display:grid;place-items:center;align-content:center;gap:14px;background:#263f3b;color:#eef7f4;font:600 14px Inter,"Segoe UI",sans-serif}
+      .boot-mark{width:42px;height:42px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.24);border-radius:6px;background:#2f9e8f;color:#fff;font-size:15px}
+      .boot-progress{width:96px;height:2px;overflow:hidden;background:rgba(255,255,255,.18)}
+      .boot-progress::after{content:"";display:block;width:38px;height:100%;background:#74d8ba;animation:boot-slide 1s ease-in-out infinite alternate}
+      @keyframes boot-slide{from{transform:translateX(0)}to{transform:translateX(58px)}}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="boot-screen"><div class="boot-mark">Py</div><span>Visual Python</span><div class="boot-progress"></div></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
