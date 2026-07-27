@@ -578,6 +578,21 @@ export function getPythonContextWarning(block: Blockly.Block): string | null {
   return null;
 }
 
+const manimVoiceoverBlockTypes = new Set([
+  "visual_python_manim_voiceover",
+  "visual_python_manim_voiceover_with_animation",
+]);
+
+export function getManimVoiceoverContextWarning(block: Blockly.Block): string | null {
+  if (!manimVoiceoverBlockTypes.has(block.type)) return null;
+  let parent = block.getSurroundParent?.() ?? null;
+  while (parent) {
+    if (parent.type === "visual_python_manim_scene") return null;
+    parent = parent.getSurroundParent?.() ?? null;
+  }
+  return "配音积木只能放在 Manim 场景内部。";
+}
+
 const requiredInputsByType: Record<string, Array<[string, string]>> = {
   variables_set: [["VALUE", "变量值"]],
   controls_repeat_ext: [["TIMES", "重复次数"]],
@@ -859,7 +874,7 @@ export type PythonContextIssue = { blockId: string; message: string };
 export function validatePythonBlockContexts(workspace: Blockly.Workspace): PythonContextIssue[] {
   const issues: PythonContextIssue[] = [];
   for (const block of workspace.getAllBlocks(false)) {
-    const messages = [getPythonContextWarning(block), getPythonRequiredInputWarning(block), getPythonIdentifierWarning(block), getPythonImportWarning(block)].filter((message): message is string => Boolean(message));
+    const messages = [getPythonContextWarning(block), getManimVoiceoverContextWarning(block), getPythonRequiredInputWarning(block), getPythonIdentifierWarning(block), getPythonImportWarning(block)].filter((message): message is string => Boolean(message));
     const message = messages.join(" ") || null;
     block.setWarningText(message, "python-context");
     if (message) issues.push({ blockId: block.id, message });

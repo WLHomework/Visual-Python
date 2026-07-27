@@ -1,6 +1,6 @@
 import * as Blockly from "blockly/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildBlockOutline, filterBlockOutline } from "./blockOutline";
+import { buildBlockOutline, compactBlockOutline, filterBlockOutline } from "./blockOutline";
 
 const types = ["test_outline_scene", "test_outline_loop", "test_outline_action"];
 
@@ -41,6 +41,18 @@ describe("block outline", () => {
     const filtered = filterBlockOutline(buildBlockOutline(workspace), "执行动作");
     expect(filtered[0].children[0].children[0].id).toBe(action.id);
     expect(filterBlockOutline(buildBlockOutline(workspace), "missing")).toEqual([]);
+    workspace.dispose();
+  });
+
+  it("keeps structural nodes and issues while compacting leaf statements", () => {
+    const { workspace, scene, loop, action } = createWorkspace();
+    const compacted = compactBlockOutline(buildBlockOutline(workspace));
+    expect(compacted[0].id).toBe(scene.id);
+    expect(compacted[0].children[0].id).toBe(loop.id);
+    expect(compacted[0].children[0].children).toEqual([]);
+
+    const compactedWithIssue = compactBlockOutline(buildBlockOutline(workspace, new Set([action.id])));
+    expect(compactedWithIssue[0].children[0].children[0].id).toBe(action.id);
     workspace.dispose();
   });
 });

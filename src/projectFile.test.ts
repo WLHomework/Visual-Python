@@ -1,0 +1,41 @@
+import { describe, expect, it } from "vitest";
+import { parseDraftProject, parseProjectFile, validateProjectFile } from "./projectFile";
+
+const validProject = { version: 1, name: "课程.vpy", workspace: { blocks: { blocks: [] } } };
+
+describe("project file validation", () => {
+  it("accepts a valid Unicode project", () => {
+    const project = validateProjectFile({
+      ...validProject,
+      resources: [{ id: "audio-1", type: "audio", path: "audio/讲解.wav", originalName: "讲解.wav", size: 42 }],
+    });
+    expect(project.name).toBe("课程.vpy");
+    expect(project.resources?.[0].path).toBe("audio/讲解.wav");
+  });
+
+  it("rejects malformed and traversal-like resource data", () => {
+    expect(() => validateProjectFile({ ...validProject, resources: "audio" })).toThrow("资源列表");
+    expect(() => validateProjectFile({ ...validProject, resources: [{ id: "a", type: "audio", path: "../secret.wav", originalName: "secret.wav", size: 1 }] })).toThrow("资源记录");
+    expect(() => validateProjectFile({ ...validProject, resources: [
+      { id: "a", type: "audio", path: "audio/a.wav", originalName: "a.wav", size: 1 },
+      { id: "a", type: "audio", path: "audio/b.wav", originalName: "b.wav", size: 1 },
+    ] })).toThrow("重复");
+  });
+
+  it("rejects invalid top-level fields instead of leaking them into the UI", () => {
+    expect(() => parseProjectFile("not json")).toThrow("JSON");
+    expect(() => validateProjectFile({ ...validProject, name: {} })).toThrow("名称");
+    expect(() => validateProjectFile({ ...validProject, workspaceMode: "prompt-injection" })).toThrow("模式");
+  });
+
+  it("validates persisted drafts", () => {
+    expect(parseDraftProject(JSON.stringify({ ...validProject, path: null, savedAt: 10 })).savedAt).toBe(10);
+    expect(() => parseDraftProject(JSON.stringify({ ...validProject, path: [], savedAt: "now" }))).toThrow("草稿");
+  });
+
+  it("accepts independent scene documents and validates the active scene", () => {
+    const sceneDocuments = [{ id: "scene-main", name: "MainScene", code: "from manim import *" }];
+    expect(validateProjectFile({ ...validProject, sceneDocuments, activeSceneId: "scene-main" }).sceneDocuments).toEqual(sceneDocuments);
+    expect(() => validateProjectFile({ ...validProject, sceneDocuments, activeSceneId: "missing" })).toThrow("不存在");
+  });
+});

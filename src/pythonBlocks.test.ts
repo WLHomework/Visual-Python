@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
-import { buildDefinedFunctionCallToolbox, defaultVisualThemeId, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
-import { getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
+import { buildDefinedFunctionCallToolbox, defaultVisualThemeId, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
+import { getManimVoiceoverContextWarning, getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 
 const variableFields: Record<string, string[]> = {
   variables_set: ["VAR"], variables_get: ["VAR"],
@@ -11,6 +11,24 @@ const variableFields: Record<string, string[]> = {
   python_generator_expression: ["VAR"], python_with_two: ["ALIAS1", "ALIAS2"],
   python_async_for: ["VAR"], python_async_with: ["ALIAS"],
 };
+
+describe("Manim voiceover context validation", () => {
+  it("requires voiceover blocks to be nested in a Manim scene", () => {
+    const outside = {
+      type: "visual_python_manim_voiceover",
+      getSurroundParent: () => null,
+      getParent: () => null,
+    } as unknown as Blockly.Block;
+    expect(getManimVoiceoverContextWarning(outside)).toBe("配音积木只能放在 Manim 场景内部。");
+
+    const scene = { type: "visual_python_manim_scene", getSurroundParent: () => null } as unknown as Blockly.Block;
+    const inside = {
+      type: "visual_python_manim_voiceover_with_animation",
+      getSurroundParent: () => scene,
+    } as unknown as Blockly.Block;
+    expect(getManimVoiceoverContextWarning(inside)).toBeNull();
+  });
+});
 const state = (block: object) => {
   const copy = structuredClone(block) as Record<string, any>;
   const variables = new Map<string, { name: string; id: string }>();
@@ -436,6 +454,23 @@ describe("Python block generators", () => {
     expect(generated.code).toContain("# __visual_python_block_'print-block'__");
     const printLine = generated.code.split("\n").findIndex((line) => line.includes("print('hello')")) + 1;
     expect(generated.blockIdByLine.get(printLine)).toBe("print-block");
+    workspace.dispose();
+  });
+
+  it("finds visible code ranges for statements, containers, and expression children", () => {
+    const workspace = new Blockly.Workspace();
+    Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [{
+      id: "loop", type: "controls_repeat_ext",
+      inputs: {
+        TIMES: { shadow: { type: "math_number", fields: { NUM: 2 } } },
+        DO: { block: { id: "print", type: "python_print", inputs: { VALUE: { block: { id: "text-value", type: "text", fields: { TEXT: "hello" } } } }, next: { block: { id: "second-print", type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "world" } } } } } } } },
+      },
+    }] } }, workspace);
+    expect(findWorkspaceBlockCodeRange(workspace, "loop")).toEqual({ startLineNumber: 1, endLineNumber: 3 });
+    expect(findWorkspaceBlockCodeRange(workspace, "print")).toEqual({ startLineNumber: 2, endLineNumber: 2 });
+    expect(findWorkspaceBlockCodeRange(workspace, "second-print")).toEqual({ startLineNumber: 3, endLineNumber: 3 });
+    expect(findWorkspaceBlockCodeRange(workspace, "text-value")).toEqual({ startLineNumber: 2, endLineNumber: 2 });
+    expect(findWorkspaceBlockCodeRange(workspace, "missing")).toBeNull();
     workspace.dispose();
   });
 

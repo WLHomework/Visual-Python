@@ -763,6 +763,7 @@ export function generateWorkspacePython(workspace: Blockly.Workspace): string {
 }
 
 export type GeneratedBlockMap = { code: string; blockIdByLine: Map<number, string> };
+export type BlockCodeRange = { startLineNumber: number; endLineNumber: number };
 
 export function generateWorkspacePythonWithBlockMap(workspace: Blockly.Workspace): GeneratedBlockMap {
   const previousPrefix = pythonGenerator.STATEMENT_PREFIX;
@@ -785,6 +786,44 @@ export function generateWorkspacePythonWithBlockMap(workspace: Blockly.Workspace
   } finally {
     pythonGenerator.STATEMENT_PREFIX = previousPrefix;
   }
+}
+
+export function findWorkspaceBlockCodeRange(workspace: Blockly.Workspace, blockId: string): BlockCodeRange | null {
+  let candidate = workspace.getBlockById(blockId);
+  if (!candidate) return null;
+  const generated = generateWorkspacePythonWithBlockMap(workspace);
+  const visibleLines: Array<{ lineNumber: number; blockId?: string; hasCode: boolean }> = [];
+  let lineNumber = 0;
+  generated.code.split("\n").forEach((line, index) => {
+    if (line.trimStart().startsWith("# __visual_python_block_")) return;
+    lineNumber += 1;
+    visibleLines.push({ lineNumber, blockId: generated.blockIdByLine.get(index + 1), hasCode: Boolean(line.trim()) });
+  });
+
+  const inputSubtreeIds = (root: Blockly.Block) => {
+    const ids = new Set<string>();
+    const visitBlock = (block: Blockly.Block) => {
+      if (ids.has(block.id)) return;
+      ids.add(block.id);
+      for (const input of block.inputList) {
+        let child = input.connection?.targetBlock() ?? null;
+        while (child) {
+          visitBlock(child);
+          child = child.getNextBlock();
+        }
+      }
+    };
+    visitBlock(root);
+    return ids;
+  };
+
+  while (candidate) {
+    const ids = inputSubtreeIds(candidate);
+    const lines = visibleLines.filter((line) => line.hasCode && line.blockId && ids.has(line.blockId));
+    if (lines.length) return { startLineNumber: lines[0].lineNumber, endLineNumber: lines.at(-1)!.lineNumber };
+    candidate = candidate.getParent();
+  }
+  return null;
 }
 
 export function buildDefinedFunctionCallToolbox(workspace: Blockly.Workspace): Blockly.utils.toolbox.FlyoutItemInfoArray {

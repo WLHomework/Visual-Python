@@ -6,6 +6,8 @@ export const pluginRegistry = new PluginRegistry();
 
 let initialization: Promise<void> | null = null;
 const preferenceKey = "visual-python:plugins";
+export const corePluginIds = new Set([manimPlugin.manifest.id]);
+export const isCorePlugin = (pluginId: string) => corePluginIds.has(pluginId);
 
 const readPreferences = (): Record<string, boolean> => {
   try { return JSON.parse(localStorage.getItem(preferenceKey) || "{}"); }
@@ -18,19 +20,22 @@ const writePreference = (pluginId: string, enabled: boolean) => {
   localStorage.setItem(preferenceKey, JSON.stringify(preferences));
 };
 
-export const getPluginEnabledPreference = (pluginId: string) => readPreferences()[pluginId] ?? false;
+export const getPluginEnabledPreference = (pluginId: string) => isCorePlugin(pluginId) || (readPreferences()[pluginId] ?? false);
 
 export function initializePlugins() {
   if (initialization) return initialization;
   pluginRegistry.register(manimPlugin);
-  const enabled = readPreferences()[manimPlugin.manifest.id] ?? true;
-  initialization = enabled
-    ? pluginRegistry.activate(manimPlugin.manifest.id)
-    : pluginRegistry.deactivate(manimPlugin.manifest.id);
+  writePreference(manimPlugin.manifest.id, true);
+  initialization = pluginRegistry.activate(manimPlugin.manifest.id);
   return initialization;
 }
 
 export async function setPluginEnabled(pluginId: string, enabled: boolean) {
+  if (isCorePlugin(pluginId)) {
+    writePreference(pluginId, true);
+    await pluginRegistry.activate(pluginId);
+    return;
+  }
   writePreference(pluginId, enabled);
   if (enabled) await pluginRegistry.activate(pluginId);
   else await pluginRegistry.deactivate(pluginId);

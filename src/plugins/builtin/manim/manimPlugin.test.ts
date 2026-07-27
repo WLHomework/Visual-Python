@@ -1,11 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
 import { generatePython } from "../../../pythonBlocks";
+import { validatePythonBlockContexts } from "../../../pythonSyntaxBlocks";
 import { PluginRegistry } from "../../core/pluginRegistry";
 import { dynamicMatrixDataShadow, dynamicTableDataShadow } from "./helpers";
 import { manimPlugin } from "./index";
 import { colourForManimBlock, manimBlockColours } from "./constants";
 import { registerManimToolbox } from "./toolbox";
+import { parseVoiceoverMarker } from "./voiceoverMarkers";
+import { parseLocalAudioMarker } from "./localAudioMarkers";
 
 const number = (value: number) => ({ block: { type: "math_number", fields: { NUM: value } } });
 const text = (value: string) => ({ block: { type: "text", fields: { TEXT: value } } });
@@ -133,6 +136,80 @@ describe("Manim plugin generators", () => {
     expect(code).toContain("self.wait(0.5)");
   });
 
+  it("generates local audio playback with offset and gain", () => {
+    const code = generatePython({ blocks: { languageVersion: 0, blocks: [{
+      type: "visual_python_manim_play_local_audio",
+      inputs: { PATH: text("music.wav"), TIME_OFFSET: number(0.5), GAIN: number(-4) },
+    }] } });
+    expect(code).toContain("self.add_sound(");
+    expect(code).toContain("'music.wav',");
+    expect(code).toContain("time_offset=0.5,");
+    expect(code).toContain("gain=-4,");
+  });
+
+  it("generates synchronized local audio markers around Manim statements", () => {
+    const code = generatePython({ blocks: { languageVersion: 0, blocks: [{
+      type: "visual_python_manim_scene",
+      fields: { NAME: "AudioScene", SCENE_TYPE: "Scene" },
+      inputs: { BODY: { block: {
+        id: "local-audio-sync",
+        type: "visual_python_manim_play_local_audio_with_animation",
+        inputs: {
+          PATH: text("C:\\audio\\music.wav"), TIME_OFFSET: number(0.5), GAIN: number(-3),
+          BODY: { block: { type: "visual_python_manim_wait", inputs: { SECONDS: number(1) } } },
+        },
+      } } },
+    }] } });
+    const markers = code.split("\n").map(parseLocalAudioMarker).filter(Boolean);
+    expect(markers).toHaveLength(2);
+    expect(markers[0]).toMatchObject({ kind: "begin", payload: { path: "C:\\audio\\music.wav", timeOffset: 0.5, gain: -3, blockId: "local-audio-sync" } });
+    expect(markers[1]).toEqual({ kind: "end" });
+    expect(code).toContain("\n    self.renderer.time");
+    expect(code).toContain("\n    self.wait(1)\n    self.wait(0)");
+  });
+
+  it("generates parseable voiceover timeline markers around normal Manim statements", () => {
+    const code = generatePython({
+      blocks: { languageVersion: 0, blocks: [{
+        type: "visual_python_manim_scene",
+        fields: { NAME: "NarratedScene", SCENE_TYPE: "Scene" },
+        inputs: { BODY: { block: {
+          type: "visual_python_manim_voiceover_with_animation",
+          inputs: {
+            TEXT: text("欢迎学习圆的面积"),
+            BODY: { block: { type: "visual_python_manim_wait", inputs: { SECONDS: number(1) } } },
+          },
+        } } },
+      }] },
+    });
+    const markers = code.split("\n").map(parseVoiceoverMarker).filter(Boolean);
+    expect(markers).toHaveLength(2);
+    expect(markers[0]).toMatchObject({ kind: "begin", payload: { version: 1, textExpression: "'欢迎学习圆的面积'", text: "欢迎学习圆的面积", blockId: expect.any(String) } });
+    expect(markers[1]).toEqual({ kind: "end" });
+    expect(code).toContain("self.wait(1)");
+    expect(code).toContain('\n    self.add_sound("visual-python-voiceover.wav")');
+    expect(code).toContain("\n    self.wait(1)\n    self.wait(0)");
+    expect(code).not.toContain("\n      self.wait(1)");
+  });
+
+  it("does not treat a voiceover connected below a scene as being inside it", () => {
+    const workspace = new Blockly.Workspace();
+    Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [{
+      type: "visual_python_manim_scene",
+      fields: { NAME: "MainScene", SCENE_TYPE: "Scene" },
+      next: { block: {
+        type: "visual_python_manim_voiceover",
+        id: "outside-voiceover",
+        inputs: { TEXT: text("欢迎学习 Manim") },
+      } },
+    }] } }, workspace);
+    expect(validatePythonBlockContexts(workspace)).toContainEqual({
+      blockId: "outside-voiceover",
+      message: "配音积木只能放在 Manim 场景内部。",
+    });
+    workspace.dispose();
+  });
+
   it("generates representative objects, methods, coordinates and dynamic tracker code", () => {
     expect(generatePython({
       blocks: { languageVersion: 0, blocks: [{
@@ -253,7 +330,7 @@ describe("Manim plugin generators", () => {
 
   it("keeps every registered Manim block generator callable with default fields", () => {
     const types = Object.keys(Blockly.Blocks).filter((type) => type.startsWith("visual_python_manim_")).sort();
-    expect(types).toHaveLength(143);
+    expect(types).toHaveLength(148);
 
     for (const type of types) {
       const workspace = new Blockly.Workspace();
@@ -328,8 +405,8 @@ describe("Manim plugin generators", () => {
     const missingFromToolbox = [...blockDefs.keys()].filter((type) => !uniqueToolboxRefs.includes(type));
     const unknownToolboxRefs = uniqueToolboxRefs.filter((type) => !blockDefs.has(type));
 
-    expect(blockDefs.size).toBe(143);
-    expect(uniqueToolboxRefs).toHaveLength(143);
+    expect(blockDefs.size).toBe(148);
+    expect(uniqueToolboxRefs).toHaveLength(148);
     expect(duplicateBlockDefs).toEqual([]);
     expect(missingFromToolbox).toEqual([]);
     expect(unknownToolboxRefs).toEqual([]);

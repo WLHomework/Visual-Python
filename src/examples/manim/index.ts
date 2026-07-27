@@ -40,14 +40,44 @@ import { vectorAdditionExample } from "./vectorAddition";
 import { bubbleSortVisualizationExample } from "./bubbleSortVisualization";
 import { circleTangentTheoremExample } from "./circleTangentTheorem";
 import { definiteIntegralAreaExample } from "./definiteIntegralArea";
+import { narratedCircleAreaExample } from "./narratedCircleArea";
+import { narratedLinearFunctionExample } from "./narratedLinearFunction";
+import { narratedPythagoreanTheoremExample } from "./narratedPythagoreanTheorem";
+import { narratedQuadraticVertexExample } from "./narratedQuadraticVertex";
+import { narratedDerivativeGeometryExample } from "./narratedDerivativeGeometry";
+import { narratedVectorAdditionExample } from "./narratedVectorAddition";
+import { narratedUnitCircleExample } from "./narratedUnitCircle";
+import { narratedLimitDialogueExample } from "./narratedLimitDialogue";
+import { narratedCompoundInterestExample } from "./narratedCompoundInterest";
+import { narratedProjectileMotionExample } from "./narratedProjectileMotion";
+import { narratedMeanAndOutlierExample } from "./narratedMeanAndOutlier";
+import { narratedDiceFrequencyExample } from "./narratedDiceFrequency";
+import { narratedTriangleAngleSumExample } from "./narratedTriangleAngleSum";
+import { narratedPerfectSquareFormulaExample } from "./narratedPerfectSquareFormula";
+import { narratedRiemannSumExample } from "./narratedRiemannSum";
+import { narratedMatrixTransformationExample } from "./narratedMatrixTransformation";
+import { narratedEulerFormulaExample } from "./narratedEulerFormula";
+import { narratedHarmonicMotionExample } from "./narratedHarmonicMotion";
+import { narratedBinarySearchExample } from "./narratedBinarySearch";
+import { narratedStackOperationsExample } from "./narratedStackOperations";
+import { narratedPacketEncapsulationExample } from "./narratedPacketEncapsulation";
+import { narratedGradientDescentExample } from "./narratedGradientDescent";
+import { narratedPlanetaryOrbitExample } from "./narratedPlanetaryOrbit";
+import { narratedElectronShellsExample } from "./narratedElectronShells";
+import { narratedDnaReplicationExample } from "./narratedDnaReplication";
+import { narratedSupplyDemandExample } from "./narratedSupplyDemand";
+import { narratedDayNightCycleExample } from "./narratedDayNightCycle";
+import { narratedSeriesParallelCircuitsExample } from "./narratedSeriesParallelCircuits";
+import { narratedReflectionRefractionExample } from "./narratedReflectionRefraction";
+import { narratedLeverTorqueExample } from "./narratedLeverTorque";
 
-export { animationOrchestrationExample, arcsSectorsAnnulusExample, axesAndFunctionsExample, basicShapesExample, bubbleSortVisualizationExample, circleTangentTheoremExample, clearUpdaterExample, definiteIntegralAreaExample, dynamicCounterExample, dynamicRedrawExample, emphasisAnimationsExample, entranceAndExitExample, followTargetExample, formulaTransformExample, functionAreaExample, geometryAnnotationsExample, groupsAndLayoutExample, growthAnimationsExample, helloManimExample, linearFunctionVisualizationExample, linesArrowsVectorsExample, matrixAndTableExample, motionRotateScaleExample, movingCameraExample, numberLineAndGridExample, objectStylesExample, polygonsAndVerticesExample, positionLayoutExample, pythagoreanTheoremExample, quadraticFunctionParametersExample, sceneObjectManagementExample, shapeTransformExample, textAndFormulasExample, threeDCameraMotionExample, threeDObjectsExample, threeDSolidCollectionExample, threeDSurfaceExample, torusAndArrow3DExample, tracedPathExample, valueTrackerExample, vectorAdditionExample };
+export { animationOrchestrationExample, arcsSectorsAnnulusExample, axesAndFunctionsExample, basicShapesExample, bubbleSortVisualizationExample, circleTangentTheoremExample, clearUpdaterExample, definiteIntegralAreaExample, dynamicCounterExample, dynamicRedrawExample, emphasisAnimationsExample, entranceAndExitExample, followTargetExample, formulaTransformExample, functionAreaExample, geometryAnnotationsExample, groupsAndLayoutExample, growthAnimationsExample, helloManimExample, linearFunctionVisualizationExample, linesArrowsVectorsExample, matrixAndTableExample, motionRotateScaleExample, movingCameraExample, narratedBinarySearchExample, narratedCircleAreaExample, narratedCompoundInterestExample, narratedDayNightCycleExample, narratedDerivativeGeometryExample, narratedDiceFrequencyExample, narratedDnaReplicationExample, narratedElectronShellsExample, narratedEulerFormulaExample, narratedGradientDescentExample, narratedHarmonicMotionExample, narratedLeverTorqueExample, narratedLimitDialogueExample, narratedLinearFunctionExample, narratedMatrixTransformationExample, narratedMeanAndOutlierExample, narratedPacketEncapsulationExample, narratedPerfectSquareFormulaExample, narratedPlanetaryOrbitExample, narratedProjectileMotionExample, narratedPythagoreanTheoremExample, narratedQuadraticVertexExample, narratedReflectionRefractionExample, narratedRiemannSumExample, narratedSeriesParallelCircuitsExample, narratedStackOperationsExample, narratedSupplyDemandExample, narratedTriangleAngleSumExample, narratedUnitCircleExample, narratedVectorAdditionExample, numberLineAndGridExample, objectStylesExample, polygonsAndVerticesExample, positionLayoutExample, pythagoreanTheoremExample, quadraticFunctionParametersExample, sceneObjectManagementExample, shapeTransformExample, textAndFormulasExample, threeDCameraMotionExample, threeDObjectsExample, threeDSolidCollectionExample, threeDSurfaceExample, torusAndArrow3DExample, tracedPathExample, valueTrackerExample, vectorAdditionExample };
 
-export const manimExamples = [helloManimExample, basicShapesExample, textAndFormulasExample, sceneObjectManagementExample, entranceAndExitExample, shapeTransformExample, motionRotateScaleExample, emphasisAnimationsExample, linesArrowsVectorsExample, groupsAndLayoutExample, geometryAnnotationsExample, matrixAndTableExample, axesAndFunctionsExample, functionAreaExample, valueTrackerExample, dynamicRedrawExample, tracedPathExample, movingCameraExample, threeDObjectsExample, threeDSurfaceExample, arcsSectorsAnnulusExample, polygonsAndVerticesExample, formulaTransformExample, positionLayoutExample, objectStylesExample, growthAnimationsExample, animationOrchestrationExample, numberLineAndGridExample, followTargetExample, clearUpdaterExample, dynamicCounterExample, threeDSolidCollectionExample, torusAndArrow3DExample, threeDCameraMotionExample, linearFunctionVisualizationExample, pythagoreanTheoremExample, vectorAdditionExample, quadraticFunctionParametersExample, bubbleSortVisualizationExample, circleTangentTheoremExample, definiteIntegralAreaExample] as const;
+export const manimExamples = [helloManimExample, basicShapesExample, textAndFormulasExample, sceneObjectManagementExample, entranceAndExitExample, shapeTransformExample, motionRotateScaleExample, emphasisAnimationsExample, linesArrowsVectorsExample, groupsAndLayoutExample, geometryAnnotationsExample, matrixAndTableExample, axesAndFunctionsExample, functionAreaExample, valueTrackerExample, dynamicRedrawExample, tracedPathExample, movingCameraExample, threeDObjectsExample, threeDSurfaceExample, arcsSectorsAnnulusExample, polygonsAndVerticesExample, formulaTransformExample, positionLayoutExample, objectStylesExample, growthAnimationsExample, animationOrchestrationExample, numberLineAndGridExample, followTargetExample, clearUpdaterExample, dynamicCounterExample, threeDSolidCollectionExample, torusAndArrow3DExample, threeDCameraMotionExample, linearFunctionVisualizationExample, pythagoreanTheoremExample, vectorAdditionExample, quadraticFunctionParametersExample, bubbleSortVisualizationExample, circleTangentTheoremExample, definiteIntegralAreaExample, narratedCircleAreaExample, narratedLinearFunctionExample, narratedPythagoreanTheoremExample, narratedQuadraticVertexExample, narratedDerivativeGeometryExample, narratedVectorAdditionExample, narratedUnitCircleExample, narratedLimitDialogueExample, narratedCompoundInterestExample, narratedProjectileMotionExample, narratedMeanAndOutlierExample, narratedDiceFrequencyExample, narratedTriangleAngleSumExample, narratedPerfectSquareFormulaExample, narratedRiemannSumExample, narratedMatrixTransformationExample, narratedEulerFormulaExample, narratedHarmonicMotionExample, narratedBinarySearchExample, narratedStackOperationsExample, narratedPacketEncapsulationExample, narratedGradientDescentExample, narratedPlanetaryOrbitExample, narratedElectronShellsExample, narratedDnaReplicationExample, narratedSupplyDemandExample, narratedDayNightCycleExample, narratedSeriesParallelCircuitsExample, narratedReflectionRefractionExample, narratedLeverTorqueExample] as const;
 
 const exampleById = new Map<string, (typeof manimExamples)[number]>(manimExamples.map((example) => [example.id, example]));
 
-export const manimDifficultyOrder = ["intro", "basic", "intermediate", "advanced", "practical"] as const;
+export const manimDifficultyOrder = ["intro", "basic", "intermediate", "advanced", "practical", "narrated"] as const;
 export type ManimDifficulty = (typeof manimDifficultyOrder)[number];
 
 export const manimDifficultyLabels: Record<ManimDifficulty, string> = {
@@ -56,6 +86,7 @@ export const manimDifficultyLabels: Record<ManimDifficulty, string> = {
   intermediate: "进阶",
   advanced: "高级",
   practical: "实战案例",
+  narrated: "配音示例",
 };
 
 const difficultyById: Record<string, ManimDifficulty> = {
@@ -100,6 +131,36 @@ const difficultyById: Record<string, ManimDifficulty> = {
   "manim-bubble-sort-visualization": "practical",
   "manim-circle-tangent-theorem": "practical",
   "manim-definite-integral-area": "practical",
+  "manim-narrated-circle-area": "narrated",
+  "manim-narrated-linear-function": "narrated",
+  "manim-narrated-pythagorean-theorem": "narrated",
+  "manim-narrated-quadratic-vertex": "narrated",
+  "manim-narrated-derivative-geometry": "narrated",
+  "manim-narrated-vector-addition": "narrated",
+  "manim-narrated-unit-circle": "narrated",
+  "manim-narrated-limit-dialogue": "narrated",
+  "manim-narrated-compound-interest": "narrated",
+  "manim-narrated-projectile-motion": "narrated",
+  "manim-narrated-mean-outlier": "narrated",
+  "manim-narrated-dice-frequency": "narrated",
+  "manim-narrated-triangle-angle-sum": "narrated",
+  "manim-narrated-perfect-square-formula": "narrated",
+  "manim-narrated-riemann-sum": "narrated",
+  "manim-narrated-matrix-transformation": "narrated",
+  "manim-narrated-euler-formula": "narrated",
+  "manim-narrated-harmonic-motion": "narrated",
+  "manim-narrated-binary-search": "narrated",
+  "manim-narrated-stack-operations": "narrated",
+  "manim-narrated-packet-encapsulation": "narrated",
+  "manim-narrated-gradient-descent": "narrated",
+  "manim-narrated-planetary-orbit": "narrated",
+  "manim-narrated-electron-shells": "narrated",
+  "manim-narrated-dna-replication": "narrated",
+  "manim-narrated-supply-demand": "narrated",
+  "manim-narrated-day-night-cycle": "narrated",
+  "manim-narrated-series-parallel-circuits": "narrated",
+  "manim-narrated-reflection-refraction": "narrated",
+  "manim-narrated-lever-torque": "narrated",
 };
 
 const manimExamplePlan: ExampleCatalogItem[] = [
@@ -133,6 +194,36 @@ const additionalManimExamples: ExampleCatalogItem[] = [
   { id: "manim-vector-addition", title: "向量合成与平行四边形法则" },
   { id: "manim-quadratic-function-parameters", title: "二次函数参数变化" },
   { id: "manim-linear-function-visualization", title: "一次函数动态讲解" },
+  { id: "manim-narrated-circle-area", title: "配音讲解：圆的面积" },
+  { id: "manim-narrated-linear-function", title: "配音讲解：一次函数图像" },
+  { id: "manim-narrated-pythagorean-theorem", title: "配音讲解：勾股定理" },
+  { id: "manim-narrated-quadratic-vertex", title: "配音讲解：二次函数顶点移动" },
+  { id: "manim-narrated-derivative-geometry", title: "配音讲解：导数的几何意义" },
+  { id: "manim-narrated-vector-addition", title: "配音讲解：向量加法" },
+  { id: "manim-narrated-unit-circle", title: "配音讲解：单位圆与三角函数" },
+  { id: "manim-narrated-limit-dialogue", title: "角色对话：理解极限" },
+  { id: "manim-narrated-compound-interest", title: "生活数学：复利增长" },
+  { id: "manim-narrated-projectile-motion", title: "物理演示：抛物运动" },
+  { id: "manim-narrated-mean-outlier", title: "统计入门：平均数与离群值" },
+  { id: "manim-narrated-dice-frequency", title: "概率入门：掷骰子的频率趋于稳定" },
+  { id: "manim-narrated-triangle-angle-sum", title: "几何证明：三角形内角和" },
+  { id: "manim-narrated-perfect-square-formula", title: "代数演示：完全平方公式" },
+  { id: "manim-narrated-riemann-sum", title: "微积分直观：黎曼和逼近面积" },
+  { id: "manim-narrated-matrix-transformation", title: "线性代数：矩阵变换平面" },
+  { id: "manim-narrated-euler-formula", title: "复数直观：欧拉公式与单位圆" },
+  { id: "manim-narrated-harmonic-motion", title: "物理演示：简谐振动与正弦波" },
+  { id: "manim-narrated-binary-search", title: "算法演示：二分查找" },
+  { id: "manim-narrated-stack-operations", title: "数据结构：栈的入栈与出栈" },
+  { id: "manim-narrated-packet-encapsulation", title: "计算机网络：数据包分层封装" },
+  { id: "manim-narrated-gradient-descent", title: "机器学习：梯度下降寻找最低点" },
+  { id: "manim-narrated-planetary-orbit", title: "天文学：行星绕恒星运动" },
+  { id: "manim-narrated-electron-shells", title: "化学：原子电子层模型" },
+  { id: "manim-narrated-dna-replication", title: "生物学：DNA 碱基配对与复制" },
+  { id: "manim-narrated-supply-demand", title: "经济学：供给与需求均衡" },
+  { id: "manim-narrated-day-night-cycle", title: "地理：昼夜交替与地球自转" },
+  { id: "manim-narrated-series-parallel-circuits", title: "电学：串联与并联电路" },
+  { id: "manim-narrated-reflection-refraction", title: "光学：反射与折射定律" },
+  { id: "manim-narrated-lever-torque", title: "力学：杠杆平衡与力矩" },
   { id: "manim-arcs-sectors-annulus", title: "圆弧、扇形与圆环" },
   { id: "manim-polygons-vertices", title: "多边形与顶点" },
   { id: "manim-formula-transform", title: "LaTeX 公式变换" },

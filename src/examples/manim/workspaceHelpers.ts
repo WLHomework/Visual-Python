@@ -28,3 +28,5 @@ export const sceneWorkspace = (name: string, sceneType: string, body: object) =>
 export const play = (animation: object) => ({ type: "visual_python_manim_play", inputs: { ANIMATION: input(animation) } });
 export const create = (name: string, seconds = 1) => ({ type: "visual_python_manim_create_object_animation", inputs: { MOBJECT: ref(name), RUN_TIME: number(seconds) } });
 export const wait = (seconds = 1) => ({ type: "visual_python_manim_wait", inputs: { SECONDS: number(seconds) } });
+export const voiceover = (content: string, role = "default", id?: string) => ({ type: "visual_python_manim_voiceover", ...(id ? { id } : {}), fields: { ROLE: role }, inputs: { TEXT: text(content) } });
+export const voiceoverWithAnimation = (content: string, body: object, role = "default", id?: string) => ({ type: "visual_python_manim_voiceover_with_animation", ...(id ? { id } : {}), fields: { ROLE: role }, inputs: { TEXT: text(content), BODY: input(body) } });

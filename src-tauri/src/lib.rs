@@ -1,6 +1,8 @@
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -16,6 +18,723 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::sync::Notify;
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TtsConfig {
+    provider: String,
+    base_url: String,
+    model: String,
+    voice: String,
+    speed: f32,
+    audio_format: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TtsPreviewResult {
+    path: String,
+    format: String,
+    duration_seconds: f64,
+    cached: bool,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiModelConfig {
+    base_url: String,
+    model: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiToolFunctionCall {
+    name: String,
+    arguments: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiToolCall {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    function: AiToolFunctionCall,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiChatMessage {
+    role: String,
+    content: Option<String>,
+    tool_call_id: Option<String>,
+    tool_calls: Option<Vec<AiToolCall>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiChatCompletionResult {
+    content: String,
+    tool_calls: Vec<AiToolCall>,
+    model: String,
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    total_tokens: Option<u64>,
+}
+
+#[derive(Default)]
+struct AiToolCallAccumulator {
+    id: String,
+    kind: String,
+    name: String,
+    arguments: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiChatStreamEvent {
+    request_id: String,
+    channel: String,
+    delta: String,
+    tool_index: Option<usize>,
+    tool_name: Option<String>,
+}
+
+struct AiStreamTarget {
+    app: AppHandle,
+    request_id: String,
+    cancellation: Arc<AiRequestCancellation>,
+}
+
+#[derive(Default)]
+struct AiRequestCancellation {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
+
+impl AiRequestCancellation {
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    async fn wait(&self) {
+        if self.cancelled.load(Ordering::SeqCst) {
+            return;
+        }
+        self.notify.notified().await;
+    }
+}
+
+#[derive(Default)]
+struct AiChatRequests {
+    active: Mutex<HashMap<String, Arc<AiRequestCancellation>>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedProjectResource {
+    id: String,
+    r#type: String,
+    path: String,
+    original_name: String,
+    size: u64,
+    deduplicated: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExistingProjectResource {
+    id: String,
+    path: String,
+    original_name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectResourceStatus {
+    path: String,
+    exists: bool,
+    size: u64,
+}
+
+fn transaction_stamp() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+}
+
+fn sibling_transaction_path(path: &Path, label: &str) -> Result<PathBuf, String> {
+    let parent = path
+        .parent()
+        .ok_or("Project path has no parent directory")?;
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("project");
+    Ok(parent.join(format!(
+        ".visual-python-{label}-{}-{name}",
+        transaction_stamp()
+    )))
+}
+
+fn validate_project_file_path(path: &Path) -> Result<(), String> {
+    if !path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("vpy"))
+    {
+        return Err("Visual Python project path must end in .vpy".into());
+    }
+    if !path.parent().is_some_and(Path::is_dir) {
+        return Err("Visual Python project directory does not exist".into());
+    }
+    Ok(())
+}
+
+fn replace_file_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
+    validate_project_file_path(path)?;
+    let staged = sibling_transaction_path(path, "staged")?;
+    let backup = sibling_transaction_path(path, "backup")?;
+    fs::write(&staged, contents)
+        .map_err(|error| format!("cannot stage Visual Python project: {error}"))?;
+    let had_existing = path.is_file();
+    if had_existing {
+        if let Err(error) = fs::rename(path, &backup) {
+            let _ = fs::remove_file(&staged);
+            return Err(format!("cannot back up Visual Python project: {error}"));
+        }
+    }
+    if let Err(error) = fs::rename(&staged, path) {
+        if had_existing {
+            let _ = fs::rename(&backup, path);
+        }
+        let _ = fs::remove_file(&staged);
+        return Err(format!("cannot replace Visual Python project: {error}"));
+    }
+    if had_existing {
+        let _ = fs::remove_file(backup);
+    }
+    Ok(())
+}
+
+fn update_project_resources<F>(project_path: &Path, update: F) -> Result<(), String>
+where
+    F: FnOnce(&mut Vec<Value>) -> Result<(), String>,
+{
+    let source = fs::read_to_string(project_path)
+        .map_err(|error| format!("cannot read Visual Python project: {error}"))?;
+    let mut project: Value = serde_json::from_str(&source)
+        .map_err(|error| format!("Visual Python project is not valid JSON: {error}"))?;
+    let object = project
+        .as_object_mut()
+        .ok_or("Visual Python project root must be an object")?;
+    let resources = object
+        .entry("resources")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or("Visual Python project resources must be an array")?;
+    update(resources)?;
+    let contents = serde_json::to_vec_pretty(&project)
+        .map_err(|error| format!("cannot serialize Visual Python project: {error}"))?;
+    replace_file_atomically(project_path, &contents)
+}
+
+fn imported_resource_value(resource: &ImportedProjectResource) -> Value {
+    serde_json::json!({
+        "id": resource.id,
+        "type": resource.r#type,
+        "path": resource.path,
+        "originalName": resource.original_name,
+        "size": resource.size,
+    })
+}
+
+fn value_contains_string(value: &Value, needle: &str) -> bool {
+    match value {
+        Value::String(text) => text == needle,
+        Value::Array(items) => items.iter().any(|item| value_contains_string(item, needle)),
+        Value::Object(object) => object
+            .values()
+            .any(|item| value_contains_string(item, needle)),
+        _ => false,
+    }
+}
+
+fn saved_project_uses_resource(project_path: &Path, resource_path: &str) -> Result<bool, String> {
+    let source = fs::read_to_string(project_path)
+        .map_err(|error| format!("cannot read Visual Python project: {error}"))?;
+    let project: Value = serde_json::from_str(&source)
+        .map_err(|error| format!("Visual Python project is not valid JSON: {error}"))?;
+    let resource_id = project
+        .get("resources")
+        .and_then(Value::as_array)
+        .and_then(|resources| {
+            resources.iter().find_map(|value| {
+                (value.get("path").and_then(Value::as_str) == Some(resource_path))
+                    .then(|| value.get("id").and_then(Value::as_str))
+                    .flatten()
+            })
+        });
+    Ok(resource_id.is_some_and(|id| {
+        project
+            .get("workspace")
+            .is_some_and(|workspace| value_contains_string(workspace, &format!("resource://{id}")))
+    }))
+}
+
+#[tauri::command]
+fn file_sha256(path: &Path) -> Result<[u8; 32], String> {
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(digest.finalize().into())
+}
+
+#[tauri::command]
+fn import_project_audio(
+    app: AppHandle,
+    project_path: String,
+    source_path: String,
+    existing_resources: Vec<ExistingProjectResource>,
+) -> Result<ImportedProjectResource, String> {
+    let project = PathBuf::from(&project_path);
+    let source = PathBuf::from(&source_path);
+    if !source.is_file() {
+        return Err("Selected audio file does not exist".to_string());
+    }
+    let project_stem = project
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or("Invalid project path")?;
+    let project_dir = project.parent().ok_or("Invalid project directory")?;
+    let audio_dir = project_dir
+        .join(format!("{project_stem}.assets"))
+        .join("audio");
+    fs::create_dir_all(&audio_dir).map_err(|error| error.to_string())?;
+    app.asset_protocol_scope()
+        .allow_directory(&audio_dir, true)
+        .map_err(|error| error.to_string())?;
+
+    let original_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or("Invalid audio file name")?
+        .to_string();
+    let source_hash = file_sha256(&source)?;
+    for resource in existing_resources {
+        let existing_path = project_resource_path(&project_path, &resource.path)?;
+        if existing_path.is_file()
+            && file_sha256(&existing_path).is_ok_and(|hash| hash == source_hash)
+        {
+            let size = fs::metadata(existing_path)
+                .map_err(|error| error.to_string())?
+                .len();
+            return Ok(ImportedProjectResource {
+                id: resource.id,
+                r#type: "audio".to_string(),
+                path: resource.path,
+                original_name: resource.original_name,
+                size,
+                deduplicated: true,
+            });
+        }
+    }
+    let stem = source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("audio");
+    let extension = source.extension().and_then(|value| value.to_str());
+    let mut file_name = original_name.clone();
+    let mut index = 2_u32;
+    while audio_dir.join(&file_name).exists() {
+        file_name = match extension {
+            Some(extension) => format!("{stem}-{index}.{extension}"),
+            None => format!("{stem}-{index}"),
+        };
+        index += 1;
+    }
+    let destination = audio_dir.join(&file_name);
+    let size = fs::copy(&source, &destination).map_err(|error| error.to_string())?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let id = format!("audio-{timestamp:x}");
+    let resource = ImportedProjectResource {
+        id,
+        r#type: "audio".to_string(),
+        path: format!("audio/{file_name}"),
+        original_name,
+        size,
+        deduplicated: false,
+    };
+    if let Err(error) = update_project_resources(&project, |resources| {
+        resources.push(imported_resource_value(&resource));
+        Ok(())
+    }) {
+        let _ = fs::remove_file(&destination);
+        return Err(error);
+    }
+    Ok(resource)
+}
+
+fn copy_directory_recursive(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_directory_recursive(&source_path, &destination_path)?;
+        } else {
+            fs::copy(&source_path, &destination_path).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn paths_equal_for_platform(left: &Path, right: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        left == right
+    }
+}
+
+fn rename_path_case_aware(source: &Path, destination: &Path) -> Result<(), String> {
+    if source == destination {
+        return Ok(());
+    }
+    if paths_equal_for_platform(source, destination) {
+        let temporary = sibling_transaction_path(source, "case-rename")?;
+        fs::rename(source, &temporary).map_err(|error| error.to_string())?;
+        if let Err(error) = fs::rename(&temporary, destination) {
+            let _ = fs::rename(&temporary, source);
+            return Err(error.to_string());
+        }
+        return Ok(());
+    }
+    fs::rename(source, destination).map_err(|error| error.to_string())
+}
+
+fn project_assets_path(project: &Path) -> Result<PathBuf, String> {
+    let stem = project
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or("Invalid project path")?;
+    Ok(project
+        .parent()
+        .ok_or("Invalid project directory")?
+        .join(format!("{stem}.assets")))
+}
+
+#[tauri::command]
+fn write_project_file(project_path: String, contents: String) -> Result<(), String> {
+    replace_file_atomically(Path::new(&project_path), contents.as_bytes())
+}
+
+#[tauri::command]
+fn save_project_as(
+    source_project_path: Option<String>,
+    destination_project_path: String,
+    contents: String,
+) -> Result<(), String> {
+    let destination = PathBuf::from(destination_project_path);
+    validate_project_file_path(&destination)?;
+    let source = source_project_path.as_deref().map(PathBuf::from);
+    if source
+        .as_ref()
+        .is_some_and(|path| paths_equal_for_platform(path, &destination))
+    {
+        return replace_file_atomically(&destination, contents.as_bytes());
+    }
+
+    let staged_project = sibling_transaction_path(&destination, "save-as-project")?;
+    let backup_project = sibling_transaction_path(&destination, "save-as-project-backup")?;
+    fs::write(&staged_project, contents.as_bytes())
+        .map_err(|error| format!("cannot stage Visual Python project: {error}"))?;
+
+    let destination_assets = project_assets_path(&destination)?;
+    let staged_assets = sibling_transaction_path(&destination_assets, "save-as-assets")?;
+    let backup_assets = sibling_transaction_path(&destination_assets, "save-as-assets-backup")?;
+    let source_assets = source.as_deref().map(project_assets_path).transpose()?;
+    let has_staged_assets = source_assets.as_ref().is_some_and(|path| path.is_dir());
+    if has_staged_assets {
+        if let Err(error) =
+            copy_directory_recursive(source_assets.as_ref().unwrap(), &staged_assets)
+        {
+            let _ = fs::remove_file(&staged_project);
+            let _ = fs::remove_dir_all(&staged_assets);
+            return Err(error);
+        }
+    }
+    if destination_assets.exists() && !destination_assets.is_dir() {
+        let _ = fs::remove_file(&staged_project);
+        let _ = fs::remove_dir_all(&staged_assets);
+        return Err("destination project resources path is not a directory".into());
+    }
+
+    let had_project = destination.is_file();
+    let had_assets = destination_assets.is_dir();
+    if had_project {
+        if let Err(error) = fs::rename(&destination, &backup_project) {
+            let _ = fs::remove_file(&staged_project);
+            let _ = fs::remove_dir_all(&staged_assets);
+            return Err(format!("cannot back up destination project: {error}"));
+        }
+    }
+    if had_assets {
+        if let Err(error) = fs::rename(&destination_assets, &backup_assets) {
+            if had_project {
+                let _ = fs::rename(&backup_project, &destination);
+            }
+            let _ = fs::remove_file(&staged_project);
+            let _ = fs::remove_dir_all(&staged_assets);
+            return Err(format!(
+                "cannot back up destination project resources: {error}"
+            ));
+        }
+    }
+
+    let commit = (|| -> Result<(), String> {
+        if has_staged_assets {
+            fs::rename(&staged_assets, &destination_assets)
+                .map_err(|error| format!("cannot install project resources: {error}"))?;
+        }
+        fs::rename(&staged_project, &destination)
+            .map_err(|error| format!("cannot install Visual Python project: {error}"))?;
+        Ok(())
+    })();
+    if let Err(error) = commit {
+        if destination.is_file() {
+            let _ = fs::remove_file(&destination);
+        }
+        if destination_assets.is_dir() {
+            let _ = fs::remove_dir_all(&destination_assets);
+        }
+        if had_project {
+            let _ = fs::rename(&backup_project, &destination);
+        }
+        if had_assets {
+            let _ = fs::rename(&backup_assets, &destination_assets);
+        }
+        let _ = fs::remove_file(&staged_project);
+        let _ = fs::remove_dir_all(&staged_assets);
+        return Err(error);
+    }
+    if had_project {
+        let _ = fs::remove_file(backup_project);
+    }
+    if had_assets {
+        let _ = fs::remove_dir_all(backup_assets);
+    }
+    Ok(())
+}
+
+fn project_resource_path(project_path: &str, resource_path: &str) -> Result<PathBuf, String> {
+    let project = PathBuf::from(project_path);
+    let stem = project
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or("Invalid project path")?;
+    let relative = Path::new(resource_path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err("Invalid project resource path".to_string());
+    }
+    Ok(project
+        .parent()
+        .ok_or("Invalid project directory")?
+        .join(format!("{stem}.assets"))
+        .join(relative))
+}
+
+fn allow_project_resource_directory(app: &AppHandle, project_path: &str) -> Result<(), String> {
+    let project = PathBuf::from(project_path);
+    let stem = project
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or("Invalid project path")?;
+    let assets = project
+        .parent()
+        .ok_or("Invalid project directory")?
+        .join(format!("{stem}.assets"));
+    if assets.is_dir() {
+        app.asset_protocol_scope()
+            .allow_directory(&assets, true)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn replace_project_audio(
+    app: AppHandle,
+    project_path: String,
+    resource_path: String,
+    source_path: String,
+) -> Result<ImportedProjectResource, String> {
+    let project = PathBuf::from(&project_path);
+    let source = PathBuf::from(&source_path);
+    if !source.is_file() {
+        return Err("Selected audio file does not exist".to_string());
+    }
+    let original_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or("Invalid audio file name")?
+        .to_string();
+    let destination = project_resource_path(&project_path, &resource_path)?;
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    allow_project_resource_directory(&app, &project_path)?;
+    let same_file = source
+        .canonicalize()
+        .ok()
+        .zip(destination.canonicalize().ok())
+        .is_some_and(|(left, right)| left == right);
+    let backup = sibling_transaction_path(&destination, "resource-backup")?;
+    let staged = sibling_transaction_path(&destination, "resource-staged")?;
+    let had_existing = destination.is_file();
+    let size = if same_file {
+        fs::metadata(&source)
+            .map_err(|error| error.to_string())?
+            .len()
+    } else {
+        fs::copy(&source, &staged).map_err(|error| error.to_string())?;
+        if had_existing {
+            if let Err(error) = fs::rename(&destination, &backup) {
+                let _ = fs::remove_file(&staged);
+                return Err(error.to_string());
+            }
+        }
+        if let Err(error) = fs::rename(&staged, &destination) {
+            if had_existing {
+                let _ = fs::rename(&backup, &destination);
+            }
+            let _ = fs::remove_file(&staged);
+            return Err(error.to_string());
+        }
+        match fs::metadata(&destination) {
+            Ok(metadata) => metadata.len(),
+            Err(error) => {
+                let _ = fs::remove_file(&destination);
+                if had_existing {
+                    let _ = fs::rename(&backup, &destination);
+                }
+                return Err(error.to_string());
+            }
+        }
+    };
+    let resource = ImportedProjectResource {
+        id: String::new(),
+        r#type: "audio".to_string(),
+        path: resource_path.clone(),
+        original_name,
+        size,
+        deduplicated: false,
+    };
+    if let Err(error) = update_project_resources(&project, |resources| {
+        let Some(existing) = resources.iter_mut().find(|value| {
+            value.get("path").and_then(Value::as_str) == Some(resource_path.as_str())
+        }) else {
+            return Err("Project resource metadata does not exist".into());
+        };
+        existing["originalName"] = Value::String(resource.original_name.clone());
+        existing["size"] = Value::Number(resource.size.into());
+        Ok(())
+    }) {
+        if !same_file {
+            let _ = fs::remove_file(&destination);
+            if had_existing {
+                let _ = fs::rename(&backup, &destination);
+            }
+        }
+        return Err(error);
+    }
+    if had_existing && !same_file {
+        let _ = fs::remove_file(backup);
+    }
+    Ok(resource)
+}
+
+#[tauri::command]
+fn inspect_project_resources(
+    app: AppHandle,
+    project_path: String,
+    resource_paths: Vec<String>,
+) -> Result<Vec<ProjectResourceStatus>, String> {
+    allow_project_resource_directory(&app, &project_path)?;
+    resource_paths
+        .into_iter()
+        .map(|resource_path| {
+            let path = project_resource_path(&project_path, &resource_path)?;
+            let metadata = fs::metadata(path)
+                .ok()
+                .filter(|metadata| metadata.is_file());
+            Ok(ProjectResourceStatus {
+                path: resource_path,
+                exists: metadata.is_some(),
+                size: metadata.map(|value| value.len()).unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn delete_project_resource(project_path: String, resource_path: String) -> Result<(), String> {
+    let project = PathBuf::from(&project_path);
+    if saved_project_uses_resource(&project, &resource_path)? {
+        return Err("请先保存已移除资源引用的工程，再重试".into());
+    }
+    let path = project_resource_path(&project_path, &resource_path)?;
+    let backup = sibling_transaction_path(&path, "resource-deleted")?;
+    if path.is_file() {
+        fs::rename(&path, &backup).map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = update_project_resources(&project, |resources| {
+        resources.retain(|value| {
+            value.get("path").and_then(Value::as_str) != Some(resource_path.as_str())
+        });
+        Ok(())
+    }) {
+        if backup.is_file() {
+            let _ = fs::rename(&backup, &path);
+        }
+        return Err(error);
+    }
+    if backup.is_file() {
+        let _ = fs::remove_file(backup);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn reveal_project_resource(project_path: String, resource_path: String) -> Result<(), String> {
+    let path = project_resource_path(&project_path, &resource_path)?;
+    if !path.is_file() {
+        return Err("Project resource does not exist".to_string());
+    }
+    reveal_video_in_folder(path.to_string_lossy().into_owned())
+}
 
 #[derive(Clone, Serialize)]
 struct PythonOutput {
@@ -48,12 +767,14 @@ struct PackageInstallFinished {
 
 #[derive(Clone, Serialize)]
 struct ManimOutput {
+    task_id: u64,
     stream: &'static str,
     data: String,
 }
 
 #[derive(Clone, Serialize)]
 struct ManimFinished {
+    task_id: u64,
     success: bool,
     stopped: bool,
     scene: String,
@@ -68,6 +789,14 @@ struct ManimStorageInfo {
     path: String,
     size_bytes: u64,
     render_count: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TtsCacheInfo {
+    path: String,
+    size_bytes: u64,
+    clip_count: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -98,6 +827,1279 @@ struct PythonPackageStatus {
     installed: bool,
 }
 
+fn validate_tts_url(value: &str) -> Result<String, String> {
+    let value = value.trim().trim_end_matches('/');
+    if value.is_empty() {
+        return Err("尚未配置配音接口地址，请在 Manim 设置的视频配音中填写百炼接口地址".into());
+    }
+    let parsed = url::Url::parse(value).map_err(|_| "配音接口地址无效".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("配音接口只支持 HTTP 或 HTTPS".into());
+    }
+    Ok(value.to_string())
+}
+
+fn openai_speech_endpoint(base_url: &str) -> String {
+    let lower = base_url.to_ascii_lowercase();
+    if lower.ends_with("/audio/speech") {
+        base_url.to_string()
+    } else if lower.ends_with("/chat/completions") {
+        format!(
+            "{}/audio/speech",
+            &base_url[..base_url.len() - "/chat/completions".len()]
+        )
+    } else if lower.ends_with("/v1") {
+        format!("{base_url}/audio/speech")
+    } else {
+        format!("{base_url}/v1/audio/speech")
+    }
+}
+
+fn openai_chat_endpoint(base_url: &str) -> String {
+    let lower = base_url.to_ascii_lowercase();
+    if lower.ends_with("/chat/completions") {
+        base_url.to_string()
+    } else if lower.ends_with("/audio/speech") {
+        format!(
+            "{}/chat/completions",
+            &base_url[..base_url.len() - "/audio/speech".len()]
+        )
+    } else if lower.ends_with("/v1") {
+        format!("{base_url}/chat/completions")
+    } else {
+        format!("{base_url}/v1/chat/completions")
+    }
+}
+
+fn uses_openai_chat_audio(base_url: &str) -> bool {
+    let lower = base_url.to_ascii_lowercase();
+    lower.ends_with("/chat/completions")
+        || (lower.contains(".maas.aliyuncs.com/") && lower.contains("/compatible-mode/v1"))
+}
+
+fn bailian_speech_endpoint(base_url: &str) -> String {
+    let lower = base_url.to_ascii_lowercase();
+    if lower.ends_with("/speechsynthesizer") {
+        base_url.to_string()
+    } else if lower.ends_with("/api/v1") {
+        format!("{base_url}/services/audio/tts/SpeechSynthesizer")
+    } else {
+        format!("{base_url}/api/v1/services/audio/tts/SpeechSynthesizer")
+    }
+}
+
+fn tts_speed_instruction(speed: f32) -> Option<&'static str> {
+    if speed <= 0.7 {
+        Some("请使用很慢且清晰的语速朗读。")
+    } else if speed < 0.95 {
+        Some("请使用稍慢且清晰的语速朗读。")
+    } else if speed > 1.3 {
+        Some("请使用较快但保持清晰的语速朗读。")
+    } else if speed > 1.05 {
+        Some("请使用稍快且清晰的语速朗读。")
+    } else {
+        None
+    }
+}
+
+fn is_bailian_voice_compatible(model: &str, voice: &str) -> bool {
+    match model {
+        "qwen-audio-3.0-tts-plus" => matches!(voice, "longanlingxin" | "longanlufeng"),
+        "qwen-audio-3.0-tts-flash" => matches!(
+            voice,
+            "longanfengyue"
+                | "longanyuanfei"
+                | "longanlingxi"
+                | "longanxiaoxin"
+                | "longanhuan_v3.6"
+                | "longjielidou_v3.6"
+                | "longpaopao_v3.6"
+                | "longhuohuo_v3.6"
+                | "longchuanshu_v3.6"
+                | "loongmary"
+                | "loongeva_v3.6"
+                | "loongjohn"
+        ),
+        _ => false,
+    }
+}
+
+fn find_audio_url(value: &Value) -> Option<&str> {
+    match value {
+        Value::Object(object) => {
+            for key in ["url", "audio_url", "audioUrl"] {
+                if let Some(Value::String(url)) = object.get(key) {
+                    if url.starts_with("http://") || url.starts_with("https://") {
+                        return Some(url);
+                    }
+                }
+            }
+            object.values().find_map(find_audio_url)
+        }
+        Value::Array(items) => items.iter().find_map(find_audio_url),
+        _ => None,
+    }
+}
+
+fn find_audio_base64(value: &Value) -> Option<&str> {
+    match value {
+        Value::Object(object) => {
+            if let Some(Value::Object(audio)) = object.get("audio") {
+                if let Some(Value::String(data)) = audio.get("data") {
+                    return Some(data);
+                }
+            }
+            object.values().find_map(find_audio_base64)
+        }
+        Value::Array(items) => items.iter().find_map(find_audio_base64),
+        _ => None,
+    }
+}
+
+fn tts_error_body(body: &str) -> String {
+    let compact = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    compact.chars().take(500).collect()
+}
+
+fn tts_cache_key(config: &TtsConfig, text: &str, format: &str) -> String {
+    let mut digest = Sha256::new();
+    for value in [
+        "visual-python-tts-v1",
+        config.provider.as_str(),
+        config.base_url.trim().trim_end_matches('/'),
+        config.model.as_str(),
+        config.voice.as_str(),
+        format,
+        text,
+    ] {
+        digest.update(value.as_bytes());
+        digest.update([0]);
+    }
+    digest.update(config.speed.to_bits().to_le_bytes());
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn wav_duration_seconds(audio: &[u8]) -> Option<f64> {
+    if audio.len() < 12 || &audio[0..4] != b"RIFF" || &audio[8..12] != b"WAVE" {
+        return None;
+    }
+    let mut offset = 12usize;
+    let mut byte_rate = None;
+    let mut data_size = None;
+    while offset.checked_add(8)? <= audio.len() {
+        let id = &audio[offset..offset + 4];
+        let size = u32::from_le_bytes(audio[offset + 4..offset + 8].try_into().ok()?) as usize;
+        let data_start = offset + 8;
+        let available = audio.len().saturating_sub(data_start);
+        if id == b"data" && size > available {
+            data_size = Some(available as u64);
+            break;
+        }
+        if size > available {
+            return None;
+        }
+        if id == b"fmt " && size >= 12 {
+            byte_rate = Some(u32::from_le_bytes(
+                audio[data_start + 8..data_start + 12].try_into().ok()?,
+            ));
+        } else if id == b"data" {
+            data_size = Some(size as u64);
+        }
+        offset = data_start + size + (size % 2);
+    }
+    let rate = byte_rate?;
+    if rate == 0 {
+        return None;
+    }
+    Some(data_size? as f64 / rate as f64)
+}
+
+const TTS_CREDENTIAL_SERVICE: &str = "Visual Python TTS";
+
+fn tts_credential_account(config: &TtsConfig) -> String {
+    format!(
+        "{}@{}",
+        config.provider.trim().to_ascii_lowercase(),
+        config
+            .base_url
+            .trim()
+            .trim_end_matches('/')
+            .to_ascii_lowercase()
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn load_stored_tts_api_key(config: &TtsConfig) -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new(TTS_CREDENTIAL_SERVICE, &tts_credential_account(config))
+        .map_err(|error| format!("无法访问配音凭据：{error}"))?;
+    match entry.get_password() {
+        Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(format!("无法读取配音凭据：{error}")),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn load_stored_tts_api_key(_config: &TtsConfig) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+#[cfg(target_os = "windows")]
+fn store_tts_api_key(config: &TtsConfig, api_key: &str) -> Result<(), String> {
+    keyring::Entry::new(TTS_CREDENTIAL_SERVICE, &tts_credential_account(config))
+        .map_err(|error| format!("无法访问配音凭据：{error}"))?
+        .set_password(api_key)
+        .map_err(|error| format!("无法保存配音凭据：{error}"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn store_tts_api_key(_config: &TtsConfig, _api_key: &str) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn delete_stored_tts_api_key(config: &TtsConfig) -> Result<(), String> {
+    let entry = keyring::Entry::new(TTS_CREDENTIAL_SERVICE, &tts_credential_account(config))
+        .map_err(|error| format!("无法访问配音凭据：{error}"))?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(format!("无法删除配音凭据：{error}")),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn delete_stored_tts_api_key(_config: &TtsConfig) -> Result<(), String> {
+    Ok(())
+}
+
+fn tts_environment_api_key(config: &TtsConfig) -> Option<String> {
+    let variable = if config.provider == "aliyun-bailian" {
+        "DASHSCOPE_API_KEY"
+    } else {
+        "OPENAI_API_KEY"
+    };
+    std::env::var(variable)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[tauri::command]
+fn has_tts_api_key(config: TtsConfig) -> Result<bool, String> {
+    Ok(load_stored_tts_api_key(&config)?.is_some())
+}
+
+#[tauri::command]
+fn clear_tts_api_key(config: TtsConfig) -> Result<(), String> {
+    delete_stored_tts_api_key(&config)
+}
+
+const AI_CREDENTIAL_SERVICE: &str = "Visual Python AI";
+
+fn validate_ai_base_url(value: &str) -> Result<String, String> {
+    let value = value.trim().trim_end_matches('/');
+    if value.is_empty() || value.len() > 1000 {
+        return Err("AI 请求地址不能为空且不能超过 1000 个字符".into());
+    }
+    let parsed = url::Url::parse(value).map_err(|_| "AI 请求地址无效".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("AI 请求地址只支持 HTTP 或 HTTPS".into());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("AI 请求地址不能包含用户名或密码".into());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("AI 请求地址不能包含查询参数或片段".into());
+    }
+    if parsed.host_str().is_none() {
+        return Err("AI 请求地址缺少主机名".into());
+    }
+    Ok(value.to_string())
+}
+
+fn ai_credential_account(base_url: &str) -> Result<String, String> {
+    Ok(validate_ai_base_url(base_url)?.to_ascii_lowercase())
+}
+
+#[cfg(target_os = "windows")]
+fn load_stored_ai_api_key(base_url: &str) -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new(AI_CREDENTIAL_SERVICE, &ai_credential_account(base_url)?)
+        .map_err(|error| format!("无法访问 AI 凭据：{error}"))?;
+    match entry.get_password() {
+        Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(format!("无法读取 AI 凭据：{error}")),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn load_stored_ai_api_key(_base_url: &str) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+#[cfg(target_os = "windows")]
+fn store_ai_api_key(base_url: &str, api_key: &str) -> Result<(), String> {
+    keyring::Entry::new(AI_CREDENTIAL_SERVICE, &ai_credential_account(base_url)?)
+        .map_err(|error| format!("无法访问 AI 凭据：{error}"))?
+        .set_password(api_key)
+        .map_err(|error| format!("无法保存 AI 凭据：{error}"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn store_ai_api_key(_base_url: &str, _api_key: &str) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn delete_stored_ai_api_key(base_url: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(AI_CREDENTIAL_SERVICE, &ai_credential_account(base_url)?)
+        .map_err(|error| format!("无法访问 AI 凭据：{error}"))?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(format!("无法删除 AI 凭据：{error}")),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn delete_stored_ai_api_key(_base_url: &str) -> Result<(), String> {
+    Ok(())
+}
+
+fn ai_environment_api_key(base_url: &str) -> Option<String> {
+    let variable = url::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .filter(|host| host.contains("dashscope.aliyuncs.com"))
+        .map(|_| "DASHSCOPE_API_KEY")
+        .unwrap_or("OPENAI_API_KEY");
+    std::env::var(variable)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn ai_error_body(body: &str) -> String {
+    if let Ok(payload) = serde_json::from_str::<Value>(body) {
+        if let Some(message) = payload
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+        {
+            return message.chars().take(800).collect();
+        }
+        if let Some(message) = payload.get("message").and_then(Value::as_str) {
+            return message.chars().take(800).collect();
+        }
+    }
+    body.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(800)
+        .collect()
+}
+
+fn ai_text_content(content: &Value) -> Option<String> {
+    if let Some(text) = content.as_str() {
+        return Some(text.to_string());
+    }
+    let parts = content.as_array()?;
+    let text = parts
+        .iter()
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("");
+    (!text.is_empty()).then_some(text)
+}
+
+fn ai_message_content(payload: &Value) -> Option<String> {
+    let content = payload
+        .get("choices")?
+        .as_array()?
+        .first()?
+        .get("message")?
+        .get("content")?;
+    ai_text_content(content)
+}
+
+fn ai_message_tool_calls(payload: &Value) -> Vec<AiToolCall> {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("tool_calls"))
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
+}
+
+fn merge_ai_stream_tool_calls(payload: &Value, calls: &mut Vec<AiToolCallAccumulator>) {
+    let Some(deltas) = payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("delta"))
+        .and_then(|delta| delta.get("tool_calls"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for (fallback_index, delta) in deltas.iter().enumerate() {
+        let index = delta
+            .get("index")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize)
+            .unwrap_or(fallback_index);
+        while calls.len() <= index {
+            calls.push(AiToolCallAccumulator::default());
+        }
+        let call = &mut calls[index];
+        if let Some(value) = delta.get("id").and_then(Value::as_str) {
+            call.id.push_str(value);
+        }
+        if let Some(value) = delta.get("type").and_then(Value::as_str) {
+            call.kind.push_str(value);
+        }
+        if let Some(function) = delta.get("function") {
+            if let Some(value) = function.get("name").and_then(Value::as_str) {
+                call.name.push_str(value);
+            }
+            if let Some(value) = function.get("arguments").and_then(Value::as_str) {
+                call.arguments.push_str(value);
+            }
+        }
+    }
+}
+
+fn ai_stream_tool_argument_deltas(payload: &Value) -> Vec<(usize, Option<String>, String)> {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("delta"))
+        .and_then(|delta| delta.get("tool_calls"))
+        .and_then(Value::as_array)
+        .map(|deltas| {
+            deltas
+                .iter()
+                .enumerate()
+                .filter_map(|(fallback_index, delta)| {
+                    let function = delta.get("function")?;
+                    let arguments = function.get("arguments").and_then(Value::as_str)?;
+                    if arguments.is_empty() {
+                        return None;
+                    }
+                    Some((
+                        delta
+                            .get("index")
+                            .and_then(Value::as_u64)
+                            .map(|value| value as usize)
+                            .unwrap_or(fallback_index),
+                        function
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                        arguments.to_owned(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn finish_ai_stream_tool_calls(calls: Vec<AiToolCallAccumulator>) -> Vec<AiToolCall> {
+    calls
+        .into_iter()
+        .enumerate()
+        .filter(|(_, call)| !call.name.trim().is_empty())
+        .map(|(index, call)| AiToolCall {
+            id: if call.id.trim().is_empty() {
+                format!("call-{index}")
+            } else {
+                call.id
+            },
+            kind: if call.kind.trim().is_empty() {
+                "function".into()
+            } else {
+                call.kind
+            },
+            function: AiToolFunctionCall {
+                name: call.name,
+                arguments: call.arguments,
+            },
+        })
+        .collect()
+}
+
+fn ai_stream_delta(payload: &Value) -> Option<String> {
+    let content = payload
+        .get("choices")?
+        .as_array()?
+        .first()?
+        .get("delta")?
+        .get("content")?;
+    ai_text_content(content)
+}
+
+fn ai_stream_reasoning_delta(payload: &Value) -> Option<&str> {
+    payload
+        .get("choices")?
+        .as_array()?
+        .first()?
+        .get("delta")?
+        .get("reasoning_content")?
+        .as_str()
+}
+
+fn ai_stream_finish_reason(payload: &Value) -> Option<&str> {
+    payload
+        .get("choices")?
+        .as_array()?
+        .first()?
+        .get("finish_reason")?
+        .as_str()
+}
+
+fn should_disable_ai_thinking(base_url: &str, model: &str) -> bool {
+    let is_aliyun = url::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| host == "aliyuncs.com" || host.ends_with(".aliyuncs.com"));
+    let model = model.to_ascii_lowercase();
+    is_aliyun && (model.starts_with("qwen") || model.starts_with("qwq"))
+}
+
+fn sse_event_boundary(buffer: &[u8]) -> Option<(usize, usize)> {
+    let lf = buffer.windows(2).position(|window| window == b"\n\n");
+    let crlf = buffer.windows(4).position(|window| window == b"\r\n\r\n");
+    match (lf, crlf) {
+        (Some(left), Some(right)) if left <= right => Some((left, 2)),
+        (Some(_), Some(right)) => Some((right, 4)),
+        (Some(index), None) => Some((index, 2)),
+        (None, Some(index)) => Some((index, 4)),
+        (None, None) => None,
+    }
+}
+
+fn take_sse_events(buffer: &mut Vec<u8>) -> Vec<String> {
+    let mut events = Vec::new();
+    while let Some((index, delimiter_length)) = sse_event_boundary(buffer) {
+        let event = buffer.drain(..index).collect::<Vec<_>>();
+        buffer.drain(..delimiter_length);
+        if let Ok(text) = String::from_utf8(event) {
+            let data = text
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:"))
+                .map(str::trim_start)
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !data.is_empty() {
+                events.push(data);
+            }
+        }
+    }
+    events
+}
+
+async fn perform_ai_chat_completion(
+    config: AiModelConfig,
+    messages: Vec<AiChatMessage>,
+    tools: Option<Vec<Value>>,
+    api_key: Option<String>,
+    max_tokens: u32,
+    stream_target: Option<AiStreamTarget>,
+) -> Result<AiChatCompletionResult, String> {
+    let base_url = validate_ai_base_url(&config.base_url)?;
+    let model = config.model.trim();
+    if model.is_empty() || model.chars().count() > 200 {
+        return Err("模型名称不能为空且不能超过 200 个字符".into());
+    }
+    if messages.is_empty() || messages.len() > 100 {
+        return Err("AI 请求需要包含 1 到 100 条消息".into());
+    }
+    let mut total_characters = 0usize;
+    for message in &messages {
+        if !matches!(
+            message.role.as_str(),
+            "system" | "user" | "assistant" | "tool"
+        ) {
+            return Err("AI 消息角色只支持 system、user、assistant 或 tool".into());
+        }
+        let length = message
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .chars()
+            .count();
+        let has_tool_calls = message
+            .tool_calls
+            .as_ref()
+            .is_some_and(|calls| !calls.is_empty());
+        if (length == 0 && !(message.role == "assistant" && has_tool_calls)) || length > 50_000 {
+            return Err("单条 AI 消息需要包含 1 到 50000 个字符，或包含 assistant 工具调用".into());
+        }
+        if message.role == "tool"
+            && message
+                .tool_call_id
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+        {
+            return Err("tool 消息必须包含 toolCallId".into());
+        }
+        total_characters = total_characters.saturating_add(length);
+        if let Some(calls) = &message.tool_calls {
+            if calls.len() > 16 {
+                return Err("单条 assistant 消息最多包含 16 个工具调用".into());
+            }
+            for call in calls {
+                if call.id.trim().is_empty() || call.function.name.trim().is_empty() {
+                    return Err("AI 工具调用缺少 ID 或函数名称".into());
+                }
+                total_characters =
+                    total_characters.saturating_add(call.function.arguments.chars().count());
+            }
+        }
+    }
+    if total_characters > 200_000 {
+        return Err("AI 请求消息总长度不能超过 200000 个字符".into());
+    }
+
+    let supplied_key = api_key
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let key = supplied_key
+        .clone()
+        .or(load_stored_ai_api_key(&base_url)?)
+        .or_else(|| ai_environment_api_key(&base_url))
+        .ok_or_else(|| "请先填写 API Key".to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|error| format!("无法创建 AI 请求：{error}"))?;
+    if let Some(definitions) = &tools {
+        if definitions.is_empty() || definitions.len() > 128 {
+            return Err("Function Calling 工具数量需要在 1 到 128 之间".into());
+        }
+        let serialized_length = serde_json::to_string(definitions)
+            .map_err(|error| format!("Function Calling 工具定义无效：{error}"))?
+            .chars()
+            .count();
+        if serialized_length > 120_000 {
+            return Err("Function Calling 工具定义总长度不能超过 120000 个字符".into());
+        }
+    }
+    let request_messages = messages
+        .iter()
+        .map(|message| {
+            let mut value = serde_json::json!({
+                "role": message.role,
+                "content": message.content
+            });
+            if let Some(tool_call_id) = &message.tool_call_id {
+                value["tool_call_id"] = Value::String(tool_call_id.clone());
+            }
+            if let Some(tool_calls) = &message.tool_calls {
+                value["tool_calls"] = serde_json::to_value(tool_calls).unwrap_or(Value::Null);
+            }
+            value
+        })
+        .collect::<Vec<_>>();
+    let mut request_body = serde_json::json!({
+        "model": model,
+        "messages": request_messages,
+        "max_tokens": max_tokens,
+        "stream": stream_target.is_some()
+    });
+    if should_disable_ai_thinking(&base_url, model) {
+        request_body["enable_thinking"] = Value::Bool(false);
+    }
+    if let Some(definitions) = tools {
+        request_body["tools"] = Value::Array(definitions);
+        request_body["tool_choice"] = Value::String("auto".into());
+    }
+    let request = client
+        .post(openai_chat_endpoint(&base_url))
+        .bearer_auth(&key)
+        .json(&request_body);
+    let cancellation = stream_target
+        .as_ref()
+        .map(|target| target.cancellation.clone());
+    let send = request.send();
+    let mut response = match cancellation.as_ref() {
+        Some(cancellation) => tokio::select! {
+            result = send => result.map_err(|error| format!("AI 请求失败：{error}"))?,
+            _ = cancellation.wait() => return Err("AI 生成已停止".into()),
+        },
+        None => send
+            .await
+            .map_err(|error| format!("AI 请求失败：{error}"))?,
+    };
+    let status = response.status();
+    if !status.is_success() {
+        let body = response
+            .text()
+            .await
+            .map_err(|error| format!("无法读取 AI 响应：{error}"))?;
+        return Err(format!(
+            "AI 请求失败（HTTP {}）：{}",
+            status.as_u16(),
+            ai_error_body(&body)
+        ));
+    }
+    if let Some(target) = stream_target {
+        let mut buffer = Vec::new();
+        let mut content = String::new();
+        let mut response_model = model.to_string();
+        let mut prompt_tokens = None;
+        let mut completion_tokens = None;
+        let mut total_tokens = None;
+        let mut finish_reason = None::<String>;
+        let mut received_reasoning = false;
+        let mut streamed_tool_calls = Vec::<AiToolCallAccumulator>::new();
+        loop {
+            let next_chunk = response.chunk();
+            let chunk = tokio::select! {
+                result = next_chunk => result.map_err(|error| format!("读取 AI 流式响应失败：{error}"))?,
+                _ = target.cancellation.wait() => return Err("AI 生成已停止".into()),
+            };
+            let Some(chunk) = chunk else {
+                break;
+            };
+            buffer.extend_from_slice(&chunk);
+            for data in take_sse_events(&mut buffer) {
+                if data == "[DONE]" {
+                    continue;
+                }
+                let payload: Value = serde_json::from_str(&data)
+                    .map_err(|_| "AI 服务返回了无效的流式 JSON".to_string())?;
+                if let Some(message) = payload
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(Value::as_str)
+                {
+                    return Err(format!("AI 请求失败：{message}"));
+                }
+                if let Some(value) = payload.get("model").and_then(Value::as_str) {
+                    response_model = value.to_string();
+                }
+                if ai_stream_reasoning_delta(&payload).is_some_and(|value| !value.is_empty()) {
+                    received_reasoning = true;
+                }
+                if let Some(value) = ai_stream_finish_reason(&payload) {
+                    finish_reason = Some(value.to_string());
+                }
+                for (tool_index, tool_name, delta) in ai_stream_tool_argument_deltas(&payload) {
+                    target
+                        .app
+                        .emit(
+                            "ai-chat-stream",
+                            AiChatStreamEvent {
+                                request_id: target.request_id.clone(),
+                                channel: "toolArguments".into(),
+                                delta,
+                                tool_index: Some(tool_index),
+                                tool_name,
+                            },
+                        )
+                        .map_err(|error| format!("无法发送 AI 工具参数流：{error}"))?;
+                }
+                merge_ai_stream_tool_calls(&payload, &mut streamed_tool_calls);
+                if let Some(delta) = ai_stream_delta(&payload) {
+                    content.push_str(&delta);
+                    target
+                        .app
+                        .emit(
+                            "ai-chat-stream",
+                            AiChatStreamEvent {
+                                request_id: target.request_id.clone(),
+                                channel: "content".into(),
+                                delta,
+                                tool_index: None,
+                                tool_name: None,
+                            },
+                        )
+                        .map_err(|error| format!("无法发送 AI 流式内容：{error}"))?;
+                }
+                if let Some(usage) = payload.get("usage") {
+                    prompt_tokens = usage.get("prompt_tokens").and_then(Value::as_u64);
+                    completion_tokens = usage.get("completion_tokens").and_then(Value::as_u64);
+                    total_tokens = usage.get("total_tokens").and_then(Value::as_u64);
+                }
+            }
+        }
+        if !buffer.is_empty() {
+            buffer.extend_from_slice(b"\n\n");
+            for data in take_sse_events(&mut buffer) {
+                if data == "[DONE]" {
+                    continue;
+                }
+                let payload: Value = serde_json::from_str(&data)
+                    .map_err(|_| "AI 服务返回了无效的流式 JSON".to_string())?;
+                for (tool_index, tool_name, delta) in ai_stream_tool_argument_deltas(&payload) {
+                    target
+                        .app
+                        .emit(
+                            "ai-chat-stream",
+                            AiChatStreamEvent {
+                                request_id: target.request_id.clone(),
+                                channel: "toolArguments".into(),
+                                delta,
+                                tool_index: Some(tool_index),
+                                tool_name,
+                            },
+                        )
+                        .map_err(|error| format!("无法发送 AI 工具参数流：{error}"))?;
+                }
+                merge_ai_stream_tool_calls(&payload, &mut streamed_tool_calls);
+                if let Some(delta) = ai_stream_delta(&payload) {
+                    content.push_str(&delta);
+                    target
+                        .app
+                        .emit(
+                            "ai-chat-stream",
+                            AiChatStreamEvent {
+                                request_id: target.request_id.clone(),
+                                channel: "content".into(),
+                                delta,
+                                tool_index: None,
+                                tool_name: None,
+                            },
+                        )
+                        .map_err(|error| format!("无法发送 AI 流式内容：{error}"))?;
+                }
+            }
+        }
+        if finish_reason.as_deref() == Some("length") {
+            return Err(format!(
+                "AI 响应达到 {max_tokens} token 上限，请缩小任务或提高输出限制"
+            ));
+        }
+        let content = content.trim().to_string();
+        let tool_calls = finish_ai_stream_tool_calls(streamed_tool_calls);
+        if content.is_empty() && tool_calls.is_empty() && received_reasoning {
+            return Err("AI 只返回了思考过程，没有生成最终内容，请关闭模型思考模式后重试".into());
+        }
+        if content.is_empty() && tool_calls.is_empty() {
+            return Err("AI 流式响应中没有找到文本或工具调用".into());
+        }
+        if let Some(value) = supplied_key.as_deref() {
+            store_ai_api_key(&base_url, value)?;
+        }
+        return Ok(AiChatCompletionResult {
+            content,
+            tool_calls,
+            model: response_model,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+        });
+    }
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("无法读取 AI 响应：{error}"))?;
+    let payload: Value =
+        serde_json::from_str(&body).map_err(|_| "AI 服务没有返回有效的 JSON 响应".to_string())?;
+    let content = ai_message_content(&payload)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_default();
+    let tool_calls = ai_message_tool_calls(&payload);
+    if content.is_empty() && tool_calls.is_empty() {
+        return Err("AI 响应中没有找到文本或工具调用".into());
+    }
+    if let Some(value) = supplied_key.as_deref() {
+        store_ai_api_key(&base_url, value)?;
+    }
+    let usage = payload.get("usage");
+    Ok(AiChatCompletionResult {
+        content,
+        tool_calls,
+        model: payload
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or(model)
+            .to_string(),
+        prompt_tokens: usage
+            .and_then(|value| value.get("prompt_tokens"))
+            .and_then(Value::as_u64),
+        completion_tokens: usage
+            .and_then(|value| value.get("completion_tokens"))
+            .and_then(Value::as_u64),
+        total_tokens: usage
+            .and_then(|value| value.get("total_tokens"))
+            .and_then(Value::as_u64),
+    })
+}
+
+#[tauri::command]
+fn has_ai_api_key(base_url: String) -> Result<bool, String> {
+    Ok(load_stored_ai_api_key(&base_url)?.is_some())
+}
+
+#[tauri::command]
+fn clear_ai_api_key(base_url: String) -> Result<(), String> {
+    delete_stored_ai_api_key(&base_url)
+}
+
+#[tauri::command]
+async fn test_ai_connection(
+    config: AiModelConfig,
+    api_key: Option<String>,
+) -> Result<AiChatCompletionResult, String> {
+    perform_ai_chat_completion(
+        config,
+        vec![AiChatMessage {
+            role: "user".into(),
+            content: Some("请仅回复：连接成功".into()),
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        None,
+        api_key,
+        32,
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn ai_chat_completion(
+    config: AiModelConfig,
+    messages: Vec<AiChatMessage>,
+    tools: Option<Vec<Value>>,
+) -> Result<AiChatCompletionResult, String> {
+    perform_ai_chat_completion(config, messages, tools, None, 1200, None).await
+}
+
+#[tauri::command]
+async fn ai_chat_completion_stream(
+    app: AppHandle,
+    requests: State<'_, AiChatRequests>,
+    request_id: String,
+    config: AiModelConfig,
+    messages: Vec<AiChatMessage>,
+    tools: Option<Vec<Value>>,
+    max_tokens: Option<u32>,
+) -> Result<AiChatCompletionResult, String> {
+    if request_id.trim().is_empty() || request_id.len() > 100 {
+        return Err("AI 流式请求 ID 无效".into());
+    }
+    let max_tokens = max_tokens.unwrap_or(1200);
+    if !(32..=65_536).contains(&max_tokens) {
+        return Err("AI 输出长度需要在 32 到 65536 token 之间".into());
+    }
+    let cancellation = Arc::new(AiRequestCancellation::default());
+    {
+        let mut active = requests
+            .active
+            .lock()
+            .map_err(|_| "AI 请求状态不可用".to_string())?;
+        if active.contains_key(&request_id) {
+            return Err("AI 流式请求 ID 已存在".into());
+        }
+        active.insert(request_id.clone(), cancellation.clone());
+    }
+    let result = perform_ai_chat_completion(
+        config,
+        messages,
+        tools,
+        None,
+        max_tokens,
+        Some(AiStreamTarget {
+            app,
+            request_id: request_id.clone(),
+            cancellation,
+        }),
+    )
+    .await;
+    if let Ok(mut active) = requests.active.lock() {
+        active.remove(&request_id);
+    }
+    result
+}
+
+#[tauri::command]
+fn cancel_ai_chat_stream(
+    requests: State<AiChatRequests>,
+    request_id: String,
+) -> Result<(), String> {
+    let cancellation = requests
+        .active
+        .lock()
+        .map_err(|_| "AI 请求状态不可用".to_string())?
+        .get(&request_id)
+        .cloned();
+    if let Some(cancellation) = cancellation {
+        cancellation.cancel();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn synthesize_tts_preview(
+    app: AppHandle,
+    config: TtsConfig,
+    text: String,
+    api_key: Option<String>,
+    storage_path: Option<String>,
+) -> Result<TtsPreviewResult, String> {
+    if config.provider != "aliyun-bailian" {
+        return Err("当前版本仅支持阿里百炼配音服务".into());
+    }
+    let text = text.trim();
+    if text.is_empty() || text.chars().count() > 2000 {
+        return Err("试听文本需要包含 1 到 2000 个字符".into());
+    }
+    if config.model.trim().is_empty() || config.voice.trim().is_empty() {
+        return Err("请填写配音模型和音色".into());
+    }
+    if !(0.5..=2.0).contains(&config.speed) {
+        return Err("配音语速需要在 0.5 到 2.0 之间".into());
+    }
+    let base_url = validate_tts_url(&config.base_url)?;
+    let format = if config.audio_format == "mp3" {
+        "mp3"
+    } else {
+        "wav"
+    };
+    let cache_directory = tts_cache_directory(&app, storage_path.as_deref())?;
+    fs::create_dir_all(&cache_directory)
+        .map_err(|error| format!("无法创建配音缓存目录：{error}"))?;
+    let cache_path = cache_directory.join(format!(
+        "{}.{}",
+        tts_cache_key(&config, text, format),
+        format
+    ));
+    let supplied_key = api_key
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if cache_path.is_file() {
+        match fs::read(&cache_path) {
+            Ok(audio) if !audio.is_empty() => {
+                let duration_seconds = if format == "wav" {
+                    wav_duration_seconds(&audio).unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                if format != "wav" || duration_seconds > 0.0 {
+                    if let Some(value) = supplied_key.as_deref() {
+                        store_tts_api_key(&config, value)?;
+                    }
+                    return Ok(TtsPreviewResult {
+                        path: cache_path.to_string_lossy().into_owned(),
+                        format: format.into(),
+                        duration_seconds,
+                        cached: true,
+                    });
+                }
+                let _ = fs::remove_file(&cache_path);
+            }
+            _ => {
+                let _ = fs::remove_file(&cache_path);
+            }
+        }
+    }
+    let key = supplied_key
+        .clone()
+        .or(load_stored_tts_api_key(&config)?)
+        .or_else(|| tts_environment_api_key(&config))
+        .ok_or_else(|| "请先填写 API Key".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|error| format!("无法创建配音请求：{error}"))?;
+    let audio = if config.provider == "aliyun-bailian" {
+        let voice = match (config.model.as_str(), config.voice.as_str()) {
+            ("qwen-audio-3.0-tts-plus", "longanlingxi") => "longanlingxin",
+            (_, "longanhuan_v3") => "longanhuan_v3.6",
+            (_, "longjielidou_v3") => "longjielidou_v3.6",
+            (_, "longpaopao_v3") => "longpaopao_v3.6",
+            (_, "longhuohuo_v3") => "longhuohuo_v3.6",
+            (_, "longchuanshu_v3") => "longchuanshu_v3.6",
+            (_, "loongeva_v3") => "loongeva_v3.6",
+            _ => config.voice.as_str(),
+        };
+        if !is_bailian_voice_compatible(&config.model, voice) {
+            return Err(format!(
+                "音色 {voice} 不适用于模型 {}，请重新选择模型和音色",
+                config.model
+            ));
+        }
+        let mut input = serde_json::json!({
+            "text": text,
+            "voice": voice,
+            "format": format,
+            "sample_rate": 24000
+        });
+        if let Some(instruction) = tts_speed_instruction(config.speed) {
+            input["instruction"] = Value::String(instruction.into());
+        }
+        let response = client
+            .post(bailian_speech_endpoint(&base_url))
+            .bearer_auth(&key)
+            .json(&serde_json::json!({ "model": config.model, "input": input }))
+            .send()
+            .await
+            .map_err(|error| format!("百炼配音请求失败：{error}"))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| format!("无法读取百炼响应：{error}"))?;
+        if !status.is_success() {
+            return Err(format!(
+                "百炼配音失败（HTTP {}）：{}",
+                status.as_u16(),
+                tts_error_body(&body)
+            ));
+        }
+        let payload: Value =
+            serde_json::from_str(&body).map_err(|_| "百炼没有返回有效的 JSON 响应".to_string())?;
+        let audio_url =
+            find_audio_url(&payload).ok_or_else(|| "百炼响应中没有找到音频地址".to_string())?;
+        let download = client
+            .get(audio_url)
+            .send()
+            .await
+            .map_err(|error| format!("下载配音失败：{error}"))?;
+        if !download.status().is_success() {
+            return Err(format!(
+                "下载配音失败（HTTP {}）",
+                download.status().as_u16()
+            ));
+        }
+        download
+            .bytes()
+            .await
+            .map_err(|error| format!("读取配音文件失败：{error}"))?
+            .to_vec()
+    } else if config.provider == "openai-compatible" {
+        if uses_openai_chat_audio(&base_url) {
+            let mut messages = Vec::new();
+            if let Some(instruction) = tts_speed_instruction(config.speed) {
+                messages.push(serde_json::json!({
+                    "role": "system",
+                    "content": [{ "type": "text", "text": instruction }]
+                }));
+            }
+            messages.push(serde_json::json!({
+                "role": "user",
+                "content": [{ "type": "text", "text": text }]
+            }));
+            let response = client
+                .post(openai_chat_endpoint(&base_url))
+                .bearer_auth(&key)
+                .json(&serde_json::json!({
+                    "model": config.model,
+                    "messages": messages,
+                    "modalities": ["text", "audio"],
+                    "audio": { "voice": config.voice, "format": format }
+                }))
+                .send()
+                .await
+                .map_err(|error| format!("OpenAI 兼容配音请求失败：{error}"))?;
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .map_err(|error| format!("无法读取配音响应：{error}"))?;
+            if !status.is_success() {
+                return Err(format!(
+                    "配音服务返回错误（HTTP {}）：{}",
+                    status.as_u16(),
+                    tts_error_body(&body)
+                ));
+            }
+            let payload: Value = serde_json::from_str(&body)
+                .map_err(|_| "OpenAI 兼容服务没有返回有效的 JSON 响应".to_string())?;
+            if let Some(data) = find_audio_base64(&payload) {
+                let encoded = data
+                    .rsplit_once(',')
+                    .map(|(_, value)| value)
+                    .unwrap_or(data);
+                base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .map_err(|error| format!("无法解码配音数据：{error}"))?
+            } else if let Some(audio_url) = find_audio_url(&payload) {
+                let download = client
+                    .get(audio_url)
+                    .send()
+                    .await
+                    .map_err(|error| format!("下载配音失败：{error}"))?;
+                if !download.status().is_success() {
+                    return Err(format!(
+                        "下载配音失败（HTTP {}）",
+                        download.status().as_u16()
+                    ));
+                }
+                download
+                    .bytes()
+                    .await
+                    .map_err(|error| format!("读取配音文件失败：{error}"))?
+                    .to_vec()
+            } else {
+                return Err("OpenAI 兼容响应中没有找到音频数据".into());
+            }
+        } else {
+            let response = client
+                .post(openai_speech_endpoint(&base_url))
+                .bearer_auth(&key)
+                .json(&serde_json::json!({
+                    "model": config.model,
+                    "voice": config.voice,
+                    "input": text,
+                    "speed": config.speed,
+                    "response_format": format
+                }))
+                .send()
+                .await
+                .map_err(|error| format!("OpenAI 兼容配音请求失败：{error}"))?;
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                return Err(format!(
+                    "配音服务返回错误（HTTP {}）：{}",
+                    status.as_u16(),
+                    tts_error_body(&body)
+                ));
+            }
+            response
+                .bytes()
+                .await
+                .map_err(|error| format!("读取配音文件失败：{error}"))?
+                .to_vec()
+        }
+    } else {
+        return Err("不支持的配音协议".into());
+    };
+
+    if audio.is_empty() {
+        return Err("配音服务返回了空音频".into());
+    }
+    let duration_seconds = if format == "wav" {
+        wav_duration_seconds(&audio).ok_or_else(|| "配音服务返回的 WAV 音频无法读取".to_string())?
+    } else {
+        0.0
+    };
+    fs::write(&cache_path, audio).map_err(|error| format!("无法保存配音缓存文件：{error}"))?;
+    if let Some(value) = supplied_key {
+        store_tts_api_key(&config, &value)?;
+    }
+    Ok(TtsPreviewResult {
+        path: cache_path.to_string_lossy().into_owned(),
+        format: format.into(),
+        duration_seconds,
+        cached: false,
+    })
+}
+
 fn vpy_project_from_args<I>(args: I, current_dir: &Path) -> Option<PathBuf>
 where
     I: IntoIterator<Item = OsString>,
@@ -125,6 +2127,106 @@ fn get_startup_project() -> Option<String> {
     let current_dir = std::env::current_dir().unwrap_or_default();
     vpy_project_from_args(std::env::args_os(), &current_dir)
         .map(|path| path.to_string_lossy().into_owned())
+}
+
+fn normalize_vpy_file_name(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 160
+        || value.chars().any(|ch| {
+            ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        })
+    {
+        return Err("invalid Visual Python project name".into());
+    }
+    let name = if value.to_ascii_lowercase().ends_with(".vpy") {
+        format!("{}.vpy", &value[..value.len() - 4])
+    } else {
+        format!("{value}.vpy")
+    };
+    let base_name = name[..name.len() - 4].trim_end_matches([' ', '.']);
+    if base_name.is_empty()
+        || matches!(
+            base_name.to_ascii_lowercase().as_str(),
+            "con"
+                | "prn"
+                | "aux"
+                | "nul"
+                | "com1"
+                | "com2"
+                | "com3"
+                | "com4"
+                | "com5"
+                | "com6"
+                | "com7"
+                | "com8"
+                | "com9"
+                | "lpt1"
+                | "lpt2"
+                | "lpt3"
+                | "lpt4"
+                | "lpt5"
+                | "lpt6"
+                | "lpt7"
+                | "lpt8"
+                | "lpt9"
+        )
+    {
+        return Err("invalid Visual Python project name".into());
+    }
+    Ok(format!("{base_name}.vpy"))
+}
+
+#[tauri::command]
+fn rename_project_file(current_path: String, new_name: String) -> Result<String, String> {
+    let current_path = PathBuf::from(current_path);
+    if !current_path.is_file()
+        || !current_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("vpy"))
+    {
+        return Err("current Visual Python project does not exist".into());
+    }
+    let new_name = normalize_vpy_file_name(&new_name)?;
+    let parent = current_path
+        .parent()
+        .ok_or("current Visual Python project has no parent directory")?;
+    let destination = parent.join(&new_name);
+    if destination == current_path {
+        return Ok(destination.to_string_lossy().into_owned());
+    }
+    let case_only_change = paths_equal_for_platform(&current_path, &destination);
+    if destination.exists() && !case_only_change {
+        return Err("a project with this name already exists".into());
+    }
+    let current_stem = current_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or("invalid current project name")?;
+    let destination_stem = destination
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or("invalid destination project name")?;
+    let current_assets = parent.join(format!("{current_stem}.assets"));
+    let destination_assets = parent.join(format!("{destination_stem}.assets"));
+    let renamed_assets = current_assets.is_dir() && current_assets != destination_assets;
+    if renamed_assets {
+        if destination_assets.exists()
+            && !paths_equal_for_platform(&current_assets, &destination_assets)
+        {
+            return Err("a project resource directory with this name already exists".into());
+        }
+        rename_path_case_aware(&current_assets, &destination_assets)
+            .map_err(|error| format!("cannot rename project resources: {error}"))?;
+    }
+    if let Err(error) = rename_path_case_aware(&current_path, &destination) {
+        if renamed_assets {
+            let _ = rename_path_case_aware(&destination_assets, &current_assets);
+        }
+        return Err(format!("cannot rename Visual Python project: {error}"));
+    }
+    Ok(destination.to_string_lossy().into_owned())
 }
 
 fn show_main_window(app: &AppHandle) -> Result<(), String> {
@@ -239,10 +2341,12 @@ struct ActivePackageInstall {
 
 #[derive(Default)]
 struct ManimTasks {
+    next_id: AtomicU64,
     active: Arc<Mutex<Option<ActiveManimTask>>>,
 }
 
 struct ActiveManimTask {
+    id: u64,
     pid: u32,
     stopped: Arc<AtomicBool>,
 }
@@ -730,6 +2834,7 @@ fn emit_package_reader<R: Read + Send + 'static>(
 
 fn emit_manim_reader<R: Read + Send + 'static>(
     app: AppHandle,
+    task_id: u64,
     stream: &'static str,
     mut reader: R,
 ) {
@@ -741,7 +2846,14 @@ fn emit_manim_reader<R: Read + Send + 'static>(
                 Ok(size) => {
                     let data = String::from_utf8_lossy(&buffer[..size]).into_owned();
                     if !data.is_empty() {
-                        let _ = app.emit("manim-output", ManimOutput { stream, data });
+                        let _ = app.emit(
+                            "manim-output",
+                            ManimOutput {
+                                task_id,
+                                stream,
+                                data,
+                            },
+                        );
                     }
                 }
                 Err(_) => break,
@@ -816,6 +2928,135 @@ fn is_manim_render_entry(path: &Path) -> bool {
         .is_some_and(|stamp| !stamp.is_empty() && stamp.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
+const MANIM_OUTPUT_MARKER: &str = ".visual-python-output";
+
+fn sanitize_manim_output_filename(value: Option<&str>, fallback: &str) -> String {
+    let raw = value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback);
+    let without_extension = if raw.to_ascii_lowercase().ends_with(".mp4") {
+        &raw[..raw.len() - 4]
+    } else {
+        raw
+    };
+    let mut sanitized = without_extension
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+            {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect::<String>();
+    sanitized = sanitized
+        .trim()
+        .trim_end_matches([' ', '.'])
+        .chars()
+        .take(120)
+        .collect();
+    if sanitized.is_empty() {
+        sanitized = fallback.to_owned();
+    }
+    if matches!(
+        sanitized.to_ascii_lowercase().as_str(),
+        "con"
+            | "prn"
+            | "aux"
+            | "nul"
+            | "com1"
+            | "com2"
+            | "com3"
+            | "com4"
+            | "com5"
+            | "com6"
+            | "com7"
+            | "com8"
+            | "com9"
+            | "lpt1"
+            | "lpt2"
+            | "lpt3"
+            | "lpt4"
+            | "lpt5"
+            | "lpt6"
+            | "lpt7"
+            | "lpt8"
+            | "lpt9"
+    ) {
+        sanitized.insert(0, '_');
+    }
+    format!("{sanitized}.mp4")
+}
+
+fn is_safe_manim_output_filename(value: &str) -> bool {
+    let path = Path::new(value);
+    path.file_name().and_then(|name| name.to_str()) == Some(value)
+        && path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("mp4"))
+}
+
+fn unique_manim_output_path(storage_dir: &Path, requested_name: &str) -> PathBuf {
+    let requested = storage_dir.join(requested_name);
+    if !requested.exists() {
+        return requested;
+    }
+    let stem = Path::new(requested_name)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("video");
+    for index in 2_u32.. {
+        let candidate = storage_dir.join(format!("{stem} ({index}).mp4"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn managed_manim_output_path(storage_dir: &Path, work_dir: &Path) -> Option<PathBuf> {
+    let name = fs::read_to_string(work_dir.join(MANIM_OUTPUT_MARKER)).ok()?;
+    let name = name.trim();
+    if !is_safe_manim_output_filename(name) {
+        return None;
+    }
+    let output = storage_dir.join(name);
+    output.is_file().then_some(output)
+}
+
+fn finalize_manim_video(
+    storage_dir: &Path,
+    work_dir: &Path,
+    source: &Path,
+    requested_name: &str,
+) -> Result<PathBuf, String> {
+    let destination = unique_manim_output_path(storage_dir, requested_name);
+    fs::copy(source, &destination)
+        .map_err(|error| format!("cannot save final Manim video: {error}"))?;
+    let Some(file_name) = destination.file_name().and_then(|name| name.to_str()) else {
+        let _ = fs::remove_file(&destination);
+        return Err("cannot determine final Manim video name".into());
+    };
+    if let Err(error) = fs::write(work_dir.join(MANIM_OUTPUT_MARKER), file_name) {
+        let _ = fs::remove_file(&destination);
+        return Err(format!("cannot record final Manim video: {error}"));
+    }
+    Ok(destination)
+}
+
+fn finalize_rendered_manim_video(
+    storage_dir: &Path,
+    work_dir: &Path,
+    requested_name: &str,
+) -> Result<PathBuf, String> {
+    let source = find_latest_mp4(work_dir)
+        .ok_or_else(|| "Manim completed without producing an MP4 video".to_string())?;
+    finalize_manim_video(storage_dir, work_dir, &source, requested_name)
+}
+
 fn directory_size(path: &Path) -> u64 {
     let Ok(entries) = fs::read_dir(path) else {
         return 0;
@@ -834,6 +3075,117 @@ fn directory_size(path: &Path) -> u64 {
     })
 }
 
+fn read_tts_cache_info_from_path(path: &Path) -> TtsCacheInfo {
+    let Ok(entries) = fs::read_dir(path) else {
+        return TtsCacheInfo {
+            path: path.to_string_lossy().into_owned(),
+            size_bytes: 0,
+            clip_count: 0,
+        };
+    };
+    entries.flatten().fold(
+        TtsCacheInfo {
+            path: path.to_string_lossy().into_owned(),
+            size_bytes: 0,
+            clip_count: 0,
+        },
+        |mut info, entry| {
+            let path = entry.path();
+            if path.is_file()
+                && path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| {
+                        matches!(extension.to_ascii_lowercase().as_str(), "wav" | "mp3")
+                    })
+            {
+                info.clip_count = info.clip_count.saturating_add(1);
+                info.size_bytes = info
+                    .size_bytes
+                    .saturating_add(entry.metadata().map(|metadata| metadata.len()).unwrap_or(0));
+            }
+            info
+        },
+    )
+}
+
+fn tts_cache_directory(app: &AppHandle, storage_path: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(value) = storage_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(PathBuf::from(value).join("clips"));
+    }
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("无法获取应用数据目录：{error}"))?
+        .join("tts-cache")
+        .join("clips"))
+}
+
+#[tauri::command]
+fn get_tts_cache_info(
+    app: AppHandle,
+    storage_path: Option<String>,
+) -> Result<TtsCacheInfo, String> {
+    Ok(read_tts_cache_info_from_path(&tts_cache_directory(
+        &app,
+        storage_path.as_deref(),
+    )?))
+}
+
+#[tauri::command]
+fn clear_tts_cache(
+    app: AppHandle,
+    tasks: State<ManimTasks>,
+    storage_path: Option<String>,
+) -> Result<TtsCacheInfo, String> {
+    if tasks
+        .active
+        .lock()
+        .map_err(|_| "Manim task state is unavailable")?
+        .is_some()
+    {
+        return Err("渲染期间不能清理配音缓存".into());
+    }
+    let path = tts_cache_directory(&app, storage_path.as_deref())?;
+    if path.exists() {
+        fs::remove_dir_all(&path).map_err(|error| format!("无法清理配音缓存：{error}"))?;
+    }
+    Ok(read_tts_cache_info_from_path(&path))
+}
+
+#[tauri::command]
+fn open_tts_cache_folder(app: AppHandle, storage_path: Option<String>) -> Result<(), String> {
+    let path = tts_cache_directory(&app, storage_path.as_deref())?;
+    fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = Command::new("explorer.exe");
+        command.arg(&path);
+        command.creation_flags(0x08000000);
+        command.spawn().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+}
+
 fn read_manim_storage_info(
     app: &AppHandle,
     storage_path: Option<&str>,
@@ -842,6 +3194,7 @@ fn read_manim_storage_info(
     let entries = fs::read_dir(&path).map_err(|error| error.to_string())?;
     let mut render_count = 0;
     let mut size_bytes: u64 = 0;
+    let mut managed_outputs = HashSet::new();
     for entry in entries.flatten() {
         let entry_path = entry.path();
         if !is_manim_render_entry(&entry_path)
@@ -854,6 +3207,17 @@ fn read_manim_storage_info(
         }
         render_count += 1;
         size_bytes = size_bytes.saturating_add(directory_size(&entry_path));
+        if let Some(output_path) = managed_manim_output_path(&path, &entry_path) {
+            managed_outputs.insert(output_path);
+        }
+    }
+    for output_path in managed_outputs {
+        size_bytes = size_bytes.saturating_add(
+            output_path
+                .metadata()
+                .map(|metadata| metadata.len())
+                .unwrap_or(0),
+        );
     }
     Ok(ManimStorageInfo {
         path: path.to_string_lossy().into_owned(),
@@ -893,6 +3257,9 @@ fn clear_manim_render_files(
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
         if !file_type.is_dir() || !is_manim_render_entry(&entry_path) {
             continue;
+        }
+        if let Some(output_path) = managed_manim_output_path(&path, &entry_path) {
+            fs::remove_file(output_path).map_err(|error| error.to_string())?;
         }
         fs::remove_dir_all(&entry_path).map_err(|error| error.to_string())?;
     }
@@ -961,27 +3328,133 @@ fn inspect_python(program: &str, prefix_args: &[&str]) -> Result<PythonEnvironme
     serde_json::from_slice(&output.stdout).map_err(|e| format!("无法解析 Python 环境：{e}"))
 }
 
+const MIN_SUPPORTED_PYTHON_MINOR: u16 = 11;
+const MAX_SUPPORTED_PYTHON_MINOR: u16 = 14;
+
+fn python_version_parts(version: &str) -> Option<(u16, u16, u16)> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts
+        .next()
+        .and_then(|value| {
+            let digits: String = value
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect();
+            (!digits.is_empty()).then_some(digits)
+        })
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+fn is_supported_python_version(version: &str) -> bool {
+    python_version_parts(version).is_some_and(|(major, minor, _)| {
+        major == 3 && (MIN_SUPPORTED_PYTHON_MINOR..=MAX_SUPPORTED_PYTHON_MINOR).contains(&minor)
+    })
+}
+
+fn add_supported_python(
+    environments: &mut Vec<PythonEnvironment>,
+    result: Result<PythonEnvironment, String>,
+) {
+    let Ok(environment) = result else {
+        return;
+    };
+    if !is_supported_python_version(&environment.version)
+        || environments
+            .iter()
+            .any(|item| item.path.eq_ignore_ascii_case(&environment.path))
+    {
+        return;
+    }
+    environments.push(environment);
+}
+
+fn python_launcher_paths(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            let executable_end = lower.rfind(".exe")? + 4;
+            let prefix = &line[..executable_end];
+            let bytes = prefix.as_bytes();
+            let drive_start = (0..bytes.len().saturating_sub(2)).find(|index| {
+                bytes[*index].is_ascii_alphabetic()
+                    && bytes[*index + 1] == b':'
+                    && matches!(bytes[*index + 2], b'\\' | b'/')
+            });
+            let unc_start = prefix.find("\\\\");
+            let start = match (drive_start, unc_start) {
+                (Some(drive), Some(unc)) => drive.min(unc),
+                (Some(drive), None) => drive,
+                (None, Some(unc)) => unc,
+                (None, None) => return None,
+            };
+            Some(prefix[start..].trim_matches('"').to_string())
+        })
+        .collect()
+}
+
 #[tauri::command]
-fn detect_python() -> Vec<PythonEnvironment> {
-    let candidates: Vec<(&str, Vec<&str>)> =
-        vec![("python", vec![]), ("python3", vec![]), ("py", vec!["-3"])];
+fn detect_python(selected_path: Option<String>) -> Vec<PythonEnvironment> {
     let mut environments = Vec::new();
-    for (program, args) in candidates {
-        if let Ok(environment) = inspect_python(program, &args) {
-            if !environments
-                .iter()
-                .any(|item: &PythonEnvironment| item.path.eq_ignore_ascii_case(&environment.path))
-            {
-                environments.push(environment);
+
+    if let Some(path) = selected_path.as_deref() {
+        add_supported_python(&mut environments, inspect_python(path, &[]));
+    }
+
+    for (program, args) in [("python", &[][..]), ("python3", &[][..])] {
+        add_supported_python(&mut environments, inspect_python(program, args));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut launcher = Command::new("py");
+        launcher.arg("-0p").creation_flags(0x08000000);
+        if let Ok(output) = launcher.output() {
+            let listing = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            for path in python_launcher_paths(&listing) {
+                add_supported_python(&mut environments, inspect_python(&path, &[]));
             }
         }
+        for tag in ["-3.11", "-3.12", "-3.13", "-3.14"] {
+            add_supported_python(&mut environments, inspect_python("py", &[tag]));
+        }
     }
+
+    #[cfg(not(target_os = "windows"))]
+    for program in ["python3.11", "python3.12", "python3.13", "python3.14"] {
+        add_supported_python(&mut environments, inspect_python(program, &[]));
+    }
+
+    environments.sort_by(|left, right| {
+        python_version_parts(&right.version)
+            .cmp(&python_version_parts(&left.version))
+            .then_with(|| left.path.to_lowercase().cmp(&right.path.to_lowercase()))
+    });
     environments
+}
+
+fn validate_supported_python(path: &str) -> Result<PythonEnvironment, String> {
+    let environment = inspect_python(path, &[])?;
+    if !is_supported_python_version(&environment.version) {
+        return Err(format!(
+            "当前项目仅支持 Python 3.{} 至 3.{}，所选解释器为 Python {}",
+            MIN_SUPPORTED_PYTHON_MINOR, MAX_SUPPORTED_PYTHON_MINOR, environment.version
+        ));
+    }
+    Ok(environment)
 }
 
 #[tauri::command]
 fn validate_python(path: String) -> Result<PythonEnvironment, String> {
-    inspect_python(&path, &[])
+    validate_supported_python(&path)
 }
 
 #[tauri::command]
@@ -1235,7 +3708,9 @@ fn read_lsp_message<R: BufRead>(reader: &mut R) -> Result<Option<Value>, String>
     let mut content_length = None;
     loop {
         let mut header = String::new();
-        let read = reader.read_line(&mut header).map_err(|error| error.to_string())?;
+        let read = reader
+            .read_line(&mut header)
+            .map_err(|error| error.to_string())?;
         if read == 0 {
             return Ok(None);
         }
@@ -1256,7 +3731,9 @@ fn read_lsp_message<R: BufRead>(reader: &mut R) -> Result<Option<Value>, String>
     }
     let content_length = content_length.ok_or("Pyright response is missing Content-Length")?;
     let mut body = vec![0; content_length];
-    reader.read_exact(&mut body).map_err(|error| error.to_string())?;
+    reader
+        .read_exact(&mut body)
+        .map_err(|error| error.to_string())?;
     serde_json::from_slice(&body)
         .map(Some)
         .map_err(|error| format!("Pyright returned invalid JSON: {error}"))
@@ -1279,7 +3756,10 @@ fn find_pyright_server(app: &AppHandle) -> Result<PathBuf, String> {
         }
     }
     let current_dir = std::env::current_dir().unwrap_or_default();
-    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?;
     let candidates = [
         current_dir.join("node_modules/pyright/langserver.index.js"),
         current_dir.join("../node_modules/pyright/langserver.index.js"),
@@ -1296,7 +3776,10 @@ fn find_node_runtime(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("VISUAL_PYTHON_NODE") {
         return Ok(PathBuf::from(path));
     }
-    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?;
     let bundled = if cfg!(target_os = "windows") {
         resource_dir.join("language-server/node.exe")
     } else {
@@ -1533,6 +4016,88 @@ fn validate_python_code(code: String, python_path: Option<String>) -> Result<(),
 }
 
 #[tauri::command]
+fn inspect_python_structure(code: String, python_path: Option<String>) -> Result<Value, String> {
+    const SCRIPT: &str = r#"
+import ast, json, sys
+
+source = sys.stdin.read()
+tree = ast.parse(source, filename="<visual-python>")
+
+def statement_info(node, source_lines):
+    segment = ast.get_source_segment(source, node) or source_lines[node.lineno - 1].strip()
+    summary = " ".join(segment.strip().split())[:240]
+    is_docstring = isinstance(node, ast.Expr) and isinstance(getattr(node, "value", None), (ast.Str, ast.Constant)) and isinstance(getattr(node.value, "value", getattr(node.value, "s", None)), str)
+    return {
+        "kind": type(node).__name__,
+        "startLine": node.lineno,
+        "endLine": getattr(node, "end_lineno", node.lineno),
+        "summary": summary,
+        "isDocstring": is_docstring,
+    }
+
+def function_info(node, source_lines):
+    body = [statement_info(item, source_lines) for item in node.body]
+    return {
+        "name": node.name,
+        "kind": "asyncFunction" if isinstance(node, ast.AsyncFunctionDef) else "function",
+        "startLine": node.lineno,
+        "endLine": getattr(node, "end_lineno", node.lineno),
+        "bodyStartLine": node.body[0].lineno if node.body else node.lineno + 1,
+        "bodyEndLine": getattr(node.body[-1], "end_lineno", node.lineno) if node.body else node.lineno,
+        "column": node.col_offset,
+        "statements": body,
+    }
+
+source_lines = source.splitlines()
+classes = []
+functions = []
+imports = []
+statements = [statement_info(node, source_lines) for node in tree.body]
+for node in tree.body:
+    if isinstance(node, ast.ClassDef):
+        methods = [function_info(item, source_lines) for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        classes.append({
+            "name": node.name,
+            "startLine": node.lineno,
+            "endLine": getattr(node, "end_lineno", node.lineno),
+            "column": node.col_offset,
+            "methods": methods,
+        })
+    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        functions.append(function_info(node, source_lines))
+    elif isinstance(node, (ast.Import, ast.ImportFrom)):
+        imports.append(statement_info(node, source_lines))
+
+json.dump({"classes": classes, "functions": functions, "imports": imports, "statements": statements}, sys.stdout, ensure_ascii=False)
+"#;
+    let mut command = Command::new(python_path.as_deref().unwrap_or("python"));
+    command
+        .args(["-X", "utf8", "-c", SCRIPT])
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("无法启动 Python：{error}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(code.as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    serde_json::from_slice(&output.stdout).map_err(|error| format!("无法解析 Python 结构：{error}"))
+}
+
+#[tauri::command]
 fn start_python(
     app: AppHandle,
     tasks: State<PythonTasks>,
@@ -1674,7 +4239,8 @@ fn render_manim(
     python_path: Option<String>,
     render_config: Option<ManimRenderConfig>,
     storage_path: Option<String>,
-) -> Result<(), String> {
+    output_file_name: Option<String>,
+) -> Result<u64, String> {
     let mut active = tasks
         .active
         .lock()
@@ -1697,7 +4263,12 @@ fn render_manim(
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_millis();
-    let work_dir = manim_storage_dir(&app, storage_path.as_deref())?.join(format!("manim-{stamp}"));
+    let storage_dir = manim_storage_dir(&app, storage_path.as_deref())?;
+    let requested_output_name = sanitize_manim_output_filename(
+        output_file_name.as_deref(),
+        &format!("{scene_name}-{stamp}"),
+    );
+    let work_dir = storage_dir.join(format!("manim-{stamp}"));
     fs::create_dir_all(&work_dir)
         .map_err(|error| format!("cannot create Manim work directory: {error}"))?;
     let script_path = work_dir.join("scene.py");
@@ -1724,6 +4295,7 @@ fn render_manim(
         return Err("invalid Manim renderer".into());
     }
 
+    let task_id = tasks.next_id.fetch_add(1, Ordering::Relaxed) + 1;
     let mut command = Command::new(python_path.as_deref().unwrap_or("python"));
     command
         .args(["-X", "utf8", "-m", "manim"])
@@ -1756,15 +4328,16 @@ fn render_manim(
     let pid = child.id();
     let stopped = Arc::new(AtomicBool::new(false));
     *active = Some(ActiveManimTask {
+        id: task_id,
         pid,
         stopped: stopped.clone(),
     });
     drop(active);
     if let Some(stdout) = child.stdout.take() {
-        emit_manim_reader(app.clone(), "stdout", stdout);
+        emit_manim_reader(app.clone(), task_id, "stdout", stdout);
     }
     if let Some(stderr) = child.stderr.take() {
-        emit_manim_reader(app.clone(), "stderr", stderr);
+        emit_manim_reader(app.clone(), task_id, "stderr", stderr);
     }
     let work_dir_text = work_dir.to_string_lossy().into_owned();
     let active_tasks = tasks.active.clone();
@@ -1772,24 +4345,35 @@ fn render_manim(
         let result = child.wait();
         let stopped_by_user = stopped.load(Ordering::SeqCst);
         if let Ok(mut active) = active_tasks.lock() {
-            if active.as_ref().is_some_and(|task| task.pid == pid) {
+            if active
+                .as_ref()
+                .is_some_and(|task| task.id == task_id && task.pid == pid)
+            {
                 *active = None;
             }
         }
-        let (success, error) = match result {
+        let (mut success, mut error) = match result {
             Ok(status) if status.success() => (true, None),
             Ok(_) if stopped_by_user => (false, None),
             Ok(status) => (false, Some(format!("Manim exited with status: {status}"))),
             Err(error) => (false, Some(error.to_string())),
         };
         let video_path = if success {
-            find_latest_mp4(&work_dir).map(|path| path.to_string_lossy().into_owned())
+            match finalize_rendered_manim_video(&storage_dir, &work_dir, &requested_output_name) {
+                Ok(path) => Some(path.to_string_lossy().into_owned()),
+                Err(finalize_error) => {
+                    success = false;
+                    error = Some(finalize_error);
+                    None
+                }
+            }
         } else {
             None
         };
         let _ = app.emit(
             "manim-finished",
             ManimFinished {
+                task_id,
                 success,
                 stopped: stopped_by_user,
                 scene: scene_name,
@@ -1799,16 +4383,20 @@ fn render_manim(
             },
         );
     });
-    Ok(())
+    Ok(task_id)
 }
 
 #[tauri::command]
-fn stop_manim_render(tasks: State<ManimTasks>) -> Result<(), String> {
+fn stop_manim_render(tasks: State<ManimTasks>, task_id: Option<u64>) -> Result<(), String> {
     let (pid, stopped) = {
         let mut active = tasks
             .active
             .lock()
             .map_err(|_| "Manim task state is unavailable")?;
+        match active.as_ref() {
+            Some(task) if task_id.is_some_and(|id| id != task.id) => return Ok(()),
+            _ => {}
+        }
         match active.take() {
             Some(task) => (task.pid, task.stopped),
             None => return Ok(()),
@@ -1926,9 +4514,11 @@ pub fn run() {
         .manage(PythonTasks::default())
         .manage(PackageInstallTasks::default())
         .manage(ManimTasks::default())
+        .manage(AiChatRequests::default())
         .manage(PyrightState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let show_item =
                 MenuItem::with_id(app, "tray-show", "显示 Visual Python", true, None::<&str>)?;
@@ -1973,6 +4563,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             finish_startup,
             get_startup_project,
+            rename_project_file,
+            write_project_file,
+            save_project_as,
+            import_project_audio,
+            replace_project_audio,
+            inspect_project_resources,
+            delete_project_resource,
+            reveal_project_resource,
             hide_main_window,
             restore_main_window,
             exit_application,
@@ -1989,15 +4587,28 @@ pub fn run() {
             send_pyright_message,
             stop_pyright_language_server,
             validate_python_code,
+            inspect_python_structure,
             start_python,
             stop_python,
             render_manim,
             stop_manim_render,
             get_manim_storage_info,
             clear_manim_render_files,
+            get_tts_cache_info,
+            clear_tts_cache,
+            open_tts_cache_folder,
             open_manim_render_folder,
             open_system_video,
             reveal_video_in_folder,
+            has_tts_api_key,
+            clear_tts_api_key,
+            synthesize_tts_preview,
+            has_ai_api_key,
+            clear_ai_api_key,
+            test_ai_connection,
+            ai_chat_completion,
+            ai_chat_completion_stream,
+            cancel_ai_chat_stream,
             send_python_input
         ])
         .run(tauri::generate_context!())
@@ -2011,12 +4622,546 @@ mod tests {
     use zip::write::SimpleFileOptions;
 
     #[test]
+    fn accepts_only_supported_python_versions() {
+        assert!(is_supported_python_version("3.11.9"));
+        assert!(is_supported_python_version("3.14.0"));
+        assert!(!is_supported_python_version("3.10.14"));
+        assert!(!is_supported_python_version("3.15.0a1"));
+        assert!(!is_supported_python_version("2.7.18"));
+    }
+
+    #[test]
+    fn parses_legacy_python_launcher_paths() {
+        let output = r#"
+ -V:3.13 *        C:\Users\Ada Lovelace\Python313\python.exe
+ -V:3.11          D:\Python311\python.exe
+ ignored line
+"#;
+        assert_eq!(
+            python_launcher_paths(output),
+            vec![
+                r"C:\Users\Ada Lovelace\Python313\python.exe",
+                r"D:\Python311\python.exe"
+            ]
+        );
+    }
+
+    #[test]
+    fn builds_tts_endpoints_from_service_roots() {
+        assert_eq!(
+            openai_speech_endpoint("https://example.com/v1"),
+            "https://example.com/v1/audio/speech"
+        );
+        assert_eq!(
+            openai_speech_endpoint("https://example.com/custom/audio/speech"),
+            "https://example.com/custom/audio/speech"
+        );
+        assert_eq!(
+            openai_chat_endpoint("https://example.com/compatible-mode/v1"),
+            "https://example.com/compatible-mode/v1/chat/completions"
+        );
+        assert!(uses_openai_chat_audio(
+            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+        ));
+        assert_eq!(
+            bailian_speech_endpoint("https://workspace.cn-beijing.maas.aliyuncs.com"),
+            "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+        );
+    }
+
+    #[test]
+    fn reports_missing_tts_address_separately_from_invalid_addresses() {
+        assert!(validate_tts_url("  ").unwrap_err().contains("尚未配置"));
+        assert_eq!(
+            validate_tts_url("not a url").unwrap_err(),
+            "配音接口地址无效"
+        );
+        assert_eq!(
+            validate_tts_url("https://example.com/").unwrap(),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn builds_openai_chat_endpoints_from_common_base_urls() {
+        assert_eq!(
+            openai_chat_endpoint("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        );
+        assert_eq!(
+            openai_chat_endpoint("https://example.com/v1/chat/completions"),
+            "https://example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            openai_chat_endpoint("https://example.com"),
+            "https://example.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn extracts_text_from_openai_chat_responses() {
+        assert_eq!(
+            ai_message_content(&json!({ "choices": [{ "message": { "content": "hello" } }] })),
+            Some("hello".into())
+        );
+        assert_eq!(
+            ai_message_content(&json!({
+                "choices": [{ "message": { "content": [{ "type": "text", "text": "hel" }, { "type": "text", "text": "lo" }] } }]
+            })),
+            Some("hello".into())
+        );
+    }
+
+    #[test]
+    fn extracts_and_merges_openai_tool_calls() {
+        let calls = ai_message_tool_calls(&json!({
+            "choices": [{ "message": { "content": null, "tool_calls": [{
+                "id": "call-1",
+                "type": "function",
+                "function": { "name": "get_context", "arguments": "{}" }
+            }] } }]
+        }));
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call-1");
+        assert_eq!(calls[0].function.name, "get_context");
+
+        let mut streamed = Vec::new();
+        merge_ai_stream_tool_calls(
+            &json!({ "choices": [{ "delta": { "tool_calls": [{
+                "index": 0, "id": "call-2", "type": "function",
+                "function": { "name": "explore_blocks", "arguments": "{\"queries\":" }
+            }] } }] }),
+            &mut streamed,
+        );
+        merge_ai_stream_tool_calls(
+            &json!({ "choices": [{ "delta": { "tool_calls": [{
+                "index": 0, "function": { "arguments": "[\"圆形\"]}" }
+            }] } }] }),
+            &mut streamed,
+        );
+        let calls = finish_ai_stream_tool_calls(streamed);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.name, "explore_blocks");
+        assert_eq!(calls[0].function.arguments, "{\"queries\":[\"圆形\"]}");
+
+        let deltas =
+            ai_stream_tool_argument_deltas(&json!({ "choices": [{ "delta": { "tool_calls": [{
+            "index": 2, "function": { "name": "replace_code", "arguments": "{\"code\":\"pri" }
+        }] } }] }));
+        assert_eq!(
+            deltas,
+            vec![(2, Some("replace_code".into()), "{\"code\":\"pri".into())]
+        );
+    }
+
+    #[test]
+    fn recognizes_reasoning_and_finish_events() {
+        let reasoning = json!({ "choices": [{ "delta": { "reasoning_content": "thinking" } }] });
+        let finished = json!({ "choices": [{ "delta": {}, "finish_reason": "length" }] });
+        assert_eq!(ai_stream_reasoning_delta(&reasoning), Some("thinking"));
+        assert_eq!(ai_stream_finish_reason(&finished), Some("length"));
+    }
+
+    #[test]
+    fn marks_ai_requests_as_cancelled() {
+        let cancellation = AiRequestCancellation::default();
+        assert!(!cancellation.cancelled.load(Ordering::SeqCst));
+        cancellation.cancel();
+        assert!(cancellation.cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn disables_thinking_only_for_qwen_on_aliyun() {
+        assert!(should_disable_ai_thinking(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "qwen-plus"
+        ));
+        assert!(should_disable_ai_thinking(
+            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "qwen3.7-flash"
+        ));
+        assert!(!should_disable_ai_thinking(
+            "https://api.openai.com/v1",
+            "qwen-plus"
+        ));
+        assert!(!should_disable_ai_thinking(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "other-model"
+        ));
+    }
+
+    #[test]
+    fn parses_openai_sse_events_across_network_chunks() {
+        let mut buffer = b"data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n".to_vec();
+        assert!(take_sse_events(&mut buffer).is_empty());
+        buffer.extend_from_slice(
+            b"\ndata: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\r\n\r\ndata: [DONE]\n\n",
+        );
+        let events = take_sse_events(&mut buffer);
+        assert_eq!(events.len(), 3);
+        let first: Value = serde_json::from_str(&events[0]).unwrap();
+        let second: Value = serde_json::from_str(&events[1]).unwrap();
+        assert_eq!(ai_stream_delta(&first), Some("hel".into()));
+        assert_eq!(ai_stream_delta(&second), Some("lo".into()));
+        assert_eq!(events[2], "[DONE]");
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn validates_ai_request_addresses() {
+        assert!(validate_ai_base_url("https://example.com/v1").is_ok());
+        assert!(validate_ai_base_url("http://127.0.0.1:11434/v1").is_ok());
+        assert!(validate_ai_base_url("file:///tmp/model").is_err());
+        assert!(validate_ai_base_url("https://user:secret@example.com/v1").is_err());
+        assert!(validate_ai_base_url("https://example.com/v1?token=secret").is_err());
+    }
+
+    #[test]
+    fn finds_nested_tts_audio_urls() {
+        let response = json!({ "output": { "audio": { "url": "https://example.com/voice.wav" } } });
+        assert_eq!(
+            find_audio_url(&response),
+            Some("https://example.com/voice.wav")
+        );
+        assert_eq!(find_audio_url(&json!({ "output": {} })), None);
+        let compatible = json!({ "choices": [{ "message": { "audio": { "data": "UklGRg==" } } }] });
+        assert_eq!(find_audio_base64(&compatible), Some("UklGRg=="));
+    }
+
+    #[test]
+    fn reads_pcm_wav_duration() {
+        let mut wav = vec![0u8; 48_044];
+        wav[0..4].copy_from_slice(b"RIFF");
+        wav[4..8].copy_from_slice(&(48_036u32).to_le_bytes());
+        wav[8..12].copy_from_slice(b"WAVE");
+        wav[12..16].copy_from_slice(b"fmt ");
+        wav[16..20].copy_from_slice(&(16u32).to_le_bytes());
+        wav[20..22].copy_from_slice(&(1u16).to_le_bytes());
+        wav[22..24].copy_from_slice(&(1u16).to_le_bytes());
+        wav[24..28].copy_from_slice(&(24_000u32).to_le_bytes());
+        wav[28..32].copy_from_slice(&(48_000u32).to_le_bytes());
+        wav[32..34].copy_from_slice(&(2u16).to_le_bytes());
+        wav[34..36].copy_from_slice(&(16u16).to_le_bytes());
+        wav[36..40].copy_from_slice(b"data");
+        wav[40..44].copy_from_slice(&(48_000u32).to_le_bytes());
+        assert_eq!(wav_duration_seconds(&wav), Some(1.0));
+
+        wav[4..8].copy_from_slice(&(0x7fff_ffffu32).to_le_bytes());
+        wav[40..44].copy_from_slice(&(0x7fff_ffffu32).to_le_bytes());
+        assert_eq!(wav_duration_seconds(&wav), Some(1.0));
+    }
+
+    #[test]
+    fn creates_stable_and_config_sensitive_tts_cache_keys() {
+        let config = TtsConfig {
+            provider: "aliyun-bailian".into(),
+            base_url: "https://example.com".into(),
+            model: "qwen-audio-3.0-tts-plus".into(),
+            voice: "longanlingxin".into(),
+            speed: 1.0,
+            audio_format: "wav".into(),
+        };
+        assert_eq!(
+            tts_cache_key(&config, "同一段旁白", "wav"),
+            tts_cache_key(&config, "同一段旁白", "wav")
+        );
+        let mut changed = config.clone();
+        changed.speed = 1.2;
+        assert_ne!(
+            tts_cache_key(&config, "同一段旁白", "wav"),
+            tts_cache_key(&changed, "同一段旁白", "wav")
+        );
+    }
+
+    #[test]
+    fn counts_only_managed_tts_audio_cache_files() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("visual-python-tts-cache-test-{suffix}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("first.wav"), vec![0u8; 12]).unwrap();
+        fs::write(root.join("second.mp3"), vec![0u8; 8]).unwrap();
+        fs::write(root.join("notes.txt"), vec![0u8; 40]).unwrap();
+        let info = read_tts_cache_info_from_path(&root);
+        assert_eq!(info.clip_count, 2);
+        assert_eq!(info.size_bytes, 20);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn validates_bailian_model_voice_pairs() {
+        assert!(is_bailian_voice_compatible(
+            "qwen-audio-3.0-tts-plus",
+            "longanlingxin"
+        ));
+        assert!(is_bailian_voice_compatible(
+            "qwen-audio-3.0-tts-flash",
+            "longanlingxi"
+        ));
+        assert!(is_bailian_voice_compatible(
+            "qwen-audio-3.0-tts-flash",
+            "longanhuan_v3.6"
+        ));
+        assert!(!is_bailian_voice_compatible(
+            "qwen-audio-3.0-tts-plus",
+            "longanlingxi"
+        ));
+    }
+
+    #[test]
     fn recognizes_only_managed_manim_render_entries() {
         assert!(is_manim_render_entry(Path::new("manim-123456")));
         assert!(!is_manim_render_entry(Path::new("manim-notes")));
         assert!(!is_manim_render_entry(Path::new("manim-123-backup")));
         assert!(!is_manim_render_entry(Path::new("personal-videos")));
         assert!(!is_manim_render_entry(Path::new("manim")));
+    }
+
+    #[test]
+    fn validates_and_renames_vpy_project_files() {
+        assert_eq!(normalize_vpy_file_name("lesson").unwrap(), "lesson.vpy");
+        assert!(normalize_vpy_file_name("lesson:01").is_err());
+        assert!(normalize_vpy_file_name("CON.vpy").is_err());
+
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("visual-python-rename-test-{suffix}"));
+        fs::create_dir_all(&root).unwrap();
+        let original = root.join("old.vpy");
+        fs::write(&original, br#"{"version":1,"resources":[]}"#).unwrap();
+        let original_assets = root.join("old.assets");
+        fs::create_dir_all(original_assets.join("audio")).unwrap();
+        fs::write(original_assets.join("audio").join("voice.wav"), b"audio").unwrap();
+
+        let renamed =
+            rename_project_file(original.to_string_lossy().into_owned(), "new-name".into())
+                .unwrap();
+
+        assert_eq!(PathBuf::from(renamed), root.join("new-name.vpy"));
+        assert!(!original.exists());
+        assert!(root.join("new-name.vpy").is_file());
+        assert!(!original_assets.exists());
+        assert!(root
+            .join("new-name.assets")
+            .join("audio")
+            .join("voice.wav")
+            .is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn renames_project_and_resources_when_only_letter_case_changes() {
+        let root = std::env::temp_dir().join(format!(
+            "visual-python-case-rename-test-{}",
+            transaction_stamp()
+        ));
+        fs::create_dir_all(root.join("Lesson.assets")).unwrap();
+        fs::write(root.join("Lesson.vpy"), br#"{"version":1,"resources":[]}"#).unwrap();
+        fs::write(root.join("Lesson.assets").join("voice.wav"), b"audio").unwrap();
+
+        let renamed = rename_project_file(
+            root.join("Lesson.vpy").to_string_lossy().into_owned(),
+            "lesson.vpy".into(),
+        )
+        .unwrap();
+
+        assert_eq!(PathBuf::from(renamed), root.join("lesson.vpy"));
+        assert!(root.join("lesson.assets").join("voice.wav").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn saves_project_and_assets_as_one_recoverable_unit() {
+        let root = std::env::temp_dir().join(format!(
+            "visual-python-save-as-test-{}",
+            transaction_stamp()
+        ));
+        fs::create_dir_all(root.join("source.assets").join("audio")).unwrap();
+        let source = root.join("source.vpy");
+        let destination = root.join("destination.vpy");
+        fs::write(
+            &source,
+            br#"{"version":1,"name":"source.vpy","workspace":{},"resources":[]}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("source.assets").join("audio").join("new.wav"),
+            b"new",
+        )
+        .unwrap();
+        fs::write(&destination, b"old project").unwrap();
+        fs::create_dir_all(root.join("destination.assets")).unwrap();
+        fs::write(root.join("destination.assets").join("old.wav"), b"old").unwrap();
+
+        let contents = r#"{"version":1,"name":"destination.vpy","workspace":{},"resources":[]}"#;
+        save_project_as(
+            Some(source.to_string_lossy().into_owned()),
+            destination.to_string_lossy().into_owned(),
+            contents.into(),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read_to_string(&destination).unwrap(), contents);
+        assert!(root
+            .join("destination.assets")
+            .join("audio")
+            .join("new.wav")
+            .is_file());
+        assert!(!root.join("destination.assets").join("old.wav").exists());
+        assert!(fs::read_dir(&root).unwrap().flatten().all(|entry| !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".visual-python-")));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn restores_destination_when_save_as_cannot_install_assets() {
+        let root = std::env::temp_dir().join(format!(
+            "visual-python-save-as-rollback-test-{}",
+            transaction_stamp()
+        ));
+        fs::create_dir_all(root.join("source.assets")).unwrap();
+        let source = root.join("source.vpy");
+        let destination = root.join("destination.vpy");
+        fs::write(&source, b"source project").unwrap();
+        fs::write(root.join("source.assets").join("new.wav"), b"new").unwrap();
+        fs::write(&destination, b"old project").unwrap();
+        fs::write(root.join("destination.assets"), b"blocking file").unwrap();
+
+        assert!(save_project_as(
+            Some(source.to_string_lossy().into_owned()),
+            destination.to_string_lossy().into_owned(),
+            "new project".into(),
+        )
+        .is_err());
+
+        assert_eq!(fs::read(&destination).unwrap(), b"old project");
+        assert_eq!(
+            fs::read(root.join("destination.assets")).unwrap(),
+            b"blocking file"
+        );
+        assert!(fs::read_dir(&root).unwrap().flatten().all(|entry| !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".visual-python-")));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn updates_project_resource_metadata_without_touching_other_fields() {
+        let root = std::env::temp_dir().join(format!(
+            "visual-python-resource-metadata-test-{}",
+            transaction_stamp()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let project = root.join("lesson.vpy");
+        fs::write(
+            &project,
+            br#"{"version":1,"name":"lesson.vpy","workspace":{"blocks":{}},"resources":[]}"#,
+        )
+        .unwrap();
+
+        update_project_resources(&project, |resources| {
+            resources.push(serde_json::json!({"id":"audio-1","type":"audio","path":"audio/a.wav","originalName":"a.wav","size":3}));
+            Ok(())
+        })
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&fs::read_to_string(&project).unwrap()).unwrap();
+        assert_eq!(value["name"], "lesson.vpy");
+        assert_eq!(value["workspace"]["blocks"], serde_json::json!({}));
+        assert_eq!(value["resources"][0]["id"], "audio-1");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn refuses_to_delete_a_resource_still_used_by_the_saved_workspace() {
+        let root = std::env::temp_dir().join(format!(
+            "visual-python-resource-usage-test-{}",
+            transaction_stamp()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let project = root.join("lesson.vpy");
+        fs::write(
+            &project,
+            br#"{"version":1,"name":"lesson.vpy","workspace":{"fields":{"TEXT":"resource://audio-1"}},"resources":[{"id":"audio-1","type":"audio","path":"audio/a.wav","originalName":"a.wav","size":3}]}"#,
+        )
+        .unwrap();
+
+        assert!(saved_project_uses_resource(&project, "audio/a.wav").unwrap());
+        assert!(delete_project_resource(
+            project.to_string_lossy().into_owned(),
+            "audio/a.wav".into(),
+        )
+        .unwrap_err()
+        .contains("请先保存"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sanitizes_and_numbers_manim_output_names() {
+        assert_eq!(
+            sanitize_manim_output_filename(Some("lesson: 01?.mp4"), "fallback"),
+            "lesson_ 01_.mp4"
+        );
+        assert_eq!(
+            sanitize_manim_output_filename(Some("CON.mp4"), "fallback"),
+            "_CON.mp4"
+        );
+
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("visual-python-manim-output-test-{suffix}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("lesson.mp4"), b"existing").unwrap();
+        assert_eq!(
+            unique_manim_output_path(&root, "lesson.mp4"),
+            root.join("lesson (2).mp4")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn records_final_manim_output_with_its_work_directory() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("visual-python-manim-finalize-test-{suffix}"));
+        let work_dir = root.join("manim-123");
+        fs::create_dir_all(&work_dir).unwrap();
+        let source = work_dir.join("source.mp4");
+        fs::write(&source, b"video").unwrap();
+
+        let output = finalize_manim_video(&root, &work_dir, &source, "lesson.mp4").unwrap();
+
+        assert_eq!(output, root.join("lesson.mp4"));
+        assert_eq!(managed_manim_output_path(&root, &work_dir), Some(output));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_successful_manim_runs_without_a_video() {
+        let root = std::env::temp_dir().join(format!(
+            "visual-python-manim-missing-output-test-{}",
+            transaction_stamp()
+        ));
+        let work_dir = root.join("manim-123");
+        fs::create_dir_all(&work_dir).unwrap();
+
+        assert_eq!(
+            finalize_rendered_manim_video(&root, &work_dir, "lesson.mp4").unwrap_err(),
+            "Manim completed without producing an MP4 video"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

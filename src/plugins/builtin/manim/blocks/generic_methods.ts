@@ -21,4 +21,21 @@ export const registerGenericMethodBlocks = (context: PluginContext) => {
     const fallback = method === "scale" ? "1" : method === "shift" ? "RIGHT" : method === "to_edge" ? "UP" : "ORIGIN";
     return [`${value(generator, block, "MOBJECT", "Circle()", Order.MEMBER)}.${method}(${value(generator, block, "ARG", fallback)})`, Order.FUNCTION_CALL];
   });
+
+  context.registerBlock({
+    type: "visual_python_manim_apply_matrix",
+    message0: "对象 %1 应用矩阵 %2",
+    args0: [
+      { type: "input_value", name: "MOBJECT", check: "ManimObject" },
+      { type: "input_value", name: "MATRIX" },
+    ],
+    inputsInline: true,
+    output: "ManimObject",
+    colour,
+  }, (block, generator) => {
+    addManimImport(generator);
+    const target = value(generator, block, "MOBJECT", "NumberPlane()", Order.MEMBER);
+    const matrix = value(generator, block, "MATRIX", "[[1, 0], [0, 1]]");
+    return [`${target}.apply_matrix(${matrix})`, Order.FUNCTION_CALL];
+  });
 };

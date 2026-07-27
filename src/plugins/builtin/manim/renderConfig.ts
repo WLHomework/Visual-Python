@@ -7,6 +7,7 @@ export type ManimRenderConfig = {
   renderer: ManimRenderer;
   disableCaching: boolean;
   selectedScene: string;
+  outputFileName: string;
 };
 
 export const defaultManimRenderConfig: ManimRenderConfig = {
@@ -15,6 +16,7 @@ export const defaultManimRenderConfig: ManimRenderConfig = {
   renderer: "cairo",
   disableCaching: false,
   selectedScene: "",
+  outputFileName: "",
 };
 
 let currentConfig = { ...defaultManimRenderConfig };
@@ -26,7 +28,8 @@ const normalizeConfig = (value: unknown): ManimRenderConfig => {
   const fps = [15, 30, 60].includes(Number(candidate?.fps)) ? Number(candidate!.fps) as ManimRenderConfig["fps"] : defaultManimRenderConfig.fps;
   const renderer = candidate?.renderer === "opengl" ? "opengl" : "cairo";
   const selectedScene = typeof candidate?.selectedScene === "string" ? candidate.selectedScene : "";
-  return { quality, fps, renderer, disableCaching: candidate?.disableCaching === true, selectedScene };
+  const outputFileName = typeof candidate?.outputFileName === "string" ? candidate.outputFileName.slice(0, 160) : "";
+  return { quality, fps, renderer, disableCaching: candidate?.disableCaching === true, selectedScene, outputFileName };
 };
 
 const emit = () => listeners.forEach((listener) => listener({ ...currentConfig }));

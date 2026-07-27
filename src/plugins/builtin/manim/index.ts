@@ -11,6 +11,7 @@ import { registerManimFormulaField } from "./formulaField";
 import { registerManimToolbox } from "./toolbox";
 import { colourForManimBlock } from "./constants";
 import { getManimRenderConfig, isDefaultManimRenderConfig, loadManimRenderConfig, resetManimRenderConfig } from "./renderConfig";
+import { clearProjectVoiceoverRoles, loadProjectVoiceoverRoles, saveProjectVoiceoverRoles } from "./voiceoverRoles";
 
 export const manimPlugin: VisualPythonPlugin = {
   manifest: {
@@ -20,7 +21,7 @@ export const manimPlugin: VisualPythonPlugin = {
     apiVersion: PLUGIN_API_VERSION,
     description: "通过图形化积木生成 Manim 场景代码。",
     builtin: true,
-    python: { packages: ["manim"] },
+    python: { packages: ["manim"], minimumVersion: "3.11" },
   },
   activate(context) {
     registerManimAngleField();
@@ -49,6 +50,12 @@ export const manimPlugin: VisualPythonPlugin = {
       save: () => isDefaultManimRenderConfig() ? undefined : getManimRenderConfig(),
       load: loadManimRenderConfig,
       clear: resetManimRenderConfig,
+    });
+    context.registerProjectSerializer({
+      id: "visual-python.manim.voiceover-roles",
+      save: saveProjectVoiceoverRoles,
+      load: loadProjectVoiceoverRoles,
+      clear: clearProjectVoiceoverRoles,
     });
   },
 };

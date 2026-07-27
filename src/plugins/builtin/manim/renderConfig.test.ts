@@ -10,7 +10,7 @@ describe("Manim render configuration", () => {
     expect(getManimRenderConfig()).toEqual(defaultManimRenderConfig);
     expect(isDefaultManimRenderConfig()).toBe(true);
     setManimRenderConfig({ quality: "high", fps: 60, renderer: "opengl", disableCaching: true });
-    expect(getManimRenderConfig()).toEqual({ quality: "high", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "" });
+    expect(getManimRenderConfig()).toEqual({ quality: "high", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "", outputFileName: "" });
     expect(isDefaultManimRenderConfig()).toBe(false);
   });
 
@@ -30,15 +30,15 @@ describe("Manim render configuration", () => {
       registerBlock: () => undefined,
       registerToolboxCategory: () => undefined,
       registerSetting: () => undefined,
-      registerProjectSerializer: (value) => { serializer = value; },
+      registerProjectSerializer: (value) => { if (value.id === "visual-python.manim.render-config") serializer = value; },
       registerCommand: () => undefined,
       reportProblem: () => undefined,
     });
-    setManimRenderConfig({ quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene" });
+    setManimRenderConfig({ quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });
     const saved = serializer?.save();
     serializer?.clear?.();
     expect(getManimRenderConfig()).toEqual(defaultManimRenderConfig);
     serializer?.load(saved);
-    expect(getManimRenderConfig()).toEqual({ quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene" });
+    expect(getManimRenderConfig()).toEqual({ quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });
   });
 });

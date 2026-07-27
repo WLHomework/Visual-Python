@@ -20,6 +20,10 @@ const blockColourOverrides: Record<string, string> = {
   visual_python_manim_animate_method: manimBlockColours.animation,
   visual_python_manim_transform_method: manimBlockColours.object,
   visual_python_manim_formula_value: manimBlockColours.value,
+  visual_python_manim_voiceover: manimBlockColours.scene,
+  visual_python_manim_voiceover_with_animation: manimBlockColours.scene,
+  visual_python_manim_play_local_audio: manimBlockColours.scene,
+  visual_python_manim_play_local_audio_with_animation: manimBlockColours.scene,
 };
 
 export const colourForManimBlock = (type: string): string => {

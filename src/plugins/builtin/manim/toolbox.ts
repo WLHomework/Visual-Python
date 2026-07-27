@@ -84,6 +84,22 @@ export const registerManimToolbox = (context: PluginContext) => {
           }),
           toolboxBlock("visual_python_manim_wait", { SECONDS: numberShadow(1) }),
         ]),
+        sceneCategory("配音", [
+          toolboxBlock("visual_python_manim_voiceover", { TEXT: textShadow("欢迎学习 Manim") }),
+          toolboxBlock("visual_python_manim_voiceover_with_animation", { TEXT: textShadow("让我们看看这个动画") }),
+        ]),
+        sceneCategory("音频", [
+          toolboxBlock("visual_python_manim_play_local_audio", {
+            PATH: textShadow("audio.wav"),
+            TIME_OFFSET: numberShadow(0),
+            GAIN: numberShadow(0),
+          }),
+          toolboxBlock("visual_python_manim_play_local_audio_with_animation", {
+            PATH: textShadow("audio.wav"),
+            TIME_OFFSET: numberShadow(0),
+            GAIN: numberShadow(0),
+          }),
+        ]),
         sceneCategory("对象管理", [
           toolboxBlock("visual_python_manim_add"),
           toolboxBlock("visual_python_manim_add_two"),
@@ -537,6 +553,7 @@ export const registerManimToolbox = (context: PluginContext) => {
         ]),
         objectCategory("通用方法", [
           toolboxBlock("visual_python_manim_transform_method", { ARG: expressionShadow("1") }),
+          toolboxBlock("visual_python_manim_apply_matrix", { MATRIX: dynamicMatrixDataShadow() }),
         ]),
       ]),
     ],

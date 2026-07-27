@@ -63,3 +63,11 @@ export function filterBlockOutline(nodes: BlockOutlineNode[], query: string): Bl
     return children.length ? [{ ...node, children }] : [];
   });
 }
+
+export function compactBlockOutline(nodes: BlockOutlineNode[]): BlockOutlineNode[] {
+  return nodes.flatMap((node) => {
+    const children = compactBlockOutline(node.children);
+    const isStructural = node.kind !== "statement" || node.issueCount > 0 || children.length > 0;
+    return isStructural ? [{ ...node, children }] : [];
+  });
+}

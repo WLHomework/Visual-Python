@@ -1,6 +1,7 @@
 import type { PluginContext } from "../../../api/types";
 import { colour } from "../constants";
-import { addManimImport, pythonCall, value } from "../helpers";
+import { addManimImport, pythonCall, suite, value } from "../helpers";
+import { createLocalAudioBeginMarker, createLocalAudioCueMarker, createLocalAudioEndMarker } from "../localAudioMarkers";
 
 export const registerScenePlaybackBlocks = (context: PluginContext) => {
   context.registerBlock({
@@ -89,5 +90,59 @@ export const registerScenePlaybackBlocks = (context: PluginContext) => {
   }, (block, generator) => {
     addManimImport(generator);
     return `self.wait(${value(generator, block, "SECONDS", "1")})\n`;
+  });
+
+  context.registerBlock({
+    type: "visual_python_manim_play_local_audio",
+    message0: "播放本地音频 %1 开始偏移 %2 秒 音量增益 %3 dB",
+    args0: [
+      { type: "input_value", name: "PATH", check: "String" },
+      { type: "input_value", name: "TIME_OFFSET", check: "Number" },
+      { type: "input_value", name: "GAIN", check: "Number" },
+    ],
+    inputsInline: true,
+    previousStatement: null,
+    nextStatement: null,
+    colour,
+    tooltip: "播放本地音乐、音效或录音。右键积木可选择音频文件；路径也可以手动填写。需要等待音频结束时，请在后面连接等待积木。",
+  }, (block, generator) => {
+    addManimImport(generator);
+    const pathBlock = block.getInputTargetBlock("PATH");
+    const offsetBlock = block.getInputTargetBlock("TIME_OFFSET");
+    const gainBlock = block.getInputTargetBlock("GAIN");
+    const pathExpression = value(generator, block, "PATH", "'audio.wav'");
+    const path = pathBlock?.type === "text" ? String(pathBlock.getFieldValue("TEXT") ?? "") : undefined;
+    const timeOffset = offsetBlock?.type === "math_number" ? Number(offsetBlock.getFieldValue("NUM")) : undefined;
+    const gain = gainBlock?.type === "math_number" ? Number(gainBlock.getFieldValue("NUM")) : undefined;
+    return `${createLocalAudioCueMarker({ version: 1, pathExpression, ...(path === undefined ? {} : { path }), ...(timeOffset === undefined ? {} : { timeOffset }), ...(gain === undefined ? {} : { gain }), blockId: block.id })}\n`;
+  });
+
+  context.registerBlock({
+    type: "visual_python_manim_play_local_audio_with_animation",
+    message0: "播放本地音频 %1 开始偏移 %2 秒 音量增益 %3 dB 同时执行 %4 %5",
+    args0: [
+      { type: "input_value", name: "PATH", check: "String" },
+      { type: "input_value", name: "TIME_OFFSET", check: "Number" },
+      { type: "input_value", name: "GAIN", check: "Number" },
+      { type: "input_dummy" },
+      { type: "input_statement", name: "BODY" },
+    ],
+    inputsInline: false,
+    previousStatement: null,
+    nextStatement: null,
+    colour,
+    tooltip: "播放本地音频并同时执行内部动画。动画较短时，渲染前会根据音频时长自动补足等待。",
+  }, (block, generator) => {
+    addManimImport(generator);
+    const pathBlock = block.getInputTargetBlock("PATH");
+    const offsetBlock = block.getInputTargetBlock("TIME_OFFSET");
+    const gainBlock = block.getInputTargetBlock("GAIN");
+    const pathExpression = value(generator, block, "PATH", "'audio.wav'");
+    const path = pathBlock?.type === "text" ? String(pathBlock.getFieldValue("TEXT") ?? "") : undefined;
+    const timeOffset = offsetBlock?.type === "math_number" ? Number(offsetBlock.getFieldValue("NUM")) : undefined;
+    const gain = gainBlock?.type === "math_number" ? Number(gainBlock.getFieldValue("NUM")) : undefined;
+    const body = suite(generator, block, "BODY").replace(new RegExp(`^${generator.INDENT}`), "").replace(new RegExp(`\\n${generator.INDENT}`, "g"), "\n");
+    const marker = createLocalAudioBeginMarker({ version: 1, pathExpression, ...(path === undefined ? {} : { path }), ...(timeOffset === undefined ? {} : { timeOffset }), ...(gain === undefined ? {} : { gain }), blockId: block.id });
+    return `${marker}\n${body}${createLocalAudioEndMarker()}\n`;
   });
 };
