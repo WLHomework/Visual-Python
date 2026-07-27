@@ -17,7 +17,9 @@ describe("Manim local audio preprocessing", () => {
     expect(resolveAudio).toHaveBeenCalledWith({ path: "C:\\audio\\music.wav", timeOffset: 1.25, gain: -4, blockId: "audio-block" });
     expect(prepared.synchronizedSegmentCount).toBe(1);
     expect(prepared.code).toContain('self.add_sound("C:\\\\audio\\\\music.wav", time_offset=1.25, gain=-4)');
-    expect(prepared.code).toContain("self.wait(max(0, 3.750 -");
+    expect(prepared.code).toContain("_visual_python_local_audio_start_1_remaining = 3.750 -");
+    expect(prepared.code).toContain("self.wait(_visual_python_local_audio_start_1_remaining) if _visual_python_local_audio_start_1_remaining > 0 else None");
+    expect(prepared.code).not.toContain("self.wait(max(0,");
   });
 
   it("rejects dynamic paths before rendering", async () => {

@@ -31,7 +31,7 @@ export const colourForManimBlock = (type: string): string => {
   if (hasAny(type, ["_tracker", "_updater", "_always_redraw", "_traced_path", "_decimal_follow", "_decimal_number", "_variable"])) return manimBlockColours.dynamic;
   if (hasAny(type, ["_scene", "_camera", "_ambient_rotation", "_add", "_remove", "_clear", "_wait", "_play"])) return manimBlockColours.scene;
   if (hasAny(type, ["_animation", "_animate_", "_play"])) return manimBlockColours.animation;
-  if (hasAny(type, ["_set_color", "_set_opacity", "_set_fill", "_set_stroke", "_move_to", "_shift", "_scale", "_rotate", "_to_edge", "_to_corner", "_next_to", "_arrange"])) return manimBlockColours.method;
+  if (hasAny(type, ["_set_color", "_set_opacity", "_set_fill", "_set_stroke", "_move_to", "_shift", "_scale", "_rotate", "_to_edge", "_to_corner", "_next_to", "_arrange", "_apply_matrix"])) return manimBlockColours.method;
   if (hasAny(type, ["_direction_constant", "_scaled_direction", "_math_constant", "_degrees", "_range", "_point", "_color_constant", "_table_data", "_matrix_data"])) return manimBlockColours.value;
   return manimBlockColours.object;
 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
-import { buildDefinedFunctionCallToolbox, defaultVisualThemeId, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
+import { buildDefinedFunctionCallToolbox, defaultVisualThemeId, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, starterState, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
 import { getManimVoiceoverContextWarning, getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 
 const variableFields: Record<string, string[]> = {
@@ -603,8 +603,26 @@ describe("Python block generators", () => {
     expect(standardLibrary).toBeTruthy();
     expect(standardLibrary.contents.some((item: any) => item.kind === "category")).toBe(false);
     expect(standardLibrary.contents.filter((item: any) => item.kind === "label").map((item: any) => item.text)).toEqual([
-      "导入", "数学 math", "随机 random", "JSON", "日期时间 datetime", "路径 pathlib", "系统 os", "正则表达式 re", "集合工具 collections",
+      "导入", "数学", "随机", "JSON", "日期与时间", "文件路径", "系统", "正则表达式", "集合工具",
     ]);
+    expect(JSON.stringify(toolbox)).toContain("你好，世界");
+    expect(JSON.stringify(toolbox)).not.toContain("hello python");
+    expect(JSON.stringify(starterState)).toContain("你好，Python！");
+    expect(JSON.stringify(starterState)).toContain("图形化编程");
+  });
+
+  it("uses one colour for every block in the async toolbox", () => {
+    const workspace = new Blockly.Workspace();
+    const asyncTypes = [
+      "python_async_function_structured",
+      "python_async_typed_function_structured",
+      "python_await",
+      "python_async_for",
+      "python_async_with",
+    ];
+    const colours = asyncTypes.map((type) => workspace.newBlock(type).getColour());
+    expect(new Set(colours)).toEqual(new Set(["#8762b8"]));
+    workspace.dispose();
   });
 
   it("validates Python block placement contexts", () => {

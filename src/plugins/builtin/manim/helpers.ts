@@ -129,7 +129,7 @@ export const registerObjectReferenceBlockDefinition = () => {
   Blockly.Blocks.visual_python_manim_object_ref = {
     init(this: Blockly.Block) {
       this.appendDummyInput()
-        .appendField("Manim 对象")
+        .appendField("场景对象")
         .appendField(new Blockly.FieldDropdown(function (this: Blockly.FieldDropdown) {
           return getManimObjectOptions(this.getSourceBlock());
         }), "VAR");

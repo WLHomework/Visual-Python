@@ -6,7 +6,7 @@ import { PluginRegistry } from "../../core/pluginRegistry";
 import { dynamicMatrixDataShadow, dynamicTableDataShadow } from "./helpers";
 import { manimPlugin } from "./index";
 import { colourForManimBlock, manimBlockColours } from "./constants";
-import { registerManimToolbox } from "./toolbox";
+import { hiddenCompatibilityBlockTypes, registerManimToolbox } from "./toolbox";
 import { parseVoiceoverMarker } from "./voiceoverMarkers";
 import { parseLocalAudioMarker } from "./localAudioMarkers";
 
@@ -52,6 +52,7 @@ describe("Manim plugin generators", () => {
     expect(colourForManimBlock("visual_python_manim_animate_rotate")).toBe(manimBlockColours.animation);
     expect(colourForManimBlock("visual_python_manim_animate_move_to")).toBe(manimBlockColours.animation);
     expect(colourForManimBlock("visual_python_manim_transform_method")).toBe(manimBlockColours.object);
+    expect(colourForManimBlock("visual_python_manim_apply_matrix")).toBe(manimBlockColours.method);
     expect(new Set(Object.values(manimBlockColours)).size).toBe(6);
   });
 
@@ -68,8 +69,22 @@ describe("Manim plugin generators", () => {
       manimBlockColours.object,
       manimBlockColours.dynamic,
       manimBlockColours.method,
-      manimBlockColours.object,
     ];
+    expect(groups.map((group) => group.name)).toEqual([
+      "常用",
+      "场景与流程",
+      "对象",
+      "动画效果",
+      "坐标与数学工具",
+      "列表与批量结构",
+      "动态绑定",
+      "属性与样式",
+    ]);
+    const toolboxJson = JSON.stringify(registered[0]);
+    expect(toolboxJson).toContain("你好");
+    expect(toolboxJson).toContain("欢迎学习动画制作");
+    expect(toolboxJson).toContain("标注");
+    expect(toolboxJson).not.toContain("Hello Manim");
     expected.forEach((groupColour, index) => {
       if (!groupColour) return;
       expect(groups[index].colour).toBe(groupColour);
@@ -406,9 +421,9 @@ describe("Manim plugin generators", () => {
     const unknownToolboxRefs = uniqueToolboxRefs.filter((type) => !blockDefs.has(type));
 
     expect(blockDefs.size).toBe(148);
-    expect(uniqueToolboxRefs).toHaveLength(148);
+    expect(uniqueToolboxRefs).toHaveLength(blockDefs.size - hiddenCompatibilityBlockTypes.length);
     expect(duplicateBlockDefs).toEqual([]);
-    expect(missingFromToolbox).toEqual([]);
+    expect(missingFromToolbox.sort()).toEqual([...hiddenCompatibilityBlockTypes].sort());
     expect(unknownToolboxRefs).toEqual([]);
   });
 

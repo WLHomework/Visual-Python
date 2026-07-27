@@ -47,6 +47,7 @@ import { normalizeProjectFileName, projectFileBaseName } from "./projectNaming";
 import { projectResourceReference, resolveProjectResourceReference, type ProjectResource } from "./projectResources";
 import { parseDraftProject, parseProjectFile, type DraftProject, type ProjectFile } from "./projectFile";
 import { ManimRenderAttempt, ManimRenderCancelledError } from "./manimRenderCancellation";
+import { isManimLatexFailure } from "./manimErrorClassification";
 import { readStoredPythonEnvironment, supportedPythonRangeLabel, type PythonEnvironment } from "./pythonEnvironment";
 
 type RecentProject = { path: string; name: string; openedAt: number };
@@ -727,7 +728,7 @@ const diagnoseManimError = (traceback: string, block?: Blockly.Block) => {
   else if (errorType === "AttributeError") suggestion = `当前对象调用了不存在的属性或方法。请检查报错位置的方法名；配音必须通过 AI 专用配音工具插入，不能在 Scene 中调用 self.add_voiceover 或 self.add_synchronized_voiceover。`;
   else if (errorType === "ZeroDivisionError") suggestion = `除数不能为 0。请检查高亮积木中的数值、比例或范围步长，并改为非零值。`;
   else if (errorType === "FileNotFoundError") suggestion = `高亮积木引用的文件不存在。请重新选择有效文件，并避免使用已移动的绝对路径。`;
-  else if (/latex|tex/i.test(cleanTraceback)) suggestion = `LaTeX 渲染失败。请检查公式语法、反斜杠和成对括号；如果语法正确，再确认本机已安装 LaTeX。`;
+  else if (isManimLatexFailure(cleanTraceback)) suggestion = `LaTeX 渲染失败。请检查公式语法、反斜杠和成对括号；如果语法正确，再确认本机已安装 LaTeX。`;
   else if (errorType === "ValueError") suggestion = `输入值不在允许范围内。请检查高亮积木中的半径、尺寸、范围起止值和列表结构。`;
   else if (errorType === "TypeError") suggestion = `输入类型不匹配。请检查高亮积木的连接：对象槽连接 Manim 对象，数值槽连接数字，列表槽连接 Python 列表。`;
 
@@ -937,7 +938,6 @@ export default function App() {
     return saved === "tray" || saved === "exit" ? saved : "ask";
   });
   const [windowMaximized, setWindowMaximized] = useState(false);
-  const [rightPanelOpen, setRightPanelOpen] = useState(() => localStorage.getItem("visual-python:right-panel-open") !== "false");
   const [rightPanelWidth, setRightPanelWidth] = useState(() => {
     const saved = Number(localStorage.getItem("visual-python:right-panel-width"));
     return Number.isFinite(saved) && saved >= 360 && saved <= 720 ? saved : 480;
@@ -1542,7 +1542,6 @@ export default function App() {
     return () => cancelAnimationFrame(frame);
   }, [code, workspaceRevision]);
 
-  useEffect(() => { localStorage.setItem("visual-python:right-panel-open", String(rightPanelOpen)); }, [rightPanelOpen]);
   useEffect(() => { workspaceModeRef.current = workspaceMode; }, [workspaceMode]);
   useEffect(() => { sceneDocumentsRef.current = sceneDocuments; }, [sceneDocuments]);
   useEffect(() => { activeSceneIdRef.current = activeSceneId; }, [activeSceneId]);
@@ -1630,13 +1629,11 @@ export default function App() {
   }, [workspaceMode]);
 
   const activeCode = workspaceMode === "code" ? sourceCode : code;
-  const effectiveRightPanelOpen = workspaceMode !== "visual" || rightPanelOpen;
-  const effectiveBottomPanelOpen = workspaceMode === "visual" || bottomPanelOpen;
+  const effectiveBottomPanelOpen = bottomPanelOpen;
 
   const openConsolePanel = useCallback((panel: ConsolePanel) => {
     setActivePanel(panel);
     setBottomPanelOpen(true);
-    setRightPanelOpen(true);
   }, []);
 
   const ensureDesktopNotificationPermission = useCallback(async () => {
@@ -1706,8 +1703,6 @@ export default function App() {
       setCodeSyntaxDiagnostic(null);
       setCodeRuntimeDiagnostic(null);
     }
-    setRightPanelOpen(nextMode !== "visual");
-    if (nextMode === "visual") setBottomPanelOpen(true);
     setDirty(true);
     if (nextMode === "code") requestAnimationFrame(() => codeEditor.current?.focus());
   }, [code, renderingManim, running, sourceCodeInitialized, workspaceMode]);
@@ -1969,7 +1964,6 @@ export default function App() {
   useEffect(() => {
     if (!problems.length) return;
     setBottomPanelOpen(true);
-    setRightPanelOpen(true);
   }, [problems]);
 
   useEffect(() => {
@@ -2965,7 +2959,7 @@ export default function App() {
     setSourceCode("");
     setSourceCodeInitialized(false);
     setWorkspaceMode("split");
-    setRightPanelOpen(true);
+    setBottomPanelOpen(true);
     setProblems([]);
     setManimVideo(null);
     setOutput([{ id: outputId.current++, stream: "system", data: `已加载示例：${example.title}\n` }]);
@@ -3010,7 +3004,7 @@ export default function App() {
     setContextProblems(contextIssuesToProblems(issues));
     if (!issues.length) return true;
     setActivePanel("problems");
-    setRightPanelOpen(true);
+    setBottomPanelOpen(true);
     requestAnimationFrame(() => focusBlock(issues[0].blockId));
     return false;
   }, [focusBlock, workspaceMode]);
@@ -3019,7 +3013,6 @@ export default function App() {
     if (running) return;
     setProblems([]);
     setCodeRuntimeDiagnostic(null);
-    setRightPanelOpen(true);
     setBottomPanelOpen(true);
     if (!validateBeforeExecution()) return;
     stderrBuffer.current = "";
@@ -3066,7 +3059,6 @@ export default function App() {
     if (renderingManim) return;
     void ensureDesktopNotificationPermission();
     setProblems([]);
-    setRightPanelOpen(true);
     setBottomPanelOpen(true);
     if (!validateBeforeExecution()) return;
     const renderSource = isBlockWorkspaceMode(workspaceMode) && workspace.current
@@ -3952,7 +3944,7 @@ export default function App() {
   }, []);
 
   const startRightPanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!effectiveRightPanelOpen || workspaceMode === "code") return;
+    if (workspaceMode !== "split") return;
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = rightPanelWidth;
@@ -3968,7 +3960,7 @@ export default function App() {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
-  }, [effectiveRightPanelOpen, rightPanelWidth, workspaceMode]);
+  }, [rightPanelWidth, workspaceMode]);
 
   const runAiCodeAgentTask = useCallback(async ({
     prompt,
@@ -4751,7 +4743,7 @@ export default function App() {
   }, [aiAssistantOpen, aiPanelWidth]);
 
   const startBottomPanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!effectiveBottomPanelOpen || workspaceMode === "visual") return;
+    if (!effectiveBottomPanelOpen) return;
     event.preventDefault();
     const startY = event.clientY;
     const startHeight = bottomPanelHeight;
@@ -4767,7 +4759,7 @@ export default function App() {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
-  }, [bottomPanelHeight, effectiveBottomPanelOpen, workspaceMode]);
+  }, [bottomPanelHeight, effectiveBottomPanelOpen]);
 
   const allMissingPythonPackages = collectPluginPythonPackages().filter((name) => packageStatus[name] === false);
 
@@ -4856,12 +4848,14 @@ export default function App() {
         </div>
       </div>
     </header>
-    <section className={`workbench mode-${workspaceMode} ${aiAssistantOpen ? "ai-panel-open" : ""} ${effectiveRightPanelOpen ? "" : "right-panel-hidden"} ${effectiveBottomPanelOpen ? "" : "bottom-panel-collapsed"}`} style={{ "--right-panel-width": `${rightPanelWidth}px`, "--bottom-panel-height": `${bottomPanelHeight}px`, "--ai-panel-width": `${aiPanelWidth}px` } as CSSProperties}>
+    <section className={`workbench mode-${workspaceMode} ${aiAssistantOpen ? "ai-panel-open" : ""} ${effectiveBottomPanelOpen ? "" : "bottom-panel-collapsed"}`} style={{ "--right-panel-width": `${rightPanelWidth}px`, "--bottom-panel-height": `${bottomPanelHeight}px`, "--ai-panel-width": `${aiPanelWidth}px` } as CSSProperties}>
       <aside className="activity-rail" onContextMenu={(event) => event.preventDefault()}>
         <button className={`activity ${isBlockWorkspaceMode(workspaceMode) ? "active" : ""}`} title="切换到纯图形化" disabled={running || renderingManim} onClick={() => changeWorkspaceMode("visual")}><Blocks size={20}/></button>
         <button className={`activity ${aiAssistantOpen ? "active" : ""}`} title={workspaceMode === "code" ? "AI 编程助手" : "AI 编程助手仅在纯代码模式可用"} aria-label="AI 编程助手" aria-pressed={aiAssistantOpen} disabled={workspaceMode !== "code"} onClick={() => setAiAssistantOpen((open) => !open)}><Sparkles size={20}/></button>
         <div className="rail-spacer"/><button className={`activity ${settingsOpen || manimRenderSettingsOpen || pluginsOpen || resourcesOpen ? "active" : ""}`} title="设置" onClick={() => openApplicationSettings("appearance")}><Settings size={20}/></button>
       </aside>
+      <section className="workspace-shell">
+        <div className="workspace-content">
       <section className="block-panel">
         <div className="block-search" style={{ width: blockToolboxWidth || 172 }} onPointerDown={() => {
           suppressToolboxAutoHide.current = true;
@@ -4883,13 +4877,15 @@ export default function App() {
         </div>
         <div ref={host} className="blockly-host"/>
       </section>
-      <div className={`panel-resizer ${effectiveRightPanelOpen ? "" : "collapsed"}`} onPointerDown={startRightPanelResize} role="separator" aria-label="调整辅助面板宽度" aria-orientation="vertical"/>
-      <aside className={`right-panel ${effectiveRightPanelOpen ? "" : "collapsed"}`} aria-hidden={!effectiveRightPanelOpen}>
+      <div className="panel-resizer" onPointerDown={startRightPanelResize} role="separator" aria-label="调整辅助面板宽度" aria-orientation="vertical"/>
+      <aside className="right-panel">
         <div className="panel-head"><div className="code-scene-tabs" role="tablist" aria-label="Python 场景">{workspaceMode === "code" ? sceneDocuments.map((scene) => { const aiStatus = sceneAiStatuses[scene.id]; const aiStatusLabel = aiStatus ? ({ working: "AI 正在处理", changed: "AI 已修改", error: "AI 处理出错", validated: "AI 已校验", rendered: "AI 已检查渲染" } as const)[aiStatus] : ""; return <div key={scene.id} className={`scene-tab ${scene.id === activeSceneId ? "active" : ""}`} role="tab" aria-selected={scene.id === activeSceneId}><button className="scene-tab-label" onClick={() => focusManimSceneTab(scene.id)} title={`打开场景 ${scene.name}`}><Film size={13}/><span>{scene.name}</span>{aiStatus && <i className={`scene-ai-status ${aiStatus}`} title={aiStatusLabel} aria-label={aiStatusLabel}/>}</button><button className="scene-tab-close" onClick={() => closeManimSceneTab(scene.id)} title={`删除场景 ${scene.name}`} aria-label={`删除场景 ${scene.name}`}><X size={12}/></button></div>; }) : <div className="panel-tab active"><Braces size={14}/> Python</div>}{workspaceMode === "code" && <button className="scene-tab-add" onClick={addManimSceneTab} title="新建独立 Manim 场景" aria-label="新建独立 Manim 场景"><Plus size={14}/></button>}</div><div className="panel-head-actions"><span className="read-only">{workspaceMode === "code" ? "独立场景" : "实时生成"}</span>{workspaceMode === "code" && <div className="code-outline-wrap" ref={codeOutlineRef}><button ref={codeOutlineTriggerRef} className="code-outline-trigger" disabled={!codeOutline.length} aria-label="代码结构大纲" title="代码结构大纲" aria-haspopup="menu" aria-expanded={codeOutlineOpen} onClick={() => setCodeOutlineOpen((open) => !open)}><ListTree size={15}/></button>{codeOutlineOpen && <div className="code-outline-menu" role="menu" aria-label="代码结构">{codeOutline.map((item) => <button key={`${item.kind}-${item.lineNumber}-${item.label}`} role="menuitem" onClick={() => focusCodeOutlineItem(item)} title={`第 ${item.lineNumber} 行`}><span className={`code-outline-icon outline-${item.kind}`}>{item.kind === "function" ? <Braces size={14}/> : <Box size={14}/>}</span><span className="code-outline-label"><strong>{item.label}</strong><small>{item.kind === "function" ? item.signature : `class ${item.label}`}</small></span><span className="code-outline-line">{item.lineNumber}</span></button>)}</div>}</div>}</div></div>
         <div className="editor-wrap"><Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `scene-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense></div>
-        <div className={`console-resizer ${workspaceMode === "visual" || !effectiveBottomPanelOpen ? "collapsed" : ""}`} onPointerDown={startBottomPanelResize} role="separator" aria-label="调整输出面板高度" aria-orientation="horizontal" aria-valuemin={160} aria-valuemax={600} aria-valuenow={bottomPanelHeight}/>
+      </aside>
+        </div>
+        <div className={`console-resizer ${!effectiveBottomPanelOpen ? "collapsed" : ""}`} onPointerDown={startBottomPanelResize} role="separator" aria-label="调整输出面板高度" aria-orientation="horizontal" aria-valuemin={160} aria-valuemax={600} aria-valuenow={bottomPanelHeight}/>
         <div ref={consolePanelRef} className={`console-panel ${effectiveBottomPanelOpen ? "" : "collapsed"}`} onContextMenu={openConsoleContextMenu}>
-          <div className="console-tabs"><button className={activePanel === "output" ? "active" : ""} onClick={() => openConsolePanel("output")}><Terminal size={13}/> 输出</button><button className={activePanel === "problems" ? "active" : ""} onClick={() => openConsolePanel("problems")}>问题 <span className="count">{displayedProblems.length}</span></button><button className={activePanel === "video" ? "active" : ""} onClick={() => openConsolePanel("video")}><Film size={13}/> 视频</button><span className="console-spacer"/><button className="clear-output" onClick={clearConsole} title="清空输出" aria-label="清空输出"><Trash2 size={13}/></button><button className="panel-collapse" onClick={() => workspaceMode === "visual" ? setRightPanelOpen(false) : setBottomPanelOpen((open) => !open)} title={workspaceMode === "visual" ? "关闭辅助面板" : effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"} aria-label={workspaceMode === "visual" ? "关闭辅助面板" : effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"}>{effectiveBottomPanelOpen ? <PanelBottomClose size={14}/> : <PanelBottomOpen size={14}/>}</button></div>
+          <div className="console-tabs"><button className={activePanel === "output" ? "active" : ""} onClick={() => openConsolePanel("output")}><Terminal size={13}/> 输出</button><button className={activePanel === "problems" ? "active" : ""} onClick={() => openConsolePanel("problems")}>问题 <span className="count">{displayedProblems.length}</span></button><button className={activePanel === "video" ? "active" : ""} onClick={() => openConsolePanel("video")}><Film size={13}/> 视频</button><span className="console-spacer"/><button className="clear-output" onClick={clearConsole} title="清空输出" aria-label="清空输出"><Trash2 size={13}/></button><button className="panel-collapse" onClick={() => setBottomPanelOpen((open) => !open)} title={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"} aria-label={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"}>{effectiveBottomPanelOpen ? <PanelBottomClose size={14}/> : <PanelBottomOpen size={14}/>}</button></div>
           <div className={`console-content ${renderingManim && manimRenderProgress ? "has-manim-render-status" : ""}`}>
             {renderingManim && manimRenderProgress && <div className={`manim-render-status phase-${manimRenderProgress.phase}`} role="progressbar" aria-label={`${manimRenderProgress.scene} ${manimRenderProgress.label}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={manimRenderProgress.percent}>
               <div className="manim-render-status-text"><Film size={13}/><strong>{manimRenderProgress.scene}</strong><span>{manimRenderProgress.label}</span></div>
@@ -4900,11 +4896,10 @@ export default function App() {
             {activePanel === "output" && <div className="stdin-row"><span className="stdin-prompt">›</span><input value={stdinValue} onChange={(event) => setStdinValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void sendInput(); }} placeholder={running ? "输入内容并按 Enter" : "程序运行时可输入"} disabled={!running}/><button onClick={sendInput} disabled={!running || !stdinValue.length} title="发送输入"><Send size={14}/></button></div>}
           </div>
         </div>
-      </aside>
+      </section>
       <div className={`ai-panel-resizer ${aiAssistantOpen ? "" : "collapsed"}`} onPointerDown={startAiPanelResize} role="separator" aria-label="调整 AI 智能体宽度" aria-orientation="vertical" aria-valuemin={340} aria-valuemax={520} aria-valuenow={aiPanelWidth}/>
       <aside className={`ai-drawer ${aiAssistantOpen ? "open" : ""}`} aria-hidden={!aiAssistantOpen}>
-        <header><div><span className="ai-drawer-icon"><Sparkles size={16}/></span><strong>AI 编程助手</strong></div><div className="ai-drawer-actions"><button onClick={() => openApplicationSettings("ai")} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={16}/></button><button onClick={() => setAiAssistantOpen(false)} title="关闭 AI 编程助手" aria-label="关闭 AI 编程助手"><X size={16}/></button></div></header>
-        <AiAssistantPanel key={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} conversationScope={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} lineCount={sourceCode ? sourceCode.split("\n").length : 0} sceneName={sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前场景"} onOpenSettings={() => openApplicationSettings("ai")} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onUndoCodeChange={undoAiCodeChange} onApplyCodeChange={applyAiCodeChange} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")}/>
+        <AiAssistantPanel key={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} conversationScope={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} lineCount={sourceCode ? sourceCode.split("\n").length : 0} sceneName={sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前场景"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onUndoCodeChange={undoAiCodeChange} onApplyCodeChange={applyAiCodeChange} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")}/>
       </aside>
     </section>
     <footer className="statusbar" onContextMenu={(event) => event.preventDefault()}><div className="python-environment-switcher" ref={pythonEnvironmentMenuRef}><button className="environment-status" aria-haspopup="menu" aria-expanded={pythonEnvironmentMenuOpen} disabled={running || renderingManim} onClick={() => { const next = !pythonEnvironmentMenuOpen; setPythonEnvironmentMenuOpen(next); if (next) void detectPythonEnvironments(); }}><span>{pythonEnvironment ? `Python ${pythonEnvironment.version}` : "未选择 Python"}</span></button>{pythonEnvironmentMenuOpen && <div className="python-environment-menu" role="menu" aria-label="切换 Python 解释器"><header><span><strong>Python 解释器</strong><small>{supportedPythonRangeLabel}</small></span><button className="python-environment-refresh" onClick={() => void detectPythonEnvironments()} disabled={detectingPython} title="重新检测" aria-label="重新检测 Python 解释器"><RefreshCw size={13} className={detectingPython ? "spin" : ""}/></button></header><div className="python-environment-options">{pythonEnvironments.length ? pythonEnvironments.map((environment) => { const selected = pythonEnvironment?.path.toLowerCase() === environment.path.toLowerCase(); return <button key={environment.path} className={`python-environment-option ${selected ? "selected" : ""}`} role="menuitemradio" aria-checked={selected} title={environment.path} onClick={() => selectPythonEnvironment(environment)}><span className="python-environment-option-check">{selected && <Check size={12}/>}</span><span><strong>Python {environment.version}</strong><small>{environment.implementation}{environment.virtual_env ? " · 虚拟环境" : ""}</small><code>{environment.path}</code></span></button>; }) : <div className="python-environment-empty"><Braces size={18}/><span>{detectingPython ? "正在检测 Python..." : `未检测到${supportedPythonRangeLabel}`}</span></div>}</div></div>}</div><span className="status-spacer"/>{workspaceMode === "code" && <div className="editor-status-items"><button onClick={() => runCodeEditorAction("editor.action.gotoLine")} title="跳转到行">行 {codeCursorPosition.lineNumber}，列 {codeCursorPosition.column}</button><span title="Python 缩进宽度">空格: {codeIndentSize}</span><span title="文件编码">UTF-8</span></div>}<span>{running ? "正在运行" : renderingManim ? "正在渲染" : "就绪"}</span></footer>
@@ -4925,7 +4920,7 @@ export default function App() {
         <button role="menuitem" disabled={!manimVideo} onClick={() => runConsoleContextAction(() => copyConsoleText(manimVideo?.path || ""))}><Copy size={15}/><span>复制视频路径</span></button>
       </>}
       <div className="console-context-separator" role="separator"/>
-      <button role="menuitem" onClick={() => runConsoleContextAction(() => workspaceMode === "visual" ? setRightPanelOpen(false) : setBottomPanelOpen(false))}><PanelBottomClose size={15}/><span>{workspaceMode === "visual" ? "关闭辅助面板" : "折叠面板"}</span></button>
+      <button role="menuitem" onClick={() => runConsoleContextAction(() => setBottomPanelOpen(false))}><PanelBottomClose size={15}/><span>折叠面板</span></button>
     </div>}
     {formulaEditorRequest && <Suspense fallback={<div className="formula-editor-backdrop"><div className="formula-editor-loading"><Braces size={22}/><span>正在准备公式编辑器...</span></div></div>}><FormulaEditorDialog request={formulaEditorRequest} onClose={() => setFormulaEditorRequest(null)}/></Suspense>}
     {manimRenderSettingsOpen && <div className="settings-backdrop management-center">{renderManagementNavigation()}<section className="settings-dialog manim-render-settings-dialog management-page" role="region" aria-label="Manim 渲染配置">

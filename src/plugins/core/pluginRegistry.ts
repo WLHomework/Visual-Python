@@ -1,5 +1,6 @@
 import * as Blockly from "blockly/core";
 import { pythonGenerator } from "blockly/python";
+import { localizeBlockDefinition } from "../../blockDisplayLocalization";
 import {
   PLUGIN_API_VERSION,
   type PluginBlockDefinition,
@@ -171,7 +172,7 @@ export class PluginRegistry {
         const prefix = pluginPrefix(manifest.id);
         if (!definition.type.startsWith(prefix)) throw new Error(`积木类型必须以 ${prefix} 开头：${definition.type}`);
         if (Blockly.Blocks[definition.type] || contribution.blockTypes.has(definition.type)) throw new Error(`积木类型重复：${definition.type}`);
-        Blockly.common.defineBlocksWithJsonArray([definition]);
+        Blockly.common.defineBlocksWithJsonArray([localizeBlockDefinition(definition)]);
         pythonGenerator.forBlock[definition.type] = generator as (block: Blockly.Block, generator: typeof pythonGenerator) => any;
         contribution.blockTypes.add(definition.type);
       },

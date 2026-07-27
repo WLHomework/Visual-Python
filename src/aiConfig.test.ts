@@ -11,6 +11,7 @@ describe("AI model configuration", () => {
 
   it("uses the Bailian OpenAI-compatible defaults", () => {
     expect(normalizeAiModelConfig(null)).toEqual(defaultAiModelConfig);
+    expect(defaultAiModelConfig.model).toBe("qwen3.7-flash");
   });
 
   it("trims the endpoint and model before saving", () => {

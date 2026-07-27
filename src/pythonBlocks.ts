@@ -3,11 +3,14 @@ import "blockly/blocks";
 import * as ZhHans from "blockly/msg/zh-hans";
 import { pythonGenerator } from "blockly/python";
 import { Order } from "blockly/python";
+import { localizeBlockDefinitions } from "./blockDisplayLocalization";
 import { pythonSyntaxToolbox, registerPythonSyntaxBlocks } from "./pythonSyntaxBlocks";
 
 const locale = Object.fromEntries(
   Object.entries(ZhHans).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
 );
+locale.LOGIC_BOOLEAN_TRUE = "真";
+locale.LOGIC_BOOLEAN_FALSE = "假";
 Blockly.setLocale(locale);
 
 const blockStyles = {
@@ -115,15 +118,15 @@ class ThemedMutatorIcon extends Blockly.icons.MutatorIcon {
 
 const createMutatorIcon = (blockTypes: string[], block: Blockly.BlockSvg) => new ThemedMutatorIcon(blockTypes, block);
 
-Blockly.common.defineBlocksWithJsonArray([
+Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
   { type: "python_print", message0: "打印 %1", args0: [{ type: "input_value", name: "VALUE" }], previousStatement: null, nextStatement: null, colour: colours.inputOutput },
   { type: "python_input", message0: "输入，提示 %1", args0: [{ type: "input_value", name: "PROMPT", check: "String" }], output: null, colour: colours.inputOutput },
   { type: "python_input_assign", message0: "输入并保存到 %1 提示 %2", args0: [{ type: "field_variable", name: "VAR", variable: "answer" }, { type: "input_value", name: "PROMPT", check: "String" }], previousStatement: null, nextStatement: null, colour: colours.inputOutput },
   { type: "python_import", message0: "导入模块 %1", args0: [{ type: "field_input", name: "MODULE", text: "math" }], previousStatement: null, nextStatement: null, colour: colours.module },
   { type: "python_from_import", message0: "从 %1 导入 %2", args0: [{ type: "field_input", name: "MODULE", text: "math" }, { type: "field_input", name: "NAME", text: "sqrt" }], previousStatement: null, nextStatement: null, colour: colours.module },
   { type: "python_raw_expression", message0: "Python 表达式 %1", args0: [{ type: "field_input", name: "CODE", text: "len(items)" }], output: null, colour: colours.module },
-  { type: "python_floor_divide", message0: "%1 整除 // %2", args0: [{ type: "input_value", name: "A", check: "Number" }, { type: "input_value", name: "B", check: "Number" }], inputsInline: true, output: "Number", colour: "#4f72b8" },
-  { type: "python_bitwise", message0: "%1 %2 %3", args0: [{ type: "input_value", name: "A", check: "Number" }, { type: "field_dropdown", name: "OP", options: [["按位与 &", "&"], ["按位或 |", "|"], ["按位异或 ^", "^"], ["左移 <<", "<<"], ["右移 >>", ">>"]] }, { type: "input_value", name: "B", check: "Number" }], inputsInline: true, output: "Number", colour: "#4f72b8" },
+  { type: "python_floor_divide", message0: "%1 整除 %2", args0: [{ type: "input_value", name: "A", check: "Number" }, { type: "input_value", name: "B", check: "Number" }], inputsInline: true, output: "Number", colour: "#4f72b8" },
+  { type: "python_bitwise", message0: "%1 %2 %3", args0: [{ type: "input_value", name: "A", check: "Number" }, { type: "field_dropdown", name: "OP", options: [["按位与", "&"], ["按位或", "|"], ["按位异或", "^"], ["左移", "<<"], ["右移", ">>"]] }, { type: "input_value", name: "B", check: "Number" }], inputsInline: true, output: "Number", colour: "#4f72b8" },
   { type: "python_bitwise_not", message0: "按位取反 ~ %1", args0: [{ type: "input_value", name: "VALUE", check: "Number" }], output: "Number", colour: "#4f72b8" },
   { type: "python_membership", message0: "%1 %2 %3", args0: [{ type: "input_value", name: "ITEM" }, { type: "field_dropdown", name: "OP", options: [["在 in", "in"], ["不在 not in", "not in"]] }, { type: "input_value", name: "COLLECTION" }], inputsInline: true, output: "Boolean", colour: "#5968b0" },
   { type: "python_identity", message0: "%1 %2 %3", args0: [{ type: "input_value", name: "A" }, { type: "field_dropdown", name: "OP", options: [["是 is", "is"], ["不是 is not", "is not"]] }, { type: "input_value", name: "B" }], inputsInline: true, output: "Boolean", colour: "#5968b0" },
@@ -174,7 +177,7 @@ Blockly.common.defineBlocksWithJsonArray([
   { type: "python_open_file", message0: "打开文件 %1 模式 %2 编码 %3", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_dropdown", name: "MODE", options: [["读取 r", "r"], ["写入 w", "w"], ["追加 a", "a"], ["二进制读取 rb", "rb"], ["二进制写入 wb", "wb"]] }, { type: "field_input", name: "ENCODING", text: "utf-8" }], inputsInline: true, output: null, colour: colours.module },
   { type: "python_file_read", message0: "文件 %1 读取 %2", args0: [{ type: "input_value", name: "FILE" }, { type: "input_value", name: "SIZE" }], inputsInline: true, output: null, colour: colours.module },
   { type: "python_file_write", message0: "文件 %1 写入 %2", args0: [{ type: "input_value", name: "FILE" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.module },
-]);
+]));
 
 Blockly.Blocks.python_sequence_collection = {
   init(this: any) {
@@ -702,7 +705,7 @@ pythonGenerator.forBlock.python_new_object_structured = pythonGenerator.forBlock
 export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
   kind: "categoryToolbox",
   contents: [
-    { kind: "category", name: "输入输出", colour: "#2f9e8f", contents: [{ kind: "block", type: "python_print" }, { kind: "block", type: "python_input" }, { kind: "block", type: "python_input_assign" }, { kind: "block", type: "python_length" }, { kind: "block", type: "python_convert" }, { kind: "block", type: "text", fields: { TEXT: "hello python" } }] },
+    { kind: "category", name: "输入输出", colour: "#2f9e8f", contents: [{ kind: "block", type: "python_print" }, { kind: "block", type: "python_input" }, { kind: "block", type: "python_input_assign" }, { kind: "block", type: "python_length" }, { kind: "block", type: "python_convert" }, { kind: "block", type: "text", fields: { TEXT: "你好，世界" } }] },
     { kind: "category", name: "赋值", colour: "#b95073", contents: [...pythonSyntaxToolbox.assignment] },
     { kind: "category", name: "逻辑", categorystyle: "logic_category", contents: [{ kind: "block", type: "controls_if" }, { kind: "block", type: "logic_compare" }, { kind: "block", type: "logic_operation" }, { kind: "block", type: "logic_negate" }, { kind: "block", type: "logic_boolean" }, { kind: "block", type: "python_none" }, { kind: "block", type: "python_membership" }, { kind: "block", type: "python_identity" }, { kind: "block", type: "python_conditional" }, ...pythonSyntaxToolbox.logic] },
     { kind: "category", name: "循环", categorystyle: "loop_category", contents: [{ kind: "block", type: "python_for_in" }, { kind: "block", type: "python_for_enumerate" }, { kind: "block", type: "python_for_else" }, { kind: "block", type: "python_while_else" }, { kind: "block", type: "python_range" }, { kind: "block", type: "controls_repeat_ext" }, { kind: "block", type: "controls_whileUntil" }, { kind: "block", type: "controls_for" }, { kind: "block", type: "controls_flow_statements" }, { kind: "block", type: "python_pass" }] },
@@ -712,7 +715,7 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
       { kind: "block", type: "math_random_int" }, { kind: "block", type: "math_random_float" }, { kind: "block", type: "math_on_list" }, ...pythonSyntaxToolbox.math,
     ] },
     { kind: "category", name: "文本", categorystyle: "text_category", contents: [
-      { kind: "block", type: "text", fields: { TEXT: "hello python" } },
+      { kind: "block", type: "text", fields: { TEXT: "你好，世界" } },
       { kind: "block", type: "text_join", extraState: { itemCount: 1 } },
       { kind: "block", type: "text_length" }, { kind: "block", type: "python_string_method" }, ...pythonSyntaxToolbox.text,
     ] },
@@ -738,7 +741,7 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
 };
 
 export const starterState = {
-  blocks: { languageVersion: 0, blocks: [{ type: "variables_set", x: 90, y: 70, fields: { VAR: { name: "message" } }, inputs: { VALUE: { block: { type: "text", fields: { TEXT: "Hello, Python!" } } } }, next: { block: { type: "python_print", inputs: { VALUE: { block: { type: "variables_get", fields: { VAR: { name: "message" } } } } }, next: { block: { type: "controls_repeat_ext", inputs: { TIMES: { shadow: { type: "math_number", fields: { NUM: 3 } } }, DO: { block: { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "Visual coding" } } } } } } } } } } } }] },
+  blocks: { languageVersion: 0, blocks: [{ type: "variables_set", x: 90, y: 70, fields: { VAR: { name: "message" } }, inputs: { VALUE: { block: { type: "text", fields: { TEXT: "你好，Python！" } } } }, next: { block: { type: "python_print", inputs: { VALUE: { block: { type: "variables_get", fields: { VAR: { name: "message" } } } } }, next: { block: { type: "controls_repeat_ext", inputs: { TIMES: { shadow: { type: "math_number", fields: { NUM: 3 } } }, DO: { block: { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "图形化编程" } } } } } } } } } } } }] },
 };
 
 function stripGeneratedVariableDeclarations(code: string): string {

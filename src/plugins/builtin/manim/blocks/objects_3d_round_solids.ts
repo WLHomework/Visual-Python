@@ -14,7 +14,7 @@ export const registerRoundThreeDSolidBlocks = (context: PluginContext) => {
       { type: "field_checkbox", name: "SHOW_BASE", checked: true },
       { type: "field_dropdown", name: "COLOR", options: colorOptions },
     ],
-    inputsInline: true,
+    inputsInline: false,
     output: "ManimObject",
     colour,
   }, (block, generator) => {
@@ -37,7 +37,7 @@ export const registerRoundThreeDSolidBlocks = (context: PluginContext) => {
       { type: "field_checkbox", name: "SHOW_ENDS", checked: true },
       { type: "field_dropdown", name: "COLOR", options: colorOptions },
     ],
-    inputsInline: true,
+    inputsInline: false,
     output: "ManimObject",
     colour,
   }, (block, generator) => {

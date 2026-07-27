@@ -190,7 +190,8 @@ export async function prepareManimVoiceovers(
       const active = stack.pop();
       if (!active) throw new Error("配音时间轴缺少开始积木");
       synchronizedRanges.push({ startLine: active.startLine, endLine: index + 1, duration: active.duration });
-      lines[index] = `${indent}self.wait(max(0, ${active.duration.toFixed(3)} - (self.renderer.time - ${active.variable})))`;
+      const remainingVariable = `${active.variable}_remaining`;
+      lines[index] = `${indent}${remainingVariable} = ${active.duration.toFixed(3)} - (self.renderer.time - ${active.variable}); self.wait(${remainingVariable}) if ${remainingVariable} > 0 else None`;
       continue;
     }
     const text = marker.payload?.text;

@@ -13,7 +13,7 @@ export const registerHighlightAnimationBlocks = (context: PluginContext) => {
       { type: "field_dropdown", name: "COLOR", options: [["YELLOW", "YELLOW"], ["WHITE", "WHITE"], ["RED", "RED"], ["GREEN", "GREEN"], ["BLUE", "BLUE"], ["PURPLE", "PURPLE"], ["ORANGE", "ORANGE"]] },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
-    inputsInline: true,
+    inputsInline: false,
     output: "ManimAnimation",
     colour,
   }, (block, generator) => {
@@ -35,7 +35,7 @@ export const registerHighlightAnimationBlocks = (context: PluginContext) => {
       { type: "field_dropdown", name: "COLOR", options: [["YELLOW", "YELLOW"], ["WHITE", "WHITE"], ["RED", "RED"], ["GREEN", "GREEN"], ["BLUE", "BLUE"], ["PURPLE", "PURPLE"], ["ORANGE", "ORANGE"]] },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
-    inputsInline: true,
+    inputsInline: false,
     output: "ManimAnimation",
     colour,
   }, (block, generator) => {

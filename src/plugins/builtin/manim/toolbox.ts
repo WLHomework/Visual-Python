@@ -10,16 +10,32 @@ const valueCategory = colouredCategory(manimBlockColours.value);
 const dynamicCategory = colouredCategory(manimBlockColours.dynamic);
 const methodCategory = colouredCategory(manimBlockColours.method);
 
+export const hiddenCompatibilityBlockTypes = [
+  "visual_python_manim_text_object",
+  "visual_python_manim_shape_object",
+  "visual_python_manim_curved_shape_object",
+  "visual_python_manim_line_object",
+  "visual_python_manim_3d_object",
+  "visual_python_manim_coordinate_object",
+  "visual_python_manim_create_animation",
+  "visual_python_manim_fade_animation",
+  "visual_python_manim_transform_animation",
+  "visual_python_manim_animate_method",
+  "visual_python_manim_grow_animation",
+  "visual_python_manim_indication_animation",
+  "visual_python_manim_transform_method",
+] as const;
+
 export const registerManimToolbox = (context: PluginContext) => {
   context.registerToolboxCategory({
     id: "visual-python.manim.toolbox",
     name: "Manim",
     colour,
     contents: [
-      category("常用 Manim", [
+      category("常用", [
         toolboxBlock("visual_python_manim_scene"),
         toolboxBlock("visual_python_manim_plain_text_object", {
-          CONTENT: textShadow("Hello Manim"),
+          CONTENT: textShadow("你好"),
           FONT_SIZE: numberShadow(48),
         }),
         toolboxBlock("visual_python_manim_mathtex_object", {
@@ -85,7 +101,7 @@ export const registerManimToolbox = (context: PluginContext) => {
           toolboxBlock("visual_python_manim_wait", { SECONDS: numberShadow(1) }),
         ]),
         sceneCategory("配音", [
-          toolboxBlock("visual_python_manim_voiceover", { TEXT: textShadow("欢迎学习 Manim") }),
+          toolboxBlock("visual_python_manim_voiceover", { TEXT: textShadow("欢迎学习动画制作") }),
           toolboxBlock("visual_python_manim_voiceover_with_animation", { TEXT: textShadow("让我们看看这个动画") }),
         ]),
         sceneCategory("音频", [
@@ -107,7 +123,7 @@ export const registerManimToolbox = (context: PluginContext) => {
           toolboxBlock("visual_python_manim_remove_two"),
           toolboxBlock("visual_python_manim_clear"),
         ]),
-        sceneCategory("3D 相机", [
+        sceneCategory("三维相机", [
           toolboxBlock("visual_python_manim_camera_frame_animation", {
             SCALE: numberShadow(0.6),
             RUN_TIME: numberShadow(2),
@@ -130,11 +146,11 @@ export const registerManimToolbox = (context: PluginContext) => {
       objectCategory("对象", [
         objectCategory("文本与公式", [
           toolboxBlock("visual_python_manim_plain_text_object", {
-            CONTENT: textShadow("Hello Manim"),
+            CONTENT: textShadow("你好"),
             FONT_SIZE: numberShadow(48),
           }),
           toolboxBlock("visual_python_manim_tex_object", {
-            CONTENT: textShadow("Hello Manim"),
+            CONTENT: textShadow("E = mc^2"),
             FONT_SIZE: numberShadow(48),
           }),
           toolboxBlock("visual_python_manim_mathtex_object", {
@@ -142,7 +158,6 @@ export const registerManimToolbox = (context: PluginContext) => {
             FONT_SIZE: numberShadow(48),
           }),
           toolboxBlock("visual_python_manim_formula_value"),
-          toolboxBlock("visual_python_manim_text_object", { CONTENT: textShadow("Hello Manim") }),
         ]),
         objectCategory("基础几何", [
           toolboxBlock("visual_python_manim_circle_object", { RADIUS: numberShadow(1) }),
@@ -282,14 +297,14 @@ export const registerManimToolbox = (context: PluginContext) => {
         objectCategory("标注与装饰", [
           toolboxBlock("visual_python_manim_brace", { DIRECTION: directionShadow("DOWN") }),
           toolboxBlock("visual_python_manim_brace_label", {
-            LABEL: textShadow("label"),
+            LABEL: textShadow("标注"),
             DIRECTION: directionShadow("DOWN"),
           }),
           toolboxBlock("visual_python_manim_surrounding_rectangle", { BUFF: numberShadow(0.1) }),
           toolboxBlock("visual_python_manim_angle", { RADIUS: numberShadow(0.5) }),
           toolboxBlock("visual_python_manim_right_angle", { LENGTH: numberShadow(0.25) }),
         ]),
-        objectCategory("3D 对象", [
+        objectCategory("三维对象", [
           toolboxBlock("visual_python_manim_sphere_object", {
             RADIUS: numberShadow(1),
             FILL_OPACITY: numberShadow(0.75),
@@ -453,7 +468,7 @@ export const registerManimToolbox = (context: PluginContext) => {
         toolboxBlock("visual_python_manim_color_constant"),
       ]),
 
-      objectCategory("Manim 动态结构", [
+      objectCategory("列表与批量结构", [
         toolboxBlock("visual_python_manim_play_list", {
           ANIMATIONS: animationListShadow(),
           RUN_TIME: numberShadow(1),
@@ -464,15 +479,6 @@ export const registerManimToolbox = (context: PluginContext) => {
         }),
         toolboxBlock("visual_python_manim_group_from_list_object", {
           OBJECTS: manimObjectListShadow(),
-        }),
-        toolboxBlock("visual_python_manim_table_object", {
-          DATA: dynamicTableDataShadow(),
-        }),
-        toolboxBlock("visual_python_manim_matrix_object", {
-          DATA: dynamicMatrixDataShadow(),
-        }),
-        toolboxBlock("visual_python_manim_determinant_object", {
-          DATA: dynamicMatrixDataShadow(),
         }),
       ]),
 
@@ -526,33 +532,6 @@ export const registerManimToolbox = (context: PluginContext) => {
             DIRECTION: directionShadow("RIGHT"),
             BUFF: numberShadow(0.5),
           }),
-        ]),
-      ]),
-
-      objectCategory("高级 / 通用", [
-        objectCategory("通用对象", [
-          toolboxBlock("visual_python_manim_shape_object", { ARG: expressionShadow("radius=1") }),
-          toolboxBlock("visual_python_manim_curved_shape_object", { ARG: expressionShadow("corner_radius=0.2, width=3, height=2") }),
-          toolboxBlock("visual_python_manim_line_object", {
-            START: directionShadow("LEFT"),
-            END: directionShadow("RIGHT"),
-          }),
-          toolboxBlock("visual_python_manim_3d_object", { ARG: expressionShadow("radius=1") }),
-          toolboxBlock("visual_python_manim_coordinate_object", {
-            X_RANGE: rangeShadow(-5, 5, 1),
-            Y_RANGE: rangeShadow(-3, 3, 1),
-          }),
-        ]),
-        objectCategory("通用动画", [
-          toolboxBlock("visual_python_manim_create_animation"),
-          toolboxBlock("visual_python_manim_fade_animation"),
-          toolboxBlock("visual_python_manim_transform_animation"),
-          toolboxBlock("visual_python_manim_animate_method", { ARG: expressionShadow("RIGHT") }),
-          toolboxBlock("visual_python_manim_grow_animation"),
-          toolboxBlock("visual_python_manim_indication_animation"),
-        ]),
-        objectCategory("通用方法", [
-          toolboxBlock("visual_python_manim_transform_method", { ARG: expressionShadow("1") }),
           toolboxBlock("visual_python_manim_apply_matrix", { MATRIX: dynamicMatrixDataShadow() }),
         ]),
       ]),

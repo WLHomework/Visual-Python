@@ -1,5 +1,6 @@
 import * as Blockly from "blockly/core";
 import { pythonGenerator, Order } from "blockly/python";
+import { localizeBlockDefinitions } from "./blockDisplayLocalization";
 
 export type PythonSyntaxColours = {
   variable: string;
@@ -119,11 +120,11 @@ export const pythonSyntaxToolbox = {
     { kind: "label", text: "导入", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_standard_library_import" },
     { kind: "sep", gap: 20 },
-    { kind: "label", text: "数学 math", "web-class": "python-standard-library-label" },
+    { kind: "label", text: "数学", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_math_constant" },
     { kind: "block", type: "python_math_unary" },
     { kind: "sep", gap: 20 },
-    { kind: "label", text: "随机 random", "web-class": "python-standard-library-label" },
+    { kind: "label", text: "随机", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_random_randint" },
     { kind: "block", type: "python_random_uniform" },
     { kind: "block", type: "python_random_choice" },
@@ -134,26 +135,26 @@ export const pythonSyntaxToolbox = {
     { kind: "block", type: "python_json_dumps" },
     { kind: "block", type: "python_json_loads" },
     { kind: "sep", gap: 20 },
-    { kind: "label", text: "日期时间 datetime", "web-class": "python-standard-library-label" },
+    { kind: "label", text: "日期与时间", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_datetime_now" },
     { kind: "block", type: "python_datetime_parse" },
     { kind: "block", type: "python_datetime_format" },
     { kind: "block", type: "python_datetime_timedelta" },
     { kind: "sep", gap: 20 },
-    { kind: "label", text: "路径 pathlib", "web-class": "python-standard-library-label" },
+    { kind: "label", text: "文件路径", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_path_create" },
     { kind: "block", type: "python_path_join" },
     { kind: "block", type: "python_path_check" },
     { kind: "block", type: "python_path_read_text" },
     { kind: "block", type: "python_path_write_text" },
     { kind: "sep", gap: 20 },
-    { kind: "label", text: "系统 os", "web-class": "python-standard-library-label" },
+    { kind: "label", text: "系统", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_os_getcwd" },
     { kind: "block", type: "python_os_listdir" },
     { kind: "block", type: "python_os_makedirs" },
     { kind: "block", type: "python_os_getenv" },
     { kind: "sep", gap: 20 },
-    { kind: "label", text: "正则表达式 re", "web-class": "python-standard-library-label" },
+    { kind: "label", text: "正则表达式", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_re_search" },
     { kind: "block", type: "python_re_sub" },
     { kind: "block", type: "python_re_split" },
@@ -161,7 +162,7 @@ export const pythonSyntaxToolbox = {
     { kind: "block", type: "python_re_flag" },
     { kind: "block", type: "python_re_group" },
     { kind: "sep", gap: 20 },
-    { kind: "label", text: "集合工具 collections", "web-class": "python-standard-library-label" },
+    { kind: "label", text: "集合工具", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_collections_counter" },
     { kind: "block", type: "python_collections_defaultdict" },
     { kind: "block", type: "python_collections_deque" },
@@ -232,14 +233,14 @@ const standardLibraryCall = (block: Blockly.Block, moduleName: string, member: s
   `${standardLibraryModuleReference(block.workspace, moduleName) ?? moduleName}.${member}`;
 
 export function registerPythonSyntaxBlocks(colours: PythonSyntaxColours) {
-  Blockly.common.defineBlocksWithJsonArray([
+  Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
     { type: "python_variable_target", message0: "变量 %1", args0: [{ type: "field_variable", name: "VAR", variable: "value" }], output: "PythonAssignable", colour: colours.variable },
     { type: "python_index_target", message0: "%1 的索引 %2", args0: [{ type: "input_value", name: "OBJECT" }, { type: "input_value", name: "INDEX" }], inputsInline: true, output: "PythonAssignable", colour: colours.variable },
     { type: "python_attribute_target", message0: "%1 的属性 %2", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "ATTRIBUTE", text: "name" }], inputsInline: true, output: "PythonAssignable", colour: colours.variable },
     { type: "python_unpack_target", message0: "解包为 %1 %2 , %3", args0: [{ type: "field_dropdown", name: "KIND", options: [["元组", "tuple"], ["列表", "list"]] }, { type: "input_value", name: "A", check: "PythonAssignable" }, { type: "input_value", name: "B", check: "PythonAssignable" }], inputsInline: true, output: "PythonAssignable", colour: colours.variable },
     { type: "python_starred_target", message0: "带星号 * %1", args0: [{ type: "input_value", name: "TARGET", check: "PythonAssignable" }], output: "PythonAssignable", colour: colours.variable },
     { type: "python_assign_target", message0: "设置 %1 为 %2", args0: [{ type: "input_value", name: "TARGET", check: "PythonAssignable" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.variable },
-    { type: "python_augmented_assign", message0: "将 %1 %2 %3", args0: [{ type: "input_value", name: "TARGET", check: "PythonAssignable" }, { type: "field_dropdown", name: "OP", options: [["增加 +=", "+="], ["减少 -=", "-="], ["乘以 *=", "*="], ["除以 /=", "/="], ["整除 //=", "//="], ["取余 %=", "%="], ["幂 **=", "**="], ["矩阵乘 @=", "@="], ["按位与 &=", "&="], ["按位或 |=", "|="], ["按位异或 ^=", "^="], ["左移 <<=", "<<="], ["右移 >>=", ">>="]] }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.variable },
+    { type: "python_augmented_assign", message0: "将 %1 %2 %3", args0: [{ type: "input_value", name: "TARGET", check: "PythonAssignable" }, { type: "field_dropdown", name: "OP", options: [["增加", "+="], ["减少", "-="], ["乘以", "*="], ["除以", "/="], ["整除", "//="], ["取余", "%="], ["幂", "**="], ["矩阵乘", "@="], ["按位与", "&="], ["按位或", "|="], ["按位异或", "^="], ["左移", "<<="], ["右移", ">>="]] }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.variable },
     { type: "python_annotated_assign", message0: "变量 %1 类型 %2 初始值 %3", args0: [{ type: "field_variable", name: "VAR", variable: "value" }, { type: "field_input", name: "TYPE", text: "str" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.variable },
     { type: "python_delete", message0: "删除 %1", args0: [{ type: "input_value", name: "TARGET", check: "PythonAssignable" }], previousStatement: null, nextStatement: null, colour: colours.variable },
     { type: "python_walrus", message0: "赋值表达式 %1 := %2", args0: [{ type: "field_variable", name: "VAR", variable: "value" }, { type: "input_value", name: "VALUE" }], inputsInline: true, output: null, colour: colours.variable },
@@ -315,9 +316,9 @@ export function registerPythonSyntaxBlocks(colours: PythonSyntaxColours) {
     { type: "python_case", message0: "情况 case %1 如果 %2 %3", args0: [{ type: "input_value", name: "PATTERN" }, { type: "input_value", name: "GUARD" }, { type: "input_statement", name: "BODY" }], previousStatement: "PythonCase", nextStatement: "PythonCase", colour: colours.logic },
     { type: "python_case_wildcard", message0: "其他情况 case _ %1", args0: [{ type: "input_statement", name: "BODY" }], previousStatement: "PythonCase", nextStatement: "PythonCase", colour: colours.logic },
     { type: "python_await", message0: "等待 await %1", args0: [{ type: "input_value", name: "VALUE" }], output: null, colour: colours.function },
-    { type: "python_async_for", message0: "异步对于 %1 在 %2 中 %3", args0: [{ type: "field_variable", name: "VAR", variable: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null, colour: colours.loop },
-    { type: "python_async_with", message0: "异步使用 %1 命名为 %2 %3", args0: [{ type: "input_value", name: "CONTEXT" }, { type: "field_variable", name: "ALIAS", variable: "resource" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: colours.exception },
-  ]);
+    { type: "python_async_for", message0: "异步对于 %1 在 %2 中 %3", args0: [{ type: "field_variable", name: "VAR", variable: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null, colour: colours.function },
+    { type: "python_async_with", message0: "异步使用 %1 命名为 %2 %3", args0: [{ type: "input_value", name: "CONTEXT" }, { type: "field_variable", name: "ALIAS", variable: "resource" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: colours.function },
+  ]));
 
   pythonGenerator.forBlock.python_variable_target = (block, generator) => [variableName(generator, block, "VAR", "value"), Order.ATOMIC];
   pythonGenerator.forBlock.python_index_target = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}[${value(generator, block, "INDEX", "0")}]`, Order.MEMBER];

@@ -15,7 +15,7 @@ export const registerThreeDArrowBlocks = (context: PluginContext) => {
       { type: "input_value", name: "BASE_RADIUS", check: "Number" },
       { type: "field_dropdown", name: "COLOR", options: colorOptions },
     ],
-    inputsInline: true,
+    inputsInline: false,
     output: "ManimObject",
     colour,
   }, (block, generator) => {

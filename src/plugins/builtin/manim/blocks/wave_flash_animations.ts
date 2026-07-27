@@ -14,7 +14,7 @@ export const registerWaveFlashAnimationBlocks = (context: PluginContext) => {
       { type: "input_value", name: "N_WIGGLES", check: "Number" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
-    inputsInline: true,
+    inputsInline: false,
     output: "ManimAnimation",
     colour,
   }, (block, generator) => {
@@ -37,7 +37,7 @@ export const registerWaveFlashAnimationBlocks = (context: PluginContext) => {
       { type: "input_value", name: "RIPPLES", check: "Number" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
-    inputsInline: true,
+    inputsInline: false,
     output: "ManimAnimation",
     colour,
   }, (block, generator) => {

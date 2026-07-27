@@ -27,7 +27,8 @@ export async function prepareManimLocalAudio(
     if (marker.kind === "end") {
       const active = stack.pop();
       if (!active) throw new Error("本地音频时间轴缺少开始积木");
-      lines[index] = indent + "self.wait(max(0, " + active.duration.toFixed(3) + " - (self.renderer.time - " + active.variable + ")))";
+      const remainingVariable = active.variable + "_remaining";
+      lines[index] = indent + remainingVariable + " = " + active.duration.toFixed(3) + " - (self.renderer.time - " + active.variable + "); self.wait(" + remainingVariable + ") if " + remainingVariable + " > 0 else None";
       continue;
     }
 

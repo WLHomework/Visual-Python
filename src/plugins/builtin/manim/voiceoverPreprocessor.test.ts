@@ -23,7 +23,9 @@ describe("Manim voiceover preprocessing", () => {
     expect(synthesize).toHaveBeenCalledTimes(1);
     expect(prepared.code).toContain("self.renderer.time");
     expect(prepared.code).toContain("self.play(Create(circle), run_time=3.000)");
-    expect(prepared.code).toContain("self.wait(max(0, 3.000 -");
+    expect(prepared.code).toContain("_visual_python_voiceover_start_1_remaining = 3.000 -");
+    expect(prepared.code).toContain("self.wait(_visual_python_voiceover_start_1_remaining) if _visual_python_voiceover_start_1_remaining > 0 else None");
+    expect(prepared.code).not.toContain("self.wait(max(0,");
   });
 
   it("distributes narration time according to original play and wait durations", () => {

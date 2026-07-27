@@ -25,6 +25,12 @@ export type AiAgentResult = {
   toolCallCount: number;
   lineCount: number;
   taskChange?: AiTaskChangeSnapshot;
+  clarification?: AiClarification;
+};
+
+export type AiClarification = {
+  question: string;
+  options: string[];
 };
 
 export type AiTaskChangeSnapshot = {
@@ -37,6 +43,7 @@ export type AiTaskChangeSnapshot = {
 export type AiConversationTurn = {
   user: string;
   assistant: string;
+  clarification?: boolean;
 };
 
 export type AiCodeAgentHost = {
@@ -63,6 +70,15 @@ const objectSchema = (properties: Record<string, unknown> = {}, required: string
 });
 
 const toolDefinitions = [
+  {
+    name: "ask_user",
+    label: "询问用户",
+    description: "仅当请求存在会显著改变最终成品、选错后需要大范围重写的关键歧义时使用。必须在修改代码前单独调用；普通视觉细节自行决定。提供 2 到 3 个简短候选项，宿主会追加“由 AI 决定”并显示为编号列表。",
+    parameters: objectSchema({
+      question: { type: "string", minLength: 1, maxLength: 300 },
+      options: { type: "array", minItems: 2, maxItems: 3, items: { type: "string", minLength: 1, maxLength: 100 } },
+    }, ["question", "options"]),
+  },
   {
     name: "get_context",
     label: "读取项目",
@@ -207,11 +223,17 @@ export function userExplicitlyRequestedWholeFileRewrite(prompt: string): boolean
     || /(?:rewrite|replace)\s+(?:all|the whole|the entire)\s+(?:code|file)|(?:rewrite|start)\s+from\s+scratch/i.test(prompt);
 }
 
-function availableToolDefinitions(allowRender: boolean, allowRun: boolean, allowReplace: boolean) {
+export function userExplicitlyDelegatesCreativeDecisions(prompt: string): boolean {
+  return /(?:直接做|直接开始|你决定|由你决定|你来决定|自由发挥|不用问|不要问|别问|无需询问|自行决定)/i.test(prompt)
+    || /\b(?:just do it|you decide|use your judgment|don't ask|do not ask|without asking)\b/i.test(prompt);
+}
+
+function availableToolDefinitions(allowRender: boolean, allowRun: boolean, allowReplace: boolean, allowClarification: boolean) {
   return toolDefinitions.filter((tool) => (
     (allowRender || tool.name !== "render_manim")
     && (allowRun || tool.name !== "run_project")
     && (allowReplace || tool.name !== "replace_code")
+    && (allowClarification || tool.name !== "ask_user")
   ));
 }
 
@@ -346,6 +368,11 @@ export function isFunctionCallingUnsupportedError(error: unknown): boolean {
 const agentRules = `你是 Visual Python 纯代码模式中的自主编程智能体。你可以读取和修改当前 Python 源码、运行项目、渲染 Manim、检查结果并继续修复，直到用户任务真正完成。
 
 规则：
+- 明确请求直接执行。颜色、字体、布局、普通转场等次要细节缺失时自行作出专业决定，不要询问。
+- 只有当请求存在两个以上合理方向，且选错会明显改变内容目标或导致大范围重写时，才允许调用 ask_user。必须先调用 get_context，并在任何修改工具之前单独调用 ask_user。
+- 每个原始任务最多询问一次。一次只问一个最关键的问题并提供 2 到 3 个互斥的简短选项；不要询问可以自行判断的细节，不要把多个问题塞进同一选项。
+- 用户说“直接做”“你决定”“自由发挥”或正在回答上一轮澄清问题时，禁止再次询问，必须结合回答继续原任务。
+- ask_user 只用于暂停并等待用户回答，不得用普通正文假装询问。宿主会把选项显示为编号列表，并自动提供“由 AI 决定”。
 - 结合会话历史理解“它”“刚才的效果”“继续”等指代和延续要求，但代码、工程状态和执行结果必须以本轮 get_context 返回的实时内容为准。
 - 开始时调用 get_context，先阅读完整源码和项目状态。
 - get_context 只返回当前场景标签。每个场景都是包含自身 import、常量、辅助函数和 Scene 类的独立 Python 文件，不得假设其他标签中的定义可用。
@@ -379,8 +406,9 @@ export function createAiAgentMessages(
   allowRun = userExplicitlyRequestedRun(prompt),
   history: AiConversationTurn[] = [],
   allowReplace = true,
+  allowClarification = !userExplicitlyDelegatesCreativeDecisions(prompt) && history.at(-1)?.clarification !== true,
 ): AiChatMessage[] {
-  const availableTools = availableToolDefinitions(allowRender, allowRun, allowReplace);
+  const availableTools = availableToolDefinitions(allowRender, allowRun, allowReplace, allowClarification);
   const protocol = mode === "native"
     ? "直接使用提供的 Function Calling 工具。完成后返回一段简洁中文结果，不要把工具调用写入正文。"
     : `当前接口不支持标准 Function Calling。每轮只返回一个 JSON 对象，禁止 Markdown 和额外文字：
@@ -412,6 +440,24 @@ export function createConversationMemory(history: AiConversationTurn[]): string 
   return `场景长期记忆（较早对话的压缩记录，只用于理解延续要求，实时代码仍以 get_context 为准）：\n${entries.join("\n")}`;
 }
 
+export function normalizeAiClarification(value: Record<string, unknown>): AiClarification {
+  const question = typeof value.question === "string" ? value.question.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+  const suppliedOptions = Array.isArray(value.options) ? value.options : [];
+  const options = [...new Set(suppliedOptions
+    .filter((option): option is string => typeof option === "string")
+    .map((option) => option.replace(/\s+/g, " ").trim().slice(0, 100))
+    .filter(Boolean))].slice(0, 3);
+  if (!question) throw new Error("澄清问题不能为空");
+  if (options.length < 2) throw new Error("澄清问题需要提供至少 2 个不同选项");
+  if (!options.some((option) => /由\s*AI\s*决定|你决定|自行决定/i.test(option))) options.push("由 AI 决定");
+  return { question, options };
+}
+
+export function formatAiClarification(clarification: AiClarification): string {
+  const options = clarification.options.map((option, index) => `${index + 1}. ${option}`).join("\n");
+  return `${clarification.question}\n\n${options}\n\n请回复序号，也可以直接补充要求。`;
+}
+
 function toolResultMessage(name: AiAgentToolName, result: unknown): AiChatMessage {
   const serialized = JSON.stringify(result);
   return {
@@ -434,13 +480,15 @@ export async function runAiCodeAgent({ prompt, history = [], host, onActivity, s
   const allowRun = userExplicitlyRequestedRun(prompt);
   const currentCode = host.getSnapshot().code;
   const allowReplace = typeof currentCode !== "string" || !currentCode.trim() || userExplicitlyRequestedWholeFileRewrite(prompt);
+  const allowClarification = !userExplicitlyDelegatesCreativeDecisions(prompt) && history.at(-1)?.clarification !== true;
   const functionTools = aiAgentFunctionTools.filter((tool) => (
     (allowRender || tool.function.name !== "render_manim")
     && (allowRun || tool.function.name !== "run_project")
     && (allowReplace || tool.function.name !== "replace_code")
+    && (allowClarification || tool.function.name !== "ask_user")
   ));
   let nativeFunctionCalling = true;
-  let messages = createAiAgentMessages(prompt, "native", allowRender, allowRun, history, allowReplace);
+  let messages = createAiAgentMessages(prompt, "native", allowRender, allowRun, history, allowReplace, allowClarification);
   let toolCallCount = 0;
   let malformedCount = 0;
   let noToolCount = 0;
@@ -450,9 +498,20 @@ export async function runAiCodeAgent({ prompt, history = [], host, onActivity, s
   let renderedRevision = -1;
   let inspectedRenderRevision = -1;
   let voiceoverContextRead = false;
+  let contextRead = false;
   const repeatedCalls = new Map<string, number>();
 
   const executeCall = async (call: AiAgentToolCall, round: number) => {
+    if (call.name === "ask_user") {
+      if (!allowClarification) return { ok: false, error: "本轮是对上一轮问题的回答，或用户已要求直接决定，不能再次询问。请继续完成原任务。" };
+      if (!contextRead) return { ok: false, error: "询问前必须先调用 get_context 读取当前场景。" };
+      if (revision > 0) return { ok: false, error: "代码已经开始修改，不能再暂停询问。请基于当前方案继续完成任务。" };
+      try {
+        return { ok: true, __clarification: normalizeAiClarification(call.arguments) };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
     toolCallCount += 1;
     const signature = `${revision}:${call.name}:${JSON.stringify(call.arguments)}`;
     const repetition = (repeatedCalls.get(signature) ?? 0) + 1;
@@ -500,6 +559,7 @@ export async function runAiCodeAgent({ prompt, history = [], host, onActivity, s
     if (call.name === "check_code" && result.ok === true && result.valid === true) checkedRevision = revision;
     if (call.name === "validate_scene" && result.ok === true && result.valid === true) validatedRevision = revision;
     if (call.name === "get_voiceover_context" && result.ok === true) voiceoverContextRead = true;
+    if (call.name === "get_context" && result.ok === true) contextRead = true;
     if (call.name === "render_manim" && result.ok === true && result.started === true) renderedRevision = revision;
     if (call.name === "inspect_rendered_video" && result.ok === true && result.valid === true) inspectedRenderRevision = revision;
     const failed = result.ok !== true;
@@ -525,7 +585,7 @@ export async function runAiCodeAgent({ prompt, history = [], host, onActivity, s
   for (let round = 1; round <= 80; round += 1) {
     if (signal.aborted) throw new Error("已停止生成");
     if (messages.length > 60) {
-      messages = createAiAgentMessages(prompt, nativeFunctionCalling ? "native" : "fallback", allowRender, allowRun, history, allowReplace);
+      messages = createAiAgentMessages(prompt, nativeFunctionCalling ? "native" : "fallback", allowRender, allowRun, history, allowReplace, allowClarification);
       messages.push({ role: "user", content: `此前上下文已压缩。当前状态：${JSON.stringify({ ...host.getSnapshot(), revision, checkedRevision })}` });
     }
     const messageId = `message-${round}`;
@@ -569,7 +629,7 @@ export async function runAiCodeAgent({ prompt, history = [], host, onActivity, s
       host.cancelCodePreview();
       if (!nativeFunctionCalling || !isFunctionCallingUnsupportedError(error)) throw error;
       nativeFunctionCalling = false;
-      messages = createAiAgentMessages(prompt, "fallback", allowRender, allowRun, history, allowReplace);
+      messages = createAiAgentMessages(prompt, "fallback", allowRender, allowRun, history, allowReplace, allowClarification);
       onActivity({ id: "compatibility-mode", kind: "message", status: "done", title: "已切换兼容工具模式。" });
       continue;
     }
@@ -580,7 +640,7 @@ export async function runAiCodeAgent({ prompt, history = [], host, onActivity, s
       if (!completion.toolCalls.length && hasDsmlToolMarkup(completion.content)) {
         host.cancelCodePreview();
         nativeFunctionCalling = false;
-        messages = createAiAgentMessages(prompt, "fallback", allowRender, allowRun, history, allowReplace);
+        messages = createAiAgentMessages(prompt, "fallback", allowRender, allowRun, history, allowReplace, allowClarification);
         onActivity({ id: "compatibility-mode", kind: "message", status: "done", title: "已切换兼容工具模式。" });
         continue;
       }
@@ -615,6 +675,11 @@ export async function runAiCodeAgent({ prompt, history = [], host, onActivity, s
           const call = parseNativeToolCall(nativeCall);
           if (call.name !== "replace_code") host.cancelCodePreview();
           result = await executeCall(call, round);
+          const clarification = result.__clarification;
+          if (isRecord(clarification) && typeof clarification.question === "string" && Array.isArray(clarification.options)) {
+            const normalized = clarification as unknown as AiClarification;
+            return { summary: formatAiClarification(normalized), toolCallCount, lineCount: host.getLineCount(), clarification: normalized };
+          }
         } catch (error) {
           host.cancelCodePreview();
           result = { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -662,7 +727,13 @@ export async function runAiCodeAgent({ prompt, history = [], host, onActivity, s
     }
     const call = decision.tool!;
     if (call.name !== "replace_code") host.cancelCodePreview();
-    messages.push(toolResultMessage(call.name, await executeCall(call, round)));
+    const result = await executeCall(call, round);
+    const clarification = result.__clarification;
+    if (isRecord(clarification) && typeof clarification.question === "string" && Array.isArray(clarification.options)) {
+      const normalized = clarification as unknown as AiClarification;
+      return { summary: formatAiClarification(normalized), toolCallCount, lineCount: host.getLineCount(), clarification: normalized };
+    }
+    messages.push(toolResultMessage(call.name, result));
   }
   throw new Error("智能体长时间没有收敛，已停止任务");
 }

@@ -8,11 +8,14 @@ import {
   extractStreamingAgentMessage,
   extractStreamingJsonString,
   extractVisibleAgentContent,
+  formatAiClarification,
   hasDsmlToolMarkup,
   isFunctionCallingUnsupportedError,
+  normalizeAiClarification,
   parseAiAgentDecision,
   parseNativeToolCall,
   restoreMissingBaseIndent,
+  userExplicitlyDelegatesCreativeDecisions,
   userExplicitlyForbidsRender,
   userExplicitlyRequestedRun,
   userExplicitlyRequestedWholeFileRewrite,
@@ -21,6 +24,7 @@ import {
 describe("AI code agent protocol", () => {
   it("only exposes tools for autonomous Python project work", () => {
     const names = aiAgentFunctionTools.map((tool) => tool.function.name);
+    expect(names).toContain("ask_user");
     expect(names).toContain("get_context");
     expect(names).toEqual(expect.arrayContaining(["list_scenes", "get_scene", "switch_scene", "create_scene", "rename_scene", "delete_scene"]));
     expect(names).toContain("replace_code");
@@ -55,7 +59,37 @@ describe("AI code agent protocol", () => {
     expect(messages[0].content).toContain("check_code");
     expect(messages[0].content).toContain("list_scenes");
     expect(messages[0].content).toContain("sceneId");
+    expect(messages[0].content).toContain("每个原始任务最多询问一次");
     expect(messages[1]).toEqual({ role: "user", content: "创建一个 Manim 场景" });
+  });
+
+  it("formats clarification choices as a numbered list", () => {
+    const clarification = normalizeAiClarification({
+      question: "这段动画主要讲解什么？",
+      options: ["斜率与截距", "函数图像变化"],
+    });
+    expect(clarification).toEqual({
+      question: "这段动画主要讲解什么？",
+      options: ["斜率与截距", "函数图像变化", "由 AI 决定"],
+    });
+    expect(formatAiClarification(clarification)).toBe([
+      "这段动画主要讲解什么？",
+      "",
+      "1. 斜率与截距",
+      "2. 函数图像变化",
+      "3. 由 AI 决定",
+      "",
+      "请回复序号，也可以直接补充要求。",
+    ].join("\n"));
+  });
+
+  it("disables repeated clarification and respects delegated decisions", () => {
+    expect(userExplicitlyDelegatesCreativeDecisions("不用问我，你决定直接做")).toBe(true);
+    expect(userExplicitlyDelegatesCreativeDecisions("制作一个教学动画")).toBe(false);
+    expect(createAiAgentMessages("制作一个教学动画", "fallback")[0].content).toContain('"name":"ask_user"');
+    expect(createAiAgentMessages("你决定直接做", "fallback")[0].content).not.toContain('"name":"ask_user"');
+    const history = [{ user: "制作一个动画", assistant: "你想讲什么？", clarification: true }];
+    expect(createAiAgentMessages("1", "fallback", true, false, history)[0].content).not.toContain('"name":"ask_user"');
   });
 
   it("includes bounded conversation history before the current request", () => {

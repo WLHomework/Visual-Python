@@ -25,7 +25,7 @@ export function AiModelSettings() {
     if (next.baseUrl.trim() && next.model.trim()) saveAiModelConfig(next);
   };
 
-  const resetToBailian = () => {
+  const resetToDefault = () => {
     const next = saveAiModelConfig(defaultAiModelConfig);
     setConfig(next);
     setApiKey("");
@@ -62,10 +62,10 @@ export function AiModelSettings() {
   };
 
   return <section className="ai-model-settings">
-    <div className="ai-settings-header"><div className="settings-pane-header"><h3>AI 模型</h3><p>配置兼容 OpenAI Chat Completions 的模型服务。</p></div><button onClick={resetToBailian}><RotateCcw size={14}/>百炼默认配置</button></div>
+    <div className="ai-settings-header"><div className="settings-pane-header"><h3>AI 模型</h3><p>配置兼容 OpenAI Chat Completions 的模型服务。</p></div><button onClick={resetToDefault}><RotateCcw size={14}/>默认设置</button></div>
     <div className="ai-settings-fields">
       <label><span>API 请求地址</span><input value={config.baseUrl} onChange={(event) => updateConfig({ baseUrl: event.currentTarget.value })} onBlur={() => setConfig(saveAiModelConfig(config))} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" spellCheck={false}/><small>可填写服务根地址、以 /v1 结尾的兼容地址，或完整的 /chat/completions 地址</small></label>
-      <label><span>模型名称</span><input value={config.model} onChange={(event) => updateConfig({ model: event.currentTarget.value })} onBlur={() => setConfig(saveAiModelConfig(config))} placeholder="qwen-plus" spellCheck={false}/><small>填写服务商提供的模型标识，例如 qwen-plus</small></label>
+      <label><span>模型名称</span><input value={config.model} onChange={(event) => updateConfig({ model: event.currentTarget.value })} onBlur={() => setConfig(saveAiModelConfig(config))} placeholder="qwen3.7-flash" spellCheck={false}/><small>填写服务商提供的模型标识，例如 qwen3.7-flash</small></label>
       <label className="ai-api-key-field"><span>API Key</span><div className={hasStoredKey ? "has-key" : ""}><KeyRound size={15}/><input type="password" value={apiKey} onChange={(event) => { setApiKey(event.currentTarget.value); setConnectionState(null); }} placeholder={hasStoredKey ? "已安全保存，留空继续使用" : "输入 API Key"} autoComplete="off" spellCheck={false}/>{hasStoredKey && <button onClick={() => void forgetApiKey()} title="删除 API Key" aria-label="删除 API Key"><Trash2 size={15}/></button>}</div><small>连接成功后保存到 Windows 凭据管理器，不写入工程文件</small></label>
     </div>
     <div className="ai-settings-test">

@@ -13,7 +13,7 @@ export const registerAxesObjectBlocks = (context: PluginContext) => {
       { type: "input_value", name: "X_LENGTH", check: "Number" },
       { type: "input_value", name: "Y_LENGTH", check: "Number" },
     ],
-    inputsInline: true,
+    inputsInline: false,
     output: "ManimObject",
     colour,
   }, (block, generator) => {

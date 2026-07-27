@@ -58,7 +58,7 @@ const storageKey = "visual-python:ai-model-config";
 
 export const defaultAiModelConfig: AiModelConfig = {
   baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  model: "qwen-plus",
+  model: "qwen3.7-flash",
 };
 
 export function normalizeAiModelConfig(value: unknown): AiModelConfig {

@@ -4519,6 +4519,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let show_item =
                 MenuItem::with_id(app, "tray-show", "显示 Visual Python", true, None::<&str>)?;
