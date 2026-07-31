@@ -12,6 +12,7 @@ export type ProjectFile = {
   sceneDocuments?: SceneDocument[];
   activeSceneId?: string;
   workspaceMode?: WorkspaceMode;
+  blockInputLayout?: "inline" | "external";
   resources?: ProjectResource[];
 };
 
@@ -65,6 +66,7 @@ export function validateProjectFile(value: unknown): ProjectFile {
   if (value.activeSceneId !== undefined && typeof value.activeSceneId !== "string") throw new Error("工程当前场景无效");
   if (sceneDocuments && value.activeSceneId !== undefined && !sceneDocuments.some((document) => document.id === value.activeSceneId)) throw new Error("工程当前场景不存在");
   if (value.workspaceMode !== undefined && !["visual", "split", "code"].includes(String(value.workspaceMode))) throw new Error("工程工作区模式无效");
+  if (value.blockInputLayout !== undefined && !["inline", "external"].includes(String(value.blockInputLayout))) throw new Error("积木输入布局无效");
   const plugins = parsePlugins(value.plugins);
   const resources = parseResources(value.resources);
   return {
@@ -76,6 +78,7 @@ export function validateProjectFile(value: unknown): ProjectFile {
     ...(sceneDocuments ? { sceneDocuments } : {}),
     ...(typeof value.activeSceneId === "string" ? { activeSceneId: value.activeSceneId } : {}),
     ...(value.workspaceMode ? { workspaceMode: value.workspaceMode as WorkspaceMode } : {}),
+    ...(value.blockInputLayout ? { blockInputLayout: value.blockInputLayout as "inline" | "external" } : {}),
     ...(resources ? { resources } : {}),
   };
 }

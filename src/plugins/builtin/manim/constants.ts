@@ -24,6 +24,9 @@ const blockColourOverrides: Record<string, string> = {
   visual_python_manim_voiceover_with_animation: manimBlockColours.scene,
   visual_python_manim_play_local_audio: manimBlockColours.scene,
   visual_python_manim_play_local_audio_with_animation: manimBlockColours.scene,
+  visual_python_manim_function_preset: manimBlockColours.value,
+  visual_python_manim_surface_function_preset: manimBlockColours.value,
+  visual_python_manim_dimensions: manimBlockColours.value,
 };
 
 export const colourForManimBlock = (type: string): string => {
@@ -37,39 +40,39 @@ export const colourForManimBlock = (type: string): string => {
 };
 
 export const sceneTypeOptions = [
-  ["Scene", "Scene"],
-  ["MovingCameraScene", "MovingCameraScene"],
-  ["ThreeDScene", "ThreeDScene"],
-  ["SpecialThreeDScene", "SpecialThreeDScene"],
+  ["普通场景", "Scene"],
+  ["移动相机场景", "MovingCameraScene"],
+  ["三维场景", "ThreeDScene"],
+  ["特殊三维场景", "SpecialThreeDScene"],
 ];
 
 export const textObjectOptions = [
-  ["Text", "Text"],
-  ["Tex", "Tex"],
-  ["MathTex", "MathTex"],
+  ["普通文本", "Text"],
+  ["公式文本", "Tex"],
+  ["数学公式", "MathTex"],
 ];
 
 export const shapeOptions = [
-  ["Circle", "Circle"],
-  ["Square", "Square"],
-  ["Rectangle", "Rectangle"],
-  ["Dot", "Dot"],
+  ["圆形", "Circle"],
+  ["正方形", "Square"],
+  ["矩形", "Rectangle"],
+  ["点", "Dot"],
 ];
 
 export const lineOptions = [
-  ["Line", "Line"],
-  ["DashedLine", "DashedLine"],
-  ["Arrow", "Arrow"],
-  ["DoubleArrow", "DoubleArrow"],
-  ["CurvedArrow", "CurvedArrow"],
+  ["直线", "Line"],
+  ["虚线", "DashedLine"],
+  ["箭头", "Arrow"],
+  ["双箭头", "DoubleArrow"],
+  ["曲线箭头", "CurvedArrow"],
 ];
 
 export const curvedShapeOptions = [
-  ["RoundedRectangle", "RoundedRectangle"],
-  ["Ellipse", "Ellipse"],
-  ["Arc", "Arc"],
-  ["Sector", "Sector"],
-  ["Annulus", "Annulus"],
+  ["圆角矩形", "RoundedRectangle"],
+  ["椭圆", "Ellipse"],
+  ["圆弧", "Arc"],
+  ["扇形", "Sector"],
+  ["圆环", "Annulus"],
 ];
 
 export const curvedShapeArgumentDefaults: Record<string, string> = {
@@ -81,28 +84,28 @@ export const curvedShapeArgumentDefaults: Record<string, string> = {
 };
 
 export const coordinateOptions = [
-  ["Axes", "Axes"],
-  ["NumberPlane", "NumberPlane"],
+  ["坐标系", "Axes"],
+  ["平面网格", "NumberPlane"],
 ];
 
 export const tableOptions = [
-  ["Table", "Table"],
-  ["MathTable", "MathTable"],
+  ["普通表格", "Table"],
+  ["数学表格", "MathTable"],
 ];
 
 export const matrixOptions = [
-  ["Matrix", "Matrix"],
-  ["IntegerMatrix", "IntegerMatrix"],
-  ["DecimalMatrix", "DecimalMatrix"],
+  ["普通矩阵", "Matrix"],
+  ["整数矩阵", "IntegerMatrix"],
+  ["小数矩阵", "DecimalMatrix"],
 ];
 
 export const threeDObjectOptions = [
-  ["Sphere", "Sphere"],
-  ["Cube", "Cube"],
-  ["Cone", "Cone"],
-  ["Cylinder", "Cylinder"],
-  ["Prism", "Prism"],
-  ["Torus", "Torus"],
+  ["球体", "Sphere"],
+  ["立方体", "Cube"],
+  ["圆锥", "Cone"],
+  ["圆柱", "Cylinder"],
+  ["棱柱", "Prism"],
+  ["圆环面", "Torus"],
 ];
 
 export const threeDObjectArgumentDefaults: Record<string, string> = {
@@ -115,35 +118,35 @@ export const threeDObjectArgumentDefaults: Record<string, string> = {
 };
 
 export const creationAnimationOptions = [
-  ["Create", "Create"],
-  ["Write", "Write"],
-  ["Uncreate", "Uncreate"],
-  ["Unwrite", "Unwrite"],
-  ["DrawBorderThenFill", "DrawBorderThenFill"],
+  ["绘制", "Create"],
+  ["书写", "Write"],
+  ["反向绘制", "Uncreate"],
+  ["反向书写", "Unwrite"],
+  ["先描边再填充", "DrawBorderThenFill"],
 ];
 
 export const fadeAnimationOptions = [
-  ["FadeIn", "FadeIn"],
-  ["FadeOut", "FadeOut"],
+  ["淡入", "FadeIn"],
+  ["淡出", "FadeOut"],
 ];
 
 export const transformAnimationOptions = [
-  ["Transform", "Transform"],
-  ["ReplacementTransform", "ReplacementTransform"],
-  ["TransformFromCopy", "TransformFromCopy"],
-  ["ClockwiseTransform", "ClockwiseTransform"],
-  ["CounterclockwiseTransform", "CounterclockwiseTransform"],
-  ["FadeTransform", "FadeTransform"],
+  ["变形", "Transform"],
+  ["替换变形", "ReplacementTransform"],
+  ["复制后变形", "TransformFromCopy"],
+  ["顺时针变形", "ClockwiseTransform"],
+  ["逆时针变形", "CounterclockwiseTransform"],
+  ["淡化变形", "FadeTransform"],
 ];
 
 export const animateMethodOptions = [
-  ["shift", "shift"],
-  ["scale", "scale"],
-  ["move_to", "move_to"],
-  ["rotate", "rotate"],
-  ["to_edge", "to_edge"],
-  ["set_color", "set_color"],
-  ["set_opacity", "set_opacity"],
+  ["相对移动", "shift"],
+  ["缩放", "scale"],
+  ["移动到", "move_to"],
+  ["旋转", "rotate"],
+  ["移动到边缘", "to_edge"],
+  ["设置颜色", "set_color"],
+  ["设置透明度", "set_opacity"],
 ];
 
 export const animateMethodDefaults: Record<string, string> = {
@@ -157,12 +160,12 @@ export const animateMethodDefaults: Record<string, string> = {
 };
 
 export const growAnimationOptions = [
-  ["GrowFromCenter", "GrowFromCenter"],
-  ["GrowFromPoint", "GrowFromPoint"],
-  ["GrowFromEdge", "GrowFromEdge"],
-  ["GrowArrow", "GrowArrow"],
-  ["SpinInFromNothing", "SpinInFromNothing"],
-  ["ShrinkToCenter", "ShrinkToCenter"],
+  ["从中心生长", "GrowFromCenter"],
+  ["从指定点生长", "GrowFromPoint"],
+  ["从边缘生长", "GrowFromEdge"],
+  ["箭头生长", "GrowArrow"],
+  ["旋转出现", "SpinInFromNothing"],
+  ["缩小到中心", "ShrinkToCenter"],
 ];
 
 export const growAnimationArgumentDefaults: Record<string, string> = {
@@ -175,45 +178,62 @@ export const growAnimationArgumentDefaults: Record<string, string> = {
 };
 
 export const indicationAnimationOptions = [
-  ["Indicate", "Indicate"],
-  ["Circumscribe", "Circumscribe"],
-  ["Wiggle", "Wiggle"],
-  ["ApplyWave", "ApplyWave"],
-  ["TurnInsideOut", "TurnInsideOut"],
-  ["ShowPassingFlash", "ShowPassingFlash"],
+  ["闪烁强调", "Indicate"],
+  ["圈出", "Circumscribe"],
+  ["摆动", "Wiggle"],
+  ["波浪", "ApplyWave"],
+  ["内外翻转", "TurnInsideOut"],
+  ["流光", "ShowPassingFlash"],
 ];
 
 export const colorOptions = [
-  ["WHITE", "WHITE"],
-  ["BLACK", "BLACK"],
-  ["RED", "RED"],
-  ["GREEN", "GREEN"],
-  ["BLUE", "BLUE"],
-  ["YELLOW", "YELLOW"],
-  ["PURPLE", "PURPLE"],
-  ["ORANGE", "ORANGE"],
-  ["GRAY", "GRAY"],
-  ["TEAL", "TEAL"],
+  ["白色", "WHITE"],
+  ["黑色", "BLACK"],
+  ["红色", "RED"],
+  ["绿色", "GREEN"],
+  ["蓝色", "BLUE"],
+  ["黄色", "YELLOW"],
+  ["紫色", "PURPLE"],
+  ["橙色", "ORANGE"],
+  ["灰色", "GRAY"],
+  ["青色", "TEAL"],
 ];
 
 export const directionOptions = [
-  ["ORIGIN", "ORIGIN"],
-  ["UP", "UP"],
-  ["DOWN", "DOWN"],
-  ["LEFT", "LEFT"],
-  ["RIGHT", "RIGHT"],
-  ["UL", "UL"],
-  ["UR", "UR"],
-  ["DL", "DL"],
-  ["DR", "DR"],
-  ["IN", "IN"],
-  ["OUT", "OUT"],
+  ["中心", "ORIGIN"],
+  ["上方", "UP"],
+  ["下方", "DOWN"],
+  ["左侧", "LEFT"],
+  ["右侧", "RIGHT"],
+  ["左上", "UL"],
+  ["右上", "UR"],
+  ["左下", "DL"],
+  ["右下", "DR"],
+  ["屏幕内", "IN"],
+  ["屏幕外", "OUT"],
 ];
 
 export const mathConstantOptions = [
-  ["PI", "PI"],
-  ["TAU", "TAU"],
-  ["DEGREES", "DEGREES"],
+  ["圆周率", "PI"],
+  ["一周弧度", "TAU"],
+  ["角度单位", "DEGREES"],
+];
+
+export const functionPresetOptions = [
+  ["一次函数", "linear"],
+  ["二次函数", "quadratic"],
+  ["三次函数", "cubic"],
+  ["正弦函数", "sine"],
+  ["余弦函数", "cosine"],
+  ["指数函数", "exponential"],
+  ["绝对值函数", "absolute"],
+];
+
+export const surfaceFunctionPresetOptions = [
+  ["平面", "plane"],
+  ["波浪曲面", "wave"],
+  ["鞍形曲面", "saddle"],
+  ["抛物面", "paraboloid"],
 ];
 
 export const shapeArgumentDefaults: Record<string, string> = {

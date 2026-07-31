@@ -28,7 +28,7 @@ export const shapeTransformExample: ExampleProject = {
         },
         {
           type: "visual_python_manim_assign", fields: { VAR: "triangle" },
-          inputs: { MOBJECT: input({ type: "visual_python_manim_triangle_object", fields: { COLOR: "YELLOW" } }) },
+          inputs: { MOBJECT: input({ type: "visual_python_manim_triangle_object", fields: { COLOR: "YELLOW" }, inputs: { SIDE_LENGTH: number(2) } }) },
         },
         play({ type: "visual_python_manim_create_object_animation", inputs: { MOBJECT: input(reference("circle")), RUN_TIME: number(1) } }),
         play({ type: "visual_python_manim_transform_to_animation", inputs: { SOURCE: input(reference("circle")), TARGET: input(reference("square")), RUN_TIME: number(1.5) } }),

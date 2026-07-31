@@ -1,9 +1,9 @@
 import { extractManimSceneNames, nextUniqueManimSceneName } from "./plugins/builtin/manim/sceneNames";
+import { isPythonIdentifier } from "./pythonIdentifiers";
 
 export type SceneDocument = { id: string; name: string; code: string };
 
 const validId = /^[A-Za-z0-9_-]{1,128}$/;
-const validName = /^[A-Za-z_]\w*$/;
 
 export const sceneDocumentName = (code: string, fallback: string) => extractManimSceneNames(code)[0] || fallback;
 
@@ -22,7 +22,7 @@ export function legacySceneDocument(code: string): SceneDocument {
 }
 
 export function renameSceneDocument(document: SceneDocument, name: string): SceneDocument {
-  if (!validName.test(name)) throw new Error("场景名称必须是有效的 Python 类名");
+  if (!isPythonIdentifier(name)) throw new Error("场景名称必须是有效的 Python 类名");
   const currentName = extractManimSceneNames(document.code)[0];
   const code = currentName
     ? document.code.replace(new RegExp(`(class\\s+)${currentName}(\\s*\\(\\s*(?:Scene|MovingCameraScene|ThreeDScene|SpecialThreeDScene)\\s*\\))`), `$1${name}$2`)
@@ -38,7 +38,7 @@ export function validateSceneDocuments(value: unknown): SceneDocument[] | undefi
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("工程包含无效的场景文档");
     const document = item as Record<string, unknown>;
     if (typeof document.id !== "string" || !validId.test(document.id)
-      || typeof document.name !== "string" || !validName.test(document.name)
+      || typeof document.name !== "string" || !isPythonIdentifier(document.name)
       || typeof document.code !== "string" || document.code.length > 5_000_000
       || ids.has(document.id)) throw new Error("工程包含无效的场景文档");
     ids.add(document.id);

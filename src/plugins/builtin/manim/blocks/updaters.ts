@@ -6,10 +6,10 @@ import { addManimImport, value } from "../helpers";
 export const registerUpdaterBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_traced_path",
-    message0: "TracedPath target %1 color %2 width %3",
+    message0: "运动轨迹 目标 %1 颜色 %2 线宽 %3",
     args0: [
       { type: "input_value", name: "TARGET", check: "ManimObject" },
-      { type: "field_dropdown", name: "COLOR", options: [["YELLOW", "YELLOW"], ["BLUE", "BLUE"], ["GREEN", "GREEN"], ["RED", "RED"], ["WHITE", "WHITE"]] },
+      { type: "field_manim_color", name: "COLOR" },
       { type: "input_value", name: "WIDTH", check: "Number" },
     ],
     inputsInline: true,
@@ -25,7 +25,7 @@ export const registerUpdaterBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_always_redraw",
-    message0: "实时重绘 always_redraw 对象 %1",
+    message0: "实时重绘 对象 %1",
     args0: [{ type: "input_value", name: "MOBJECT", check: "ManimObject" }],
     inputsInline: true,
     output: "ManimObject",
@@ -58,7 +58,7 @@ export const registerUpdaterBlocks = (context: PluginContext) => {
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "TARGET", check: "ManimObject" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
     ],
     inputsInline: true,
     previousStatement: null,

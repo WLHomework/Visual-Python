@@ -7,8 +7,10 @@ import { registerBasicObjectBlocks } from "./blocks/objects";
 import { registerSceneBlocks } from "./blocks/scene";
 import { registerValueBlocks } from "./blocks/values";
 import { registerManimAngleField } from "./angleField";
+import { registerManimColorField } from "./colorField";
 import { registerManimFormulaField } from "./formulaField";
 import { registerManimToolbox } from "./toolbox";
+import { installFileBlockPickerFields } from "../../../fileBlockPicker";
 import { colourForManimBlock } from "./constants";
 import { getManimRenderConfig, isDefaultManimRenderConfig, loadManimRenderConfig, resetManimRenderConfig } from "./renderConfig";
 import { clearProjectVoiceoverRoles, loadProjectVoiceoverRoles, saveProjectVoiceoverRoles } from "./voiceoverRoles";
@@ -25,6 +27,7 @@ export const manimPlugin: VisualPythonPlugin = {
   },
   activate(context) {
     registerManimAngleField();
+    registerManimColorField();
     registerManimFormulaField();
 
     const colouredContext = new Proxy(context, {
@@ -37,6 +40,7 @@ export const manimPlugin: VisualPythonPlugin = {
     });
 
     registerSceneBlocks(colouredContext);
+    installFileBlockPickerFields();
     registerBasicObjectBlocks(colouredContext);
     registerObjectExtraBlocks(colouredContext);
     registerAnimationBlocks(colouredContext);

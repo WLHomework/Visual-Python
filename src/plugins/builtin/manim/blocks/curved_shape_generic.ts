@@ -1,6 +1,6 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions, curvedShapeArgumentDefaults, curvedShapeOptions } from "../constants";
+import { colour, curvedShapeArgumentDefaults, curvedShapeOptions } from "../constants";
 import { addManimImport, joinArguments, value } from "../helpers";
 
 export const registerGenericCurveShapeBlocks = (context: PluginContext) => {
@@ -10,7 +10,7 @@ export const registerGenericCurveShapeBlocks = (context: PluginContext) => {
     args0: [
       { type: "field_dropdown", name: "OBJECT", options: curvedShapeOptions },
       { type: "input_value", name: "ARG" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

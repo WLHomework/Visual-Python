@@ -1,6 +1,6 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions, matrixOptions, tableOptions } from "../constants";
+import { colour, matrixOptions, tableOptions } from "../constants";
 import { addManimImport, value } from "../helpers";
 
 export const registerTableBlocks = (context: PluginContext) => {
@@ -58,7 +58,7 @@ export const registerTableBlocks = (context: PluginContext) => {
       { type: "input_value", name: "TABLE", check: "ManimObject" },
       { type: "input_value", name: "ROW", check: "Number" },
       { type: "input_value", name: "COLUMN", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

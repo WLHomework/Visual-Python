@@ -12,6 +12,7 @@ export const registerScenePlaybackBlocks = (context: PluginContext) => {
     previousStatement: null,
     nextStatement: null,
     colour,
+    tooltip: "执行一个动画效果。创建、淡入和变形等效果需要连接到这里才能播放。",
   }, (block, generator) => {
     addManimImport(generator);
     return `self.play(${value(generator, block, "ANIMATION", "Create(Circle())")})\n`;
@@ -29,6 +30,7 @@ export const registerScenePlaybackBlocks = (context: PluginContext) => {
     previousStatement: null,
     nextStatement: null,
     colour,
+    tooltip: "播放一个动画，并统一设置播放时间和动画内部对象的延迟比例。",
   }, (block, generator) => {
     addManimImport(generator);
     const animation = value(generator, block, "ANIMATION", "Create(Circle())");
@@ -50,6 +52,7 @@ export const registerScenePlaybackBlocks = (context: PluginContext) => {
     previousStatement: null,
     nextStatement: null,
     colour,
+    tooltip: "同时播放两个动画效果。延迟比例为零时同步开始。",
   }, (block, generator) => {
     addManimImport(generator);
     const first = value(generator, block, "FIRST", "Create(Circle())");
@@ -71,6 +74,7 @@ export const registerScenePlaybackBlocks = (context: PluginContext) => {
     previousStatement: null,
     nextStatement: null,
     colour,
+    tooltip: "批量播放动画列表。适合同时处理三个或更多动画。",
   }, (block, generator) => {
     addManimImport(generator);
     const animations = value(generator, block, "ANIMATIONS", "[Create(Circle())]");
@@ -94,7 +98,7 @@ export const registerScenePlaybackBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_play_local_audio",
-    message0: "播放本地音频 %1 开始偏移 %2 秒 音量增益 %3 dB",
+    message0: "播放本地音频 %1 开始偏移 %2 秒 音量增益 %3 分贝",
     args0: [
       { type: "input_value", name: "PATH", check: "String" },
       { type: "input_value", name: "TIME_OFFSET", check: "Number" },
@@ -104,7 +108,7 @@ export const registerScenePlaybackBlocks = (context: PluginContext) => {
     previousStatement: null,
     nextStatement: null,
     colour,
-    tooltip: "播放本地音乐、音效或录音。右键积木可选择音频文件；路径也可以手动填写。需要等待音频结束时，请在后面连接等待积木。",
+    tooltip: "播放本地音乐、音效或录音。点击路径旁的文件夹图标可选择音频文件；路径也可以手动填写。需要等待音频结束时，请在后面连接等待积木。",
   }, (block, generator) => {
     addManimImport(generator);
     const pathBlock = block.getInputTargetBlock("PATH");
@@ -119,7 +123,7 @@ export const registerScenePlaybackBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_play_local_audio_with_animation",
-    message0: "播放本地音频 %1 开始偏移 %2 秒 音量增益 %3 dB 同时执行 %4 %5",
+    message0: "播放本地音频 %1 开始偏移 %2 秒 音量增益 %3 分贝 同时执行 %4 %5",
     args0: [
       { type: "input_value", name: "PATH", check: "String" },
       { type: "input_value", name: "TIME_OFFSET", check: "Number" },

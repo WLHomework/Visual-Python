@@ -118,7 +118,7 @@ const messageOverrides: Record<string, string> = {
   visual_python_manim_camera_frame_animation: "相机画面 目标 %1 缩放 %2 时间 %3",
   visual_python_manim_3d_camera_orientation: "三维视角 垂直角 %1 水平角 %2 距离 %3",
   visual_python_manim_3d_move_camera: "三维移动相机 垂直角 %1 水平角 %2 距离 %3 时间 %4",
-  visual_python_manim_parametric_surface: "参数曲面 函数 %1 横向范围 %2 纵向范围 %3 分辨率 %4 颜色 %5",
+  visual_python_manim_parametric_surface: "参数曲面 函数 %1 横向参数范围 %2 纵向参数范围 %3 精度 %4 颜色 %5",
   visual_python_manim_traced_path: "轨迹路径 目标 %1 颜色 %2 线宽 %3",
   visual_python_manim_arrow3d_object: "三维箭头 起点 %1 终点 %2 线宽 %3 箭头高 %4 底半径 %5 颜色 %6",
   visual_python_manim_wiggle_animation: "摆动 目标 %1 缩放 %2 角度 %3 次数 %4 时间 %5",
@@ -126,8 +126,8 @@ const messageOverrides: Record<string, string> = {
   visual_python_manim_cone_object: "圆锥 底半径 %1 高 %2 方向 %3 底面 %4 颜色 %5",
   visual_python_manim_cylinder_object: "圆柱 半径 %1 高 %2 方向 %3 端面 %4 颜色 %5",
   visual_python_manim_circumscribe_animation: "圈出 目标 %1 形状 %2 间距 %3 颜色 %4 时间 %5",
-  visual_python_manim_play_local_audio: "播放音频 %1 偏移 %2 秒 增益 %3 dB",
-  visual_python_manim_play_local_audio_with_animation: "播放音频 %1 偏移 %2 秒 增益 %3 dB 同时执行 %4 %5",
+  visual_python_manim_play_local_audio: "播放音频 %1 偏移 %2 秒 增益 %3 分贝",
+  visual_python_manim_play_local_audio_with_animation: "播放音频 %1 偏移 %2 秒 增益 %3 分贝 同时执行 %4 %5",
 };
 
 const displayTextReplacements: Array<[string, string]> = [

@@ -34,7 +34,7 @@ export const registerSceneDefinitionBlocks = (context: PluginContext) => {
   registerUniqueSceneNameExtension();
   context.registerBlock({
     type: "visual_python_manim_scene",
-    message0: "Manim 场景 %1 类型 %2 %3 %4",
+    message0: "动画场景 %1 类型 %2 %3 %4",
     args0: [
       { type: "field_input", name: "NAME", text: "MainScene" },
       { type: "field_dropdown", name: "SCENE_TYPE", options: sceneTypeOptions },
@@ -45,6 +45,7 @@ export const registerSceneDefinitionBlocks = (context: PluginContext) => {
     previousStatement: null,
     nextStatement: null,
     colour,
+    tooltip: "一个完整动画的入口。把创建对象、播放动画和等待等语句放入场景内部。",
     extensions: [uniqueSceneNameExtension],
   }, (block, generator) => {
     addManimImport(generator);

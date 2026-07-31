@@ -27,4 +27,11 @@ describe("scene documents", () => {
     expect(renamed.code).toContain("class Lesson(Scene):");
     expect(() => renameSceneDocument(renamed, "not valid")).toThrow("Python 类名");
   });
+
+  it("supports Chinese scene names", () => {
+    const renamed = renameSceneDocument(legacySceneDocument("from manim import *\nclass Old(Scene):\n    pass\n"), "圆形动画");
+    expect(renamed.name).toBe("圆形动画");
+    expect(renamed.code).toContain("class 圆形动画(Scene):");
+    expect(validateSceneDocuments([renamed])).toEqual([renamed]);
+  });
 });

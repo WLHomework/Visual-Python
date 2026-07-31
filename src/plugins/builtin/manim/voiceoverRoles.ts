@@ -1,6 +1,6 @@
-import { bailianTtsModels, getBailianVoiceOptions } from "./ttsConfig";
+import { bailianTtsModels, bailianVoiceCloneModel, getBailianVoiceOptions, isBailianClonedVoice, normalizeTtsExpression, type TtsExpressionConfig } from "./ttsConfig";
 
-export type VoiceoverRole = {
+export type VoiceoverRole = TtsExpressionConfig & {
   id: string;
   name: string;
   model: string;
@@ -14,10 +14,14 @@ const listeners = new Set<(roles: VoiceoverRole[]) => void>();
 let projectRoles: VoiceoverRole[] | null = null;
 
 const normalizeRole = (value: Partial<VoiceoverRole>, index: number): VoiceoverRole => {
-  const model = bailianTtsModels.some((item) => item.id === value.model) ? String(value.model) : bailianTtsModels[0].id;
+  const requestedModel = typeof value.model === "string" ? value.model : "";
+  const requestedVoice = typeof value.voice === "string" ? value.voice.trim().slice(0, 160) : "";
+  const cloned = isBailianClonedVoice(requestedModel, requestedVoice);
+  const model = cloned ? bailianVoiceCloneModel : bailianTtsModels.some((item) => item.id === requestedModel) ? requestedModel : bailianTtsModels[0].id;
   const voices = getBailianVoiceOptions(model);
-  const voice = voices.some((item) => item.id === value.voice) ? String(value.voice) : voices[0].id;
+  const voice = cloned ? requestedVoice : voices.some((item) => item.id === requestedVoice) ? requestedVoice : voices[0].id;
   const speed = Number(value.speed);
+  const expression = normalizeTtsExpression(value);
   return {
     id: typeof value.id === "string" && /^[a-zA-Z0-9_-]{1,48}$/.test(value.id) ? value.id : `role-${Date.now()}-${index}`,
     name: typeof value.name === "string" && value.name.trim() ? value.name.trim().slice(0, 24) : `角色 ${index + 1}`,
@@ -25,6 +29,7 @@ const normalizeRole = (value: Partial<VoiceoverRole>, index: number): VoiceoverR
     voice,
     speed: Number.isFinite(speed) ? Math.min(2, Math.max(0.5, Math.round(speed * 20) / 20)) : 1,
     previewText: typeof value.previewText === "string" ? value.previewText.slice(0, 500) : "",
+    ...expression,
   };
 };
 

@@ -1,17 +1,17 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions } from "../constants";
+import { colour } from "../constants";
 import { addManimImport, pythonCall, value } from "../helpers";
 
 export const registerRoundedEllipseShapeBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_rounded_rectangle_object",
-    message0: "圆角矩形 RoundedRectangle 宽 %1 高 %2 圆角 %3 颜色 %4",
+    message0: "圆角矩形 宽 %1 高 %2 圆角 %3 颜色 %4",
     args0: [
       { type: "input_value", name: "WIDTH", check: "Number" },
       { type: "input_value", name: "HEIGHT", check: "Number" },
       { type: "input_value", name: "CORNER_RADIUS", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -27,11 +27,11 @@ export const registerRoundedEllipseShapeBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_ellipse_object",
-    message0: "椭圆 Ellipse 宽 %1 高 %2 颜色 %3",
+    message0: "椭圆 宽 %1 高 %2 颜色 %3",
     args0: [
       { type: "input_value", name: "WIDTH", check: "Number" },
       { type: "input_value", name: "HEIGHT", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

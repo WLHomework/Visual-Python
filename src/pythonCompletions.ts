@@ -1,3 +1,5 @@
+import { isPythonIdentifier, pythonIdentifierSource } from "./pythonIdentifiers";
+
 export type PythonCompletionKind = "function" | "class" | "variable" | "builtin" | "keyword" | "snippet";
 
 export type PythonCompletion = {
@@ -18,7 +20,9 @@ export type PythonSignature = { label: string; parameters: string[]; documentati
 export type PythonCallContext = { name: string; activeParameter: number };
 export type PythonOutlineItem = { label: string; kind: "function" | "class"; lineNumber: number; column: number; signature?: string };
 
-const identifierPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const identifierPattern = new RegExp(`^${pythonIdentifierSource}$`, "u");
+const identifierStartPattern = /^[_\p{ID_Start}]$/u;
+const identifierContinuePattern = /^[_\p{ID_Continue}]$/u;
 const ignoredParameters = new Set(["self", "cls"]);
 
 const positionAtOffset = (source: string, offset: number) => {
@@ -69,7 +73,7 @@ const addVariable = (symbols: Map<string, PythonCompletion>, name: string, detai
 
 export function collectPythonDocumentSymbols(source: string): PythonCompletion[] {
   const symbols = new Map<string, PythonCompletion>();
-  const functionPattern = /^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\((.*)\)\s*(?:->\s*.*?)?:\s*$/gm;
+  const functionPattern = new RegExp(`^\\s*(?:async\\s+)?def\\s+(${pythonIdentifierSource})\\s*\\((.*)\\)\\s*(?:->\\s*.*?)?:\\s*$`, "gmu");
   for (const match of source.matchAll(functionPattern)) {
     const [, name, rawParameters] = match;
     const matchOffset = match.index ?? 0;
@@ -104,7 +108,8 @@ export function collectPythonDocumentSymbols(source: string): PythonCompletion[]
     }
   }
 
-  for (const match of source.matchAll(/^\s*class\s+([A-Za-z_]\w*)\b/gm)) {
+  const classPattern = new RegExp(`^\\s*class\\s+(${pythonIdentifierSource})(?=\\s|\\(|:)`, "gmu");
+  for (const match of source.matchAll(classPattern)) {
     const name = match[1];
     const nameOffset = (match.index ?? 0) + match[0].indexOf(name);
     if (!symbols.has(name)) symbols.set(name, { label: name, kind: "class", insertText: name, detail: "当前代码中的类", sortText: `0-class-${name}`, definition: positionAtOffset(source, nameOffset) });
@@ -112,18 +117,18 @@ export function collectPythonDocumentSymbols(source: string): PythonCompletion[]
 
   for (const [lineIndex, line] of source.split(/\r?\n/).entries()) {
     const definitionFor = (name: string) => ({ lineNumber: lineIndex + 1, column: Math.max(1, line.indexOf(name) + 1) });
-    const assignment = line.match(/^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?\s*(?:=(?!=)|:=)/);
+    const assignment = line.match(new RegExp(`^\\s*(${pythonIdentifierSource})\\s*(?::[^=]+)?\\s*(?:=(?!=)|:=)`, "u"));
     if (assignment) addVariable(symbols, assignment[1], "当前代码中的变量", definitionFor(assignment[1]));
 
-    const annotation = line.match(/^\s*([A-Za-z_]\w*)\s*:\s*[^=]+$/);
+    const annotation = line.match(new RegExp(`^\\s*(${pythonIdentifierSource})\\s*:\\s*[^=]+$`, "u"));
     if (annotation) addVariable(symbols, annotation[1], "当前代码中声明的变量", definitionFor(annotation[1]));
 
     const loopTargets = line.match(/^\s*(?:async\s+)?for\s+(.+?)\s+in\s+/)?.[1];
     if (loopTargets) {
-      for (const name of loopTargets.match(/[A-Za-z_]\w*/g) ?? []) addVariable(symbols, name, "循环变量", definitionFor(name));
+      for (const name of loopTargets.match(new RegExp(pythonIdentifierSource, "gu")) ?? []) addVariable(symbols, name, "循环变量", definitionFor(name));
     }
 
-    const alias = line.match(/^\s*(?:with\s+.+?|except\s+.*?)\s+as\s+([A-Za-z_]\w*)\s*:?$/)?.[1];
+    const alias = line.match(new RegExp(`^\\s*(?:with\\s+.+?|except\\s+.*?)\\s+as\\s+(${pythonIdentifierSource})\\s*:?$`, "u"))?.[1];
     if (alias) addVariable(symbols, alias, "上下文变量", definitionFor(alias));
 
     const importStatement = line.match(/^\s*import\s+(.+)$/)?.[1];
@@ -333,7 +338,7 @@ export function findPythonCallContext(source: string, offset = source.length): P
   const call = stack.findLast((item) => item.bracket === "(");
   if (!call) return null;
   const beforeCall = beforeCursor.slice(0, call.index);
-  const nameMatch = beforeCall.match(/([A-Za-z_]\w*)\s*$/);
+  const nameMatch = beforeCall.match(new RegExp(`(${pythonIdentifierSource})\\s*$`, "u"));
   if (!nameMatch) return null;
   const nameStart = beforeCall.length - nameMatch[0].length;
   if (beforeCall.slice(0, nameStart).trimEnd().endsWith(".")) return null;
@@ -360,7 +365,7 @@ export function isPythonCompletionContext(textBeforeWord: string) {
 }
 
 export function isValidPythonIdentifier(value: string) {
-  return identifierPattern.test(value) && !reservedPythonNames.has(value);
+  return isPythonIdentifier(value) && !reservedPythonNames.has(value);
 }
 
 export type PythonIdentifierOccurrence = { lineNumber: number; startColumn: number; endColumn: number };
@@ -397,9 +402,9 @@ export function findPythonIdentifierOccurrences(source: string, name: string): P
       continue;
     }
     if (character === "'" || character === '"') { quote = character; continue; }
-    if (!/[A-Za-z_]/.test(character)) continue;
+    if (!identifierStartPattern.test(character)) continue;
     let end = index + 1;
-    while (end < source.length && /[A-Za-z0-9_]/.test(source[end])) end += 1;
+    while (end < source.length && identifierContinuePattern.test(source[end])) end += 1;
     const token = source.slice(index, end);
     if (token === name) {
       const previousText = source.slice(lineStart, index).trimEnd();

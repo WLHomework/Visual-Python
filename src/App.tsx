@@ -3,21 +3,24 @@ import * as Blockly from "blockly/core";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { readText as readClipboardText, writeText as writeClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { OnMount } from "@monaco-editor/react";
 import type { CancellationToken as MonacoCancellationToken, editor as MonacoEditor, IRange as MonacoRange, languages as MonacoLanguages, Position as MonacoPosition } from "monaco-editor";
-import { AlignLeft, ArrowLeft, Blocks, BookOpen, Box, Braces, Check, ChevronDown, ChevronRight, ChevronUp, Code2, Columns2, Copy, Download, ExternalLink, FileCode2, FilePlus2, Film, FolderOpen, ListOrdered, ListTree, Minimize2, Minus, PanelBottomClose, PanelBottomOpen, Play, Plug, Plus, Power, RefreshCw, Replace, Save, SaveAll, Search, Send, Settings, Sparkles, Square, Terminal, Trash2, Undo2, Redo2, Upload, Volume2, X } from "lucide-react";
+import { AlertCircle, AlignLeft, ArrowLeft, Blocks, BookOpen, Box, Braces, Check, ChevronDown, ChevronRight, ChevronUp, ClipboardPaste, Cloud, Code2, Columns2, Copy, Download, ExternalLink, FileCode2, FilePlus2, Film, FolderOpen, Image as ImageIcon, Link2, ListOrdered, ListTree, Mic2, Minus, PanelBottomClose, PanelBottomOpen, Pause, Play, Plug, Plus, Power, RefreshCw, Replace, Save, SaveAll, Scissors, Search, Send, Settings, SlidersHorizontal, Sparkles, Square, Terminal, TextSelect, Trash2, Undo2, Redo2, Unlink2, Upload, Volume2, X } from "lucide-react";
 import { AiAssistantPanel } from "./AiAssistantPanel";
 import { AiModelSettings } from "./AiModelSettings";
-import { applyExactCodeEdits, createCodeChangePreview, runAiCodeAgent, type AiAgentActivity, type AiAgentResult, type AiAgentToolName, type AiCodeChangeSnapshot, type AiCodeEdit, type AiConversationTurn, type AiTaskChangeSnapshot } from "./aiAgent";
+import { applyExactCodeEdits, createCodeChangePreview, runAiCodeAgent, type AiAgentActivity, type AiAgentMode, type AiAgentPermissionRequest, type AiAgentPlanStep, type AiAgentProgress, type AiAgentResult, type AiAgentToolName, type AiCodeChangeSnapshot, type AiCodeEdit, type AiConversationTurn, type AiTaskChangeSnapshot } from "./aiAgent";
+import type { AiAgentPermissionMode } from "./aiConfig";
 import { countFakeVoiceoverApis, inspectVoiceovers, insertStandaloneVoiceover, insertSynchronizedVoiceover } from "./aiVoiceover";
 import { addPythonImport, insertPythonStatements, replacePythonFunctionBody, type PythonStructure } from "./pythonStructuredEdits";
 import { defaultVisualThemeId, findWorkspaceBlockCodeRange, generateWorkspacePython, generateWorkspacePythonWithBlockMap, registerUsedVariablesToolbox, starterState, toolbox, visualPythonThemes, type VisualThemeId } from "./pythonBlocks";
 import { validatePythonBlockContexts, type PythonContextIssue } from "./pythonSyntaxBlocks";
 import { diagnosePythonError } from "./pythonDiagnostics";
 import { findPythonCallContext, findPythonIdentifierOccurrences, getPythonCompletions, getPythonOutline, getPythonSignatures, isPythonCompletionContext, isValidPythonIdentifier, type PythonCompletionKind, type PythonOutlineItem } from "./pythonCompletions";
+import { isPythonIdentifier } from "./pythonIdentifiers";
 import { parsePythonRuntimeDiagnostic } from "./pythonRuntimeDiagnostics";
 import { parsePythonSyntaxDiagnostic, type PythonCodeDiagnostic } from "./pythonSyntaxDiagnostics";
 import { formatPythonSource } from "./pythonFormatter";
@@ -28,13 +31,15 @@ import type { ExampleProject } from "./examples/types";
 import { ensureProjectPlugins, getPluginEnabledPreference, isCorePlugin, pluginRegistry, setPluginEnabled } from "./plugins";
 import type { ExternalPluginDiscovery, ExternalPluginDiscoveryResponse, ExternalPluginEntry, PluginRecord, VisualPythonPlugin } from "./plugins/api/types";
 import { getManimRenderConfig, setManimRenderConfig, subscribeManimRenderConfig, type ManimRenderConfig } from "./plugins/builtin/manim/renderConfig";
-import { bailianTtsModels, getBailianVoiceOptions, getTtsConfig, saveTtsConfig, type TtsConfig } from "./plugins/builtin/manim/ttsConfig";
+import { bailianTtsModels, bailianVoiceCloneModel, defaultTtsExpression, getBailianVoiceOptions, getTtsConfig, isBailianClonedVoice, saveTtsConfig, ttsExpressionSummary, type TtsConfig, type TtsExpressionConfig } from "./plugins/builtin/manim/ttsConfig";
 import { ManimVoiceoverError, prepareManimVoiceovers } from "./plugins/builtin/manim/voiceoverPreprocessor";
 import { ManimLocalAudioError, prepareManimLocalAudio } from "./plugins/builtin/manim/localAudioPreprocessor";
 import { readVoiceoverBlockMetadata, writeVoiceoverBlockMetadata } from "./plugins/builtin/manim/voiceoverBlockMetadata";
+import { setVoiceoverBlockPreviewHandler } from "./plugins/builtin/manim/voiceoverBlockPreview";
 import { getVoiceoverRoles, parseVoiceoverRolesFile, resolveVoiceoverRole, saveVoiceoverRoles, serializeVoiceoverRoles, subscribeVoiceoverRoles, voiceoverRoleOptions, type VoiceoverRole } from "./plugins/builtin/manim/voiceoverRoles";
 import { buildManimOutputFilename } from "./plugins/builtin/manim/outputNaming";
 import { formatRenderElapsed, initialManimRenderProgress, parseManimRenderProgress, type ManimRenderProgress } from "./plugins/builtin/manim/renderProgress";
+import { prepareManimStillImage } from "./plugins/builtin/manim/stillImagePreprocessor";
 import { extractManimSceneNames } from "./plugins/builtin/manim/sceneNames";
 import { createSceneDocument, legacySceneDocument, renameSceneDocument, sceneDocumentName, type SceneDocument } from "./sceneDocuments";
 import { validateStandaloneSceneSource } from "./sceneValidation";
@@ -44,15 +49,20 @@ import { blockSearchFlyout, createBlockSearchIndex, searchBlockIndex } from "./b
 import { buildBlockOutline, compactBlockOutline, filterBlockOutline, type BlockOutlineNode } from "./blockOutline";
 import { subscribeFormulaEditor, type FormulaEditorRequest } from "./formulaEditorBridge";
 import { normalizeProjectFileName, projectFileBaseName } from "./projectNaming";
+import { projectRelativePath, setFileBlockPickerHandler, setLocalAudioPreviewHandler, type FileBlockPickerMode } from "./fileBlockPicker";
 import { projectResourceReference, resolveProjectResourceReference, type ProjectResource } from "./projectResources";
 import { parseDraftProject, parseProjectFile, type DraftProject, type ProjectFile } from "./projectFile";
 import { ManimRenderAttempt, ManimRenderCancelledError } from "./manimRenderCancellation";
 import { isManimLatexFailure } from "./manimErrorClassification";
+import { findManagedAudioMetadataRanges } from "./managedAudioMetadata";
 import { readStoredPythonEnvironment, supportedPythonRangeLabel, type PythonEnvironment } from "./pythonEnvironment";
+import { VoiceSampleTrimmer } from "./VoiceSampleTrimmer";
+import { TtsExpressionControls } from "./TtsExpressionControls";
+import { analyzeVoiceSample, bytesToBase64, createWaveformPeaks, encodeMonoPcmWav, mergeAudioChunks, pcmSignalLevel, resampleMonoPcm, trimMonoPcm, type VoiceSampleQuality } from "./voiceRecording";
 
 type RecentProject = { path: string; name: string; openedAt: number };
-type ManimVideoPreview = { scene: string; path: string; url: string; workDir: string };
-type SceneConsoleState = { output: OutputEntry[]; problems: CodeProblem[]; video: ManimVideoPreview | null };
+type ManimRenderOutput = { type: "video" | "image"; scene: string; path: string; url: string; workDir: string; transparentBackground: boolean };
+type SceneConsoleState = { output: OutputEntry[]; problems: CodeProblem[]; renderOutput: ManimRenderOutput | null };
 type SceneAiStatus = "working" | "changed" | "error" | "validated" | "rendered";
 type OutputEntry = { id: number; stream: "stdout" | "stderr" | "system" | "input"; data: string };
 type PythonOutputEvent = { task_id: number; stream: OutputEntry["stream"]; data: string };
@@ -60,10 +70,24 @@ type PythonFinishedEvent = { task_id: number; exit_code: number; stopped: boolea
 type PackageInstallOutputEvent = { stream: OutputEntry["stream"]; data: string };
 type PackageInstallFinishedEvent = { success: boolean; stopped: boolean; error?: string | null; packages: string[] };
 type ManimOutputEvent = { task_id: number; stream: OutputEntry["stream"]; data: string };
-type ManimFinishedEvent = { task_id: number; success: boolean; stopped: boolean; scene: string; work_dir: string; video_path?: string | null; error?: string | null };
+type ManimFinishedEvent = { task_id: number; success: boolean; stopped: boolean; scene: string; work_dir: string; output_type: "video" | "image"; transparent_background: boolean; played_animation_count?: number | null; output_path?: string | null; error?: string | null };
 type ManimStorageInfo = { path: string; sizeBytes: number; renderCount: number };
 type TtsCacheInfo = { path: string; sizeBytes: number; clipCount: number };
 type TtsPreviewResult = { path: string; format: string; durationSeconds: number; cached: boolean };
+type VoiceCloneResult = { voice: string; targetModel: string };
+type RemoteClonedVoice = { voice: string; targetModel: string; language: string; createdAt: string; modifiedAt: string };
+type VoiceRecordingSession = { context: AudioContext; stream: MediaStream; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; gain: GainNode; chunks: Float32Array[]; sampleRate: number };
+type VoiceSampleAudioData = { samples: Float32Array; sampleRate: number };
+const ttsExpressionFrom = (value: TtsExpressionConfig): TtsExpressionConfig => ({ emotion: value.emotion, tone: value.tone, intonation: value.intonation, readingStyle: value.readingStyle, customInstruction: value.customInstruction });
+const ttsConfigForRole = (config: TtsConfig, role: VoiceoverRole): TtsConfig => ({ ...config, model: role.model, voice: role.voice, speed: role.speed, ...ttsExpressionFrom(role) });
+const voiceCloneLanguages = [["zh", "中文"], ["en", "英文"], ["ja", "日文"], ["ko", "韩文"], ["fr", "法文"], ["de", "德文"], ["es", "西班牙文"], ["it", "意大利文"], ["pt", "葡萄牙文"], ["ru", "俄文"]] as const;
+const voiceCloneLanguageLabel = (language: string) => voiceCloneLanguages.find(([value]) => value === language)?.[1] ?? (language || "未知语言");
+const formatRemoteVoiceDate = (value: string) => {
+  if (!value) return "创建时间未知";
+  const numeric = /^\d+$/.test(value) ? Number(value) : NaN;
+  const date = new Date(Number.isFinite(numeric) ? (numeric < 1e12 ? numeric * 1000 : numeric) : value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("zh-CN");
+};
 type ProjectResourceStatus = { path: string; exists: boolean; size: number };
 type ImportedProjectResource = ProjectResource & { deduplicated: boolean };
 const importedProjectResourceData = (resource: ImportedProjectResource): ProjectResource => ({ id: resource.id, type: resource.type, path: resource.path, originalName: resource.originalName, size: resource.size });
@@ -72,8 +96,15 @@ type OpenProjectEvent = { path: string };
 type CloseBehavior = "ask" | "tray" | "exit";
 type SettingsSection = "appearance" | "editor" | "python" | "ai" | "behavior";
 type ManimSettingsSection = "output" | "renderer" | "voice" | "storage";
-type ConsolePanel = "output" | "problems" | "video";
+type BlockInputLayout = "inline" | "external";
+type ConsolePanel = "output" | "problems" | "preview";
 type ConsoleContextMenuState = { x: number; y: number; panel: ConsolePanel; problemId?: string; selectedText: string };
+type CodeEditorContextMenuState = { x: number; y: number; hasSelection: boolean };
+type UnsavedChangesResolution = "clean" | "saved" | "discarded" | "cancelled";
+type ConfirmationTone = "primary" | "warning" | "danger";
+type ConfirmationRequest = { title: string; message: string; confirmLabel: string; detail?: string; tone?: ConfirmationTone };
+type BlockingAlertRequest = { title: string; message: string; detail?: string };
+type AppNotice = { message: string; tone: "error" | "info" };
 
 type PythonPackageStatus = { name: string; installed: boolean };
 type ProblemKind = "context" | "syntax" | "runtime" | "timeout" | "environment" | "plugin" | "resource";
@@ -94,6 +125,14 @@ const themeOptions: Array<{ id: VisualThemeId; label: string; description: strin
 const monacoThemes: Record<VisualThemeId, "vs" | "vs-dark" | "hc-black"> = {
   "visual-dark": "vs-dark", "visual-light": "vs", "one-dark": "vs-dark", "high-contrast": "hc-black",
 };
+const imageResolutionPresets = [
+  { label: "16:9", detail: "1920 × 1080", width: 1920, height: 1080 },
+  { label: "4:3", detail: "1600 × 1200", width: 1600, height: 1200 },
+  { label: "1:1", detail: "1080 × 1080", width: 1080, height: 1080 },
+  { label: "9:16", detail: "1080 × 1920", width: 1080, height: 1920 },
+] as const;
+const normalizeImageDimensionInput = (value: string | number) => Math.max(64, Math.min(8192, Math.round(Number(value) || 64)));
+const normalizeImageAnimationStepInput = (value: string | number) => Math.max(1, Math.min(10_000, Math.round(Number(value) || 1)));
 const appWindow = getCurrentWindow();
 const pluginStateLabels = { discovered: "已发现", disabled: "已禁用", loading: "加载中", active: "已启用", error: "加载失败" } as const;
 const pipMirrorUrl = "https://pypi.tuna.tsinghua.edu.cn/simple";
@@ -102,7 +141,6 @@ const Editor = lazy(() => import("@monaco-editor/react"));
 const FormulaEditorDialog = lazy(() => import("./FormulaEditorDialog"));
 const codeDiagnosticMarkerOwner = "visual-python-code-diagnostic";
 const pyrightDiagnosticMarkerOwner = "visual-python-pyright-diagnostic";
-const localAudioBlockTypes = new Set(["visual_python_manim_play_local_audio", "visual_python_manim_play_local_audio_with_animation"]);
 
 const readLocalAudioDuration = (path: string) => new Promise<number>((resolve, reject) => {
   const audio = new Audio(convertFileSrc(path));
@@ -163,6 +201,45 @@ const inspectVideoQuality = (url: string) => new Promise<{ durationSeconds: numb
     }, { once: true });
   }, { once: true });
   video.src = url;
+});
+
+const inspectImageQuality = (url: string) => new Promise<{ width: number; height: number; blankImageLikely: boolean | null; luminanceSpread: number | null; alphaSpread: number | null }>((resolve, reject) => {
+  const image = document.createElement("img");
+  image.addEventListener("error", () => reject(new Error("无法读取渲染图片")), { once: true });
+  image.addEventListener("load", () => {
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 160;
+      canvas.height = 90;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context || !width || !height) return resolve({ width, height, blankImageLikely: null, luminanceSpread: null, alphaSpread: null });
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let sum = 0;
+      let sumSquares = 0;
+      let alphaSum = 0;
+      let alphaSumSquares = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const luminance = pixels[index] * 0.2126 + pixels[index + 1] * 0.7152 + pixels[index + 2] * 0.0722;
+        const alpha = pixels[index + 3];
+        sum += luminance;
+        sumSquares += luminance * luminance;
+        alphaSum += alpha;
+        alphaSumSquares += alpha * alpha;
+      }
+      const count = pixels.length / 4;
+      const mean = sum / count;
+      const spread = Math.sqrt(Math.max(0, sumSquares / count - mean * mean));
+      const alphaMean = alphaSum / count;
+      const alphaSpread = Math.sqrt(Math.max(0, alphaSumSquares / count - alphaMean * alphaMean));
+      resolve({ width, height, blankImageLikely: Math.max(spread, alphaSpread) < 1.5, luminanceSpread: Number(spread.toFixed(2)), alphaSpread: Number(alphaSpread.toFixed(2)) });
+    } catch {
+      resolve({ width, height, blankImageLikely: null, luminanceSpread: null, alphaSpread: null });
+    }
+  }, { once: true });
+  image.src = url;
 });
 
 const renderCodeDiagnostic = (
@@ -791,6 +868,7 @@ export default function App() {
   const blockOutlineTriggerRef = useRef<HTMLButtonElement>(null);
   const consolePanelRef = useRef<HTMLDivElement>(null);
   const consoleContextMenuRef = useRef<HTMLDivElement>(null);
+  const codeEditorContextMenuRef = useRef<HTMLDivElement>(null);
   const notificationPermission = useRef<boolean | null>(null);
   const cancelProjectNameCommit = useRef(false);
   const workspace = useRef<Blockly.WorkspaceSvg | null>(null);
@@ -821,6 +899,7 @@ export default function App() {
   const codeDiagnosticDecorations = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
   const pyrightDiagnosticDecorations = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
   const selectedBlockCodeDecorations = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
+  const managedAudioMetadataDecorations = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
   const aiCodeChangeDecorations = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
   const aiCodeChangeViewZone = useRef<string | null>(null);
   const selectedBlockIdRef = useRef<string | null>(null);
@@ -830,10 +909,14 @@ export default function App() {
   const codeNavigationProviders = useRef<{ dispose: () => void } | null>(null);
   const pyrightClient = useRef<PyrightClient | null>(null);
   const formatCodeAction = useRef<() => Promise<void>>(async () => {});
-  const previewVoiceoverBlockAction = useRef<(block: Blockly.Block) => Promise<void>>(async () => {});
-  const chooseLocalAudioBlockAction = useRef<(block: Blockly.Block) => Promise<void>>(async () => {});
+  const managedVoicePreviewRequest = useRef(0);
+  const ttsPreviewAudio = useRef<HTMLAudioElement | null>(null);
   const voiceoverPreviewAudio = useRef<HTMLAudioElement | null>(null);
+  const voiceoverPreviewBlockId = useRef<string | null>(null);
+  const remoteVoicePreviewAudio = useRef<HTMLAudioElement | null>(null);
+  const remoteVoicePreviewRequest = useRef(0);
   const localAudioPreview = useRef<HTMLAudioElement | null>(null);
+  const localAudioPreviewBlockId = useRef<string | null>(null);
   const formattingPromiseRef = useRef<Promise<string | null> | null>(null);
   const [formattingCode, setFormattingCode] = useState(false);
   const [autoFormatOnSave, setAutoFormatOnSave] = useState(() => localStorage.getItem("visual-python:auto-format-on-save") === "true");
@@ -857,10 +940,14 @@ export default function App() {
   const outputRef = useRef<OutputEntry[]>(output);
   const [running, setRunning] = useState(false);
   const runningRef = useRef(running);
+  const pythonRunStartedAt = useRef(0);
+  const pythonRunElapsed = useRef(0);
   const [renderingManim, setRenderingManim] = useState(false);
   const renderingManimRef = useRef(renderingManim);
   const [manimRenderProgress, setManimRenderProgress] = useState<ManimRenderProgress | null>(null);
+  const manimRenderProgressRef = useRef<ManimRenderProgress | null>(null);
   const [manimRenderElapsed, setManimRenderElapsed] = useState(0);
+  const manimRenderElapsedRef = useRef(0);
   const [manimRenderSettingsOpen, setManimRenderSettingsOpen] = useState(false);
   const [manimSettingsSection, setManimSettingsSection] = useState<ManimSettingsSection>("output");
   const [formulaEditorRequest, setFormulaEditorRequest] = useState<FormulaEditorRequest | null>(null);
@@ -876,6 +963,46 @@ export default function App() {
   const [ttsPreviewError, setTtsPreviewError] = useState("");
   const [testingTts, setTestingTts] = useState(false);
   const [testingVoiceoverRoleId, setTestingVoiceoverRoleId] = useState<string | null>(null);
+  const [voiceCloneDialogOpen, setVoiceCloneDialogOpen] = useState(false);
+  const [voiceCloneDialogTab, setVoiceCloneDialogTab] = useState<"create" | "remote">("create");
+  const [voiceCloneName, setVoiceCloneName] = useState("");
+  const [voiceCloneSamplePath, setVoiceCloneSamplePath] = useState("");
+  const [voiceCloneLanguage, setVoiceCloneLanguage] = useState("zh");
+  const [voiceCloneConsent, setVoiceCloneConsent] = useState(false);
+  const [creatingVoiceClone, setCreatingVoiceClone] = useState(false);
+  const [voiceCloneError, setVoiceCloneError] = useState("");
+  const [voiceCloneRecordedSample, setVoiceCloneRecordedSample] = useState(false);
+  const [voiceCloneTemporarySample, setVoiceCloneTemporarySample] = useState(false);
+  const [voiceCloneSampleLabel, setVoiceCloneSampleLabel] = useState("");
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [savingVoiceRecording, setSavingVoiceRecording] = useState(false);
+  const [voiceRecordingSeconds, setVoiceRecordingSeconds] = useState(0);
+  const [voiceRecordingLevel, setVoiceRecordingLevel] = useState(0);
+  const [voiceSampleQuality, setVoiceSampleQuality] = useState<VoiceSampleQuality | null>(null);
+  const [voiceSampleAudioData, setVoiceSampleAudioData] = useState<VoiceSampleAudioData | null>(null);
+  const [voiceSampleTrimRange, setVoiceSampleTrimRange] = useState({ start: 0, end: 0 });
+  const [trimmingVoiceSample, setTrimmingVoiceSample] = useState(false);
+  const [analyzingVoiceSample, setAnalyzingVoiceSample] = useState(false);
+  const voiceSamplePeaks = useMemo(() => voiceSampleAudioData ? createWaveformPeaks(voiceSampleAudioData.samples) : [], [voiceSampleAudioData]);
+  const voiceRecordingSession = useRef<VoiceRecordingSession | null>(null);
+  const stopVoiceRecordingRef = useRef<() => void>(() => {});
+  const voiceCloneSampleAudio = useRef<HTMLAudioElement | null>(null);
+  const [previewingVoiceCloneSample, setPreviewingVoiceCloneSample] = useState(false);
+  const [voiceSamplePlaybackTime, setVoiceSamplePlaybackTime] = useState<number | null>(null);
+  const voiceSamplePlaybackProgress = voiceSamplePlaybackTime !== null && voiceSampleTrimRange.end > voiceSampleTrimRange.start
+    ? Math.max(0, Math.min(100, (voiceSamplePlaybackTime - voiceSampleTrimRange.start) / (voiceSampleTrimRange.end - voiceSampleTrimRange.start) * 100))
+    : 0;
+  const voiceSamplePlaybackRemaining = voiceSamplePlaybackTime === null ? 0 : Math.max(0, voiceSampleTrimRange.end - voiceSamplePlaybackTime);
+  const [remoteClonedVoices, setRemoteClonedVoices] = useState<RemoteClonedVoice[]>([]);
+  const [loadingRemoteClonedVoices, setLoadingRemoteClonedVoices] = useState(false);
+  const [remoteClonedVoicesLoaded, setRemoteClonedVoicesLoaded] = useState(false);
+  const [remoteClonedVoiceError, setRemoteClonedVoiceError] = useState("");
+  const [confirmingRemoteVoiceDelete, setConfirmingRemoteVoiceDelete] = useState<string | null>(null);
+  const [remoteVoicePreviewId, setRemoteVoicePreviewId] = useState<string | null>(null);
+  const [remoteVoicePreviewLoadingId, setRemoteVoicePreviewLoadingId] = useState<string | null>(null);
+  const [remoteVoicePreviewPlaying, setRemoteVoicePreviewPlaying] = useState(false);
+  const [remoteVoicePreviewTime, setRemoteVoicePreviewTime] = useState(0);
+  const [remoteVoicePreviewDuration, setRemoteVoicePreviewDuration] = useState(0);
   const [manimStorageInfo, setManimStorageInfo] = useState<ManimStorageInfo | null>(null);
   const [ttsCacheInfo, setTtsCacheInfo] = useState<TtsCacheInfo | null>(null);
   const [manimStoragePath, setManimStoragePath] = useState(() => localStorage.getItem("visual-python:manim-storage-path") || "");
@@ -897,9 +1024,12 @@ export default function App() {
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [blockSearchQuery, setBlockSearchQuery] = useState("");
   const [blockToolboxWidth, setBlockToolboxWidth] = useState(0);
+  const [blockInputLayout, setBlockInputLayout] = useState<BlockInputLayout>(() => localStorage.getItem("visual-python:block-input-layout") === "external" ? "external" : "inline");
+  const blockInputLayoutRef = useRef<BlockInputLayout>(blockInputLayout);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [exampleMenuOpen, setExampleMenuOpen] = useState(false);
   const [shortcutMenuOpen, setShortcutMenuOpen] = useState(false);
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
   const [exampleLibrary, setExampleLibrary] = useState<ExampleLibrary | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => JSON.parse(localStorage.getItem("visual-python:recent") || "[]"));
   const loadingWorkspace = useRef(false);
@@ -911,14 +1041,16 @@ export default function App() {
   const externalRestoreStarted = useRef(false);
   const packageInstallStopping = useRef(false);
   const [activePanel, setActivePanel] = useState<ConsolePanel>("output");
-  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(() => localStorage.getItem("visual-python:ai-assistant-open") === "true");
+  const aiAssistantVisible = workspaceMode === "code" && aiAssistantOpen;
   const [aiPanelWidth, setAiPanelWidth] = useState(() => {
     const saved = Number(localStorage.getItem("visual-python:ai-panel-width"));
     return Number.isFinite(saved) && saved >= 340 && saved <= 520 ? saved : 400;
   });
   const [consoleContextMenu, setConsoleContextMenu] = useState<ConsoleContextMenuState | null>(null);
-  const [manimVideo, setManimVideo] = useState<ManimVideoPreview | null>(null);
-  const manimVideoRef = useRef<ManimVideoPreview | null>(manimVideo);
+  const [codeEditorContextMenu, setCodeEditorContextMenu] = useState<CodeEditorContextMenuState | null>(null);
+  const [manimRenderOutput, setManimRenderOutput] = useState<ManimRenderOutput | null>(null);
+  const manimRenderOutputRef = useRef<ManimRenderOutput | null>(manimRenderOutput);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -929,9 +1061,16 @@ export default function App() {
   const [projectResourceQuery, setProjectResourceQuery] = useState("");
   const [projectResourceFilter, setProjectResourceFilter] = useState<ProjectResourceFilter>("all");
   const [closePromptOpen, setClosePromptOpen] = useState(false);
-  const [projectReplacementPromptOpen, setProjectReplacementPromptOpen] = useState(false);
-  const [savingBeforeProjectReplacement, setSavingBeforeProjectReplacement] = useState(false);
-  const projectReplacementResolver = useRef<((continueOperation: boolean) => void) | null>(null);
+  const [unsavedChangesPromptOpen, setUnsavedChangesPromptOpen] = useState(false);
+  const [savingUnsavedChanges, setSavingUnsavedChanges] = useState(false);
+  const unsavedChangesResolver = useRef<((resolution: UnsavedChangesResolution) => void) | null>(null);
+  const [confirmationRequest, setConfirmationRequest] = useState<ConfirmationRequest | null>(null);
+  const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
+  const confirmationReturnFocus = useRef<HTMLElement | null>(null);
+  const [blockingAlert, setBlockingAlert] = useState<BlockingAlertRequest | null>(null);
+  const blockingAlertReturnFocus = useRef<HTMLElement | null>(null);
+  const [appNotice, setAppNotice] = useState<AppNotice | null>(null);
+  const appNoticeTimer = useRef<number | null>(null);
   const [rememberCloseChoice, setRememberCloseChoice] = useState(false);
   const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>(() => {
     const saved = localStorage.getItem("visual-python:close-behavior");
@@ -978,10 +1117,55 @@ export default function App() {
   const manimRenderStartedAt = useRef(0);
   const manimBlockIdByLine = useRef(new Map<number, string>());
   const manimTaskId = useRef<number | null>(null);
+  const manimImageCaptureRequest = useRef<{ mode: "final" | "animation"; step: number } | null>(null);
   const manimRenderAttemptId = useRef(0);
   const manimRenderAttempt = useRef<ManimRenderAttempt | null>(null);
   const pendingOutput = useRef<OutputEntry[]>([]);
   const outputFlushTimer = useRef<number | null>(null);
+
+  const finishConfirmation = useCallback((confirmed: boolean) => {
+    setConfirmationRequest(null);
+    const resolve = confirmationResolver.current;
+    const returnFocus = confirmationReturnFocus.current;
+    confirmationResolver.current = null;
+    confirmationReturnFocus.current = null;
+    resolve?.(confirmed);
+    requestAnimationFrame(() => { if (returnFocus?.isConnected) returnFocus.focus(); });
+  }, []);
+
+  const requestConfirmation = useCallback((request: ConfirmationRequest) => new Promise<boolean>((resolve) => {
+    confirmationResolver.current?.(false);
+    confirmationResolver.current = resolve;
+    confirmationReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setConfirmationRequest(request);
+  }), []);
+
+  const closeBlockingAlert = useCallback(() => {
+    setBlockingAlert(null);
+    const returnFocus = blockingAlertReturnFocus.current;
+    blockingAlertReturnFocus.current = null;
+    requestAnimationFrame(() => { if (returnFocus?.isConnected) returnFocus.focus(); });
+  }, []);
+
+  const showBlockingAlert = useCallback((request: BlockingAlertRequest) => {
+    blockingAlertReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setBlockingAlert(request);
+  }, []);
+
+  const dismissAppNotice = useCallback(() => {
+    if (appNoticeTimer.current !== null) window.clearTimeout(appNoticeTimer.current);
+    appNoticeTimer.current = null;
+    setAppNotice(null);
+  }, []);
+
+  const showAppNotice = useCallback((message: string, tone: AppNotice["tone"] = "error") => {
+    if (appNoticeTimer.current !== null) window.clearTimeout(appNoticeTimer.current);
+    setAppNotice({ message, tone });
+    appNoticeTimer.current = window.setTimeout(() => {
+      appNoticeTimer.current = null;
+      setAppNotice(null);
+    }, tone === "error" ? 7000 : 4500);
+  }, []);
 
   const flushPendingOutput = useCallback(() => {
     outputFlushTimer.current = null;
@@ -1035,14 +1219,14 @@ export default function App() {
       window.clearTimeout(outputFlushTimer.current);
       outputFlushTimer.current = null;
     }
-    if (fromSceneId) sceneConsoleStates.current.set(fromSceneId, { output: currentOutput, problems: problemsRef.current, video: manimVideoRef.current });
-    const target = sceneConsoleStates.current.get(toSceneId) ?? { output: [], problems: [], video: null };
+    if (fromSceneId) sceneConsoleStates.current.set(fromSceneId, { output: currentOutput, problems: problemsRef.current, renderOutput: manimRenderOutputRef.current });
+    const target = sceneConsoleStates.current.get(toSceneId) ?? { output: [], problems: [], renderOutput: null };
     outputRef.current = target.output;
     problemsRef.current = target.problems;
-    manimVideoRef.current = target.video;
+    manimRenderOutputRef.current = target.renderOutput;
     setOutput(target.output);
     setProblems(target.problems);
-    setManimVideo(target.video);
+    setManimRenderOutput(target.renderOutput);
   }, []);
 
   useEffect(() => subscribeFormulaEditor(setFormulaEditorRequest), []);
@@ -1061,6 +1245,7 @@ export default function App() {
   useEffect(() => () => {
     if (outputFlushTimer.current !== null) window.clearTimeout(outputFlushTimer.current);
     if (toolboxAutoHideTimer.current !== null) window.clearTimeout(toolboxAutoHideTimer.current);
+    if (appNoticeTimer.current !== null) window.clearTimeout(appNoticeTimer.current);
     codeCompletionProvider.current?.dispose();
     codeCompletionProvider.current = null;
     codeSignatureHelpProvider.current?.dispose();
@@ -1085,16 +1270,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!projectMenuOpen && !exampleMenuOpen && !shortcutMenuOpen) return;
+    if (!projectMenuOpen && !exampleMenuOpen && !shortcutMenuOpen && !helpMenuOpen) return;
     const closeTopMenus = (event: PointerEvent) => {
       if (topMenuRef.current?.contains(event.target as Node)) return;
       setProjectMenuOpen(false);
       setExampleMenuOpen(false);
       setShortcutMenuOpen(false);
+      setHelpMenuOpen(false);
     };
     document.addEventListener("pointerdown", closeTopMenus);
     return () => document.removeEventListener("pointerdown", closeTopMenus);
-  }, [exampleMenuOpen, projectMenuOpen, shortcutMenuOpen]);
+  }, [exampleMenuOpen, helpMenuOpen, projectMenuOpen, shortcutMenuOpen]);
 
   useEffect(() => {
     if (!manimSceneMenuOpen) return;
@@ -1151,6 +1337,31 @@ export default function App() {
       document.removeEventListener("scroll", closeMenuWithoutEvent, true);
     };
   }, [consoleContextMenu]);
+
+  useEffect(() => {
+    if (!codeEditorContextMenu) return;
+    const closeMenu = (event: PointerEvent) => {
+      if (!codeEditorContextMenuRef.current?.contains(event.target as Node)) setCodeEditorContextMenu(null);
+    };
+    const closeMenuWithKeyboard = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCodeEditorContextMenu(null);
+    };
+    const closeMenuWithoutEvent = () => setCodeEditorContextMenu(null);
+    const focusFrame = requestAnimationFrame(() => codeEditorContextMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
+    document.addEventListener("pointerdown", closeMenu);
+    document.addEventListener("keydown", closeMenuWithKeyboard);
+    window.addEventListener("resize", closeMenuWithoutEvent);
+    window.addEventListener("blur", closeMenuWithoutEvent);
+    document.addEventListener("scroll", closeMenuWithoutEvent, true);
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      document.removeEventListener("pointerdown", closeMenu);
+      document.removeEventListener("keydown", closeMenuWithKeyboard);
+      window.removeEventListener("resize", closeMenuWithoutEvent);
+      window.removeEventListener("blur", closeMenuWithoutEvent);
+      document.removeEventListener("scroll", closeMenuWithoutEvent, true);
+    };
+  }, [codeEditorContextMenu]);
 
   useEffect(() => {
     if (!codeOutlineOpen) return;
@@ -1210,12 +1421,12 @@ export default function App() {
   const chooseLocalAudioForBlock = useCallback(async (block: Blockly.Block) => {
     const currentProjectPath = projectPathRef.current;
     if (!currentProjectPath) {
-      Blockly.dialog.alert("请先保存工程，再添加本地音频资源。");
+      showBlockingAlert({ title: "请先保存工程", message: "保存工程后才能添加本地音频资源。" });
       return;
     }
     const currentPathBlock = block.getInputTargetBlock("PATH");
     if (currentPathBlock && currentPathBlock.type !== "text") {
-      Blockly.dialog.alert("音频路径已连接其他积木，请先移除后再选择音频文件。");
+      showBlockingAlert({ title: "无法选择音频", message: "音频路径已连接其他积木，请先移除后再选择音频文件。" });
       return;
     }
     const path = await open({
@@ -1229,7 +1440,7 @@ export default function App() {
     try {
       resource = await invoke<ImportedProjectResource>("import_project_audio", { projectPath: currentProjectPath, sourcePath: path, existingResources: projectResourcesRef.current.map(({ id, path: resourcePath, originalName }) => ({ id, path: resourcePath, originalName })) });
     } catch (error) {
-      Blockly.dialog.alert(`无法导入音频资源：${String(error)}`);
+      showAppNotice(`无法导入音频资源：${String(error)}`);
       return;
     }
     if (!resource.deduplicated) {
@@ -1246,7 +1457,7 @@ export default function App() {
       return;
     }
     if (existing) {
-      Blockly.dialog.alert("路径位置已经连接了其他积木，请先移除后再选择音频文件。");
+      showBlockingAlert({ title: "无法选择音频", message: "路径位置已经连接了其他积木，请先移除后再选择音频文件。" });
       return;
     }
     Blockly.Events.setGroup(true);
@@ -1259,28 +1470,111 @@ export default function App() {
     } finally {
       Blockly.Events.setGroup(false);
     }
-  }, []);
-  chooseLocalAudioBlockAction.current = chooseLocalAudioForBlock;
+  }, [showAppNotice, showBlockingAlert]);
+  const choosePathForFileBlock = useCallback(async (block: Blockly.Block, mode: FileBlockPickerMode, inputName: string) => {
+    if (mode === "audio-file") {
+      await chooseLocalAudioForBlock(block);
+      return;
+    }
+    const editableTextBlock = (target: Blockly.Block | null) => {
+      if (target?.type === "text") return target;
+      if (target?.type === "python_path_create") {
+        const value = target.getInputTargetBlock("VALUE");
+        return value?.type === "text" ? value : null;
+      }
+      return null;
+    };
+    const connectedBlock = block.getInputTargetBlock(inputName);
+    if (connectedBlock && !editableTextBlock(connectedBlock) && connectedBlock.type !== "python_path_create") {
+      showBlockingAlert({ title: "无法选择路径", message: "路径位置已连接其他积木，请先移除后再选择。" });
+      return;
+    }
+    let selectedPath: string | null = null;
+    try {
+      if (mode === "save-file") {
+        selectedPath = await save({ title: "选择文件保存位置" });
+      } else {
+        const selectsParentDirectory = mode === "directory" && (
+          block.type === "python_os_makedirs"
+          || (block.type === "python_directory_copy" && inputName === "TARGET")
+          || (block.type === "python_directory_move" && inputName === "TARGET")
+          || (block.type === "python_file_move" && block.getFieldValue("PATH_KIND") === "directory" && inputName === "TARGET")
+        );
+        const selection = await open({
+          title: mode === "directory" ? selectsParentDirectory ? "选择目标父目录" : "选择目录" : "选择文件",
+          multiple: false,
+          directory: mode === "directory",
+        });
+        selectedPath = typeof selection === "string" ? selection : null;
+      }
+    } catch (error) {
+      showAppNotice(`无法打开路径选择器：${String(error)}`);
+      return;
+    }
+    if (!selectedPath || block.isDisposed()) return;
+    const path = projectRelativePath(selectedPath, projectPathRef.current);
+    const existing = block.getInputTargetBlock(inputName);
+    const existingText = editableTextBlock(existing);
+    if (existingText) {
+      existingText.setFieldValue(path, "TEXT");
+      return;
+    }
+    if (existing && existing.type !== "python_path_create") {
+      showBlockingAlert({ title: "无法选择路径", message: "路径位置已连接其他积木，请先移除后再选择。" });
+      return;
+    }
+    const pathOwner = existing?.type === "python_path_create" ? existing : block;
+    const pathInputName = existing?.type === "python_path_create" ? "VALUE" : inputName;
+    const blockWorkspace = block.workspace;
+    Blockly.Events.setGroup(true);
+    try {
+      const textBlock = blockWorkspace.newBlock("text") as Blockly.BlockSvg;
+      textBlock.setFieldValue(path, "TEXT");
+      textBlock.initSvg();
+      textBlock.render();
+      pathOwner.getInput(pathInputName)?.connection?.connect(textBlock.outputConnection!);
+    } finally {
+      Blockly.Events.setGroup(false);
+    }
+  }, [chooseLocalAudioForBlock, showAppNotice, showBlockingAlert]);
+
+  useEffect(() => {
+    setFileBlockPickerHandler(choosePathForFileBlock);
+    return () => setFileBlockPickerHandler(null);
+  }, [choosePathForFileBlock]);
 
   const previewLocalAudioBlock = useCallback(async (block: Blockly.Block) => {
+    if (localAudioPreview.current && localAudioPreviewBlockId.current === block.id) {
+      localAudioPreview.current.pause();
+      localAudioPreview.current.currentTime = 0;
+      localAudioPreview.current = null;
+      localAudioPreviewBlockId.current = null;
+      return;
+    }
     const pathBlock = block.getInputTargetBlock("PATH");
     const path = pathBlock?.type === "text" ? String(pathBlock.getFieldValue("TEXT") ?? "").trim() : "";
     if (!path) {
-      Blockly.dialog.alert("请先右键选择音频文件，或连接包含文件路径的 Python 文本积木。");
+      showBlockingAlert({ title: "缺少音频文件", message: "请点击积木上的文件夹图标选择音频文件，或连接包含文件路径的 Python 文本积木。" });
       return;
     }
     const resolvedPath = resolveProjectResourceReference(path, projectResourcesRef.current, projectPathRef.current);
     if (!resolvedPath || !/^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(resolvedPath)) {
-      Blockly.dialog.alert("相对路径只能在 Manim 渲染时解析。直接试听请先选择本机音频文件。");
+      showBlockingAlert({ title: "无法直接试听", message: "相对路径只能在 Manim 渲染时解析。直接试听请先选择本机音频文件。" });
       return;
     }
     localAudioPreview.current?.pause();
+    localAudioPreviewBlockId.current = null;
     const gainBlock = block.getInputTargetBlock("GAIN");
     const gain = gainBlock?.type === "math_number" ? Number(gainBlock.getFieldValue("NUM")) : 0;
     const audio = new Audio(convertFileSrc(resolvedPath));
     audio.volume = Math.min(1, Math.max(0, 10 ** ((Number.isFinite(gain) ? gain : 0) / 20)));
     localAudioPreview.current = audio;
-    audio.addEventListener("ended", () => { if (localAudioPreview.current === audio) localAudioPreview.current = null; }, { once: true });
+    localAudioPreviewBlockId.current = block.id;
+    audio.addEventListener("ended", () => {
+      if (localAudioPreview.current !== audio) return;
+      localAudioPreview.current = null;
+      localAudioPreviewBlockId.current = null;
+    }, { once: true });
     try {
       await audio.play();
       setActivePanel("output");
@@ -1288,57 +1582,23 @@ export default function App() {
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `正在试听本地音频：${path}\n` }]);
     } catch (error) {
       localAudioPreview.current = null;
-      Blockly.dialog.alert(`无法试听本地音频：${String(error)}`);
+      localAudioPreviewBlockId.current = null;
+      showAppNotice(`无法试听本地音频：${String(error)}`);
     }
-  }, []);
+  }, [showAppNotice, showBlockingAlert]);
 
   const stopLocalAudioPreview = useCallback(() => {
     localAudioPreview.current?.pause();
     if (localAudioPreview.current) localAudioPreview.current.currentTime = 0;
     localAudioPreview.current = null;
+    localAudioPreviewBlockId.current = null;
   }, []);
 
   useEffect(() => {
-    const id = "visual-python-choose-manim-local-audio";
-    const registry = Blockly.ContextMenuRegistry.registry;
-    if (registry.getItem(id)) registry.unregister(id);
-    registry.register({
-      id,
-      scopeType: Blockly.ContextMenuRegistry.ScopeType.BLOCK,
-      weight: 3,
-      displayText: "选择音频文件…",
-      preconditionFn: ({ block }) => block && localAudioBlockTypes.has(block.type) ? "enabled" : "hidden",
-      callback: ({ block }) => { if (block) void chooseLocalAudioBlockAction.current(block); },
-    });
-    return () => { if (registry.getItem(id)) registry.unregister(id); };
-  }, []);
-
-  useEffect(() => {
-    const registry = Blockly.ContextMenuRegistry.registry;
-    const previewId = "visual-python-preview-manim-local-audio";
-    const stopId = "visual-python-stop-manim-local-audio-preview";
-    if (registry.getItem(previewId)) registry.unregister(previewId);
-    registry.register({
-      id: previewId,
-      scopeType: Blockly.ContextMenuRegistry.ScopeType.BLOCK,
-      weight: 4,
-      displayText: "试听本地音频",
-      preconditionFn: ({ block }) => block && localAudioBlockTypes.has(block.type) ? "enabled" : "hidden",
-      callback: ({ block }) => { if (block) void previewLocalAudioBlock(block); },
-    });
-    if (registry.getItem(stopId)) registry.unregister(stopId);
-    registry.register({
-      id: stopId,
-      scopeType: Blockly.ContextMenuRegistry.ScopeType.BLOCK,
-      weight: 5,
-      displayText: "停止试听",
-      preconditionFn: ({ block }) => block && localAudioBlockTypes.has(block.type) && localAudioPreview.current ? "enabled" : "hidden",
-      callback: () => stopLocalAudioPreview(),
-    });
+    setLocalAudioPreviewHandler(previewLocalAudioBlock);
     return () => {
+      setLocalAudioPreviewHandler(null);
       stopLocalAudioPreview();
-      if (registry.getItem(previewId)) registry.unregister(previewId);
-      if (registry.getItem(stopId)) registry.unregister(stopId);
     };
   }, [previewLocalAudioBlock, stopLocalAudioPreview]);
 
@@ -1371,6 +1631,45 @@ export default function App() {
     showBlockSearchResults("");
   }, [showBlockSearchResults]);
 
+  const applyBlockInputLayout = useCallback((ws: Blockly.Workspace, layout: BlockInputLayout, ids?: string[]) => {
+    const blocks = ids
+      ? ids.map((id) => ws.getBlockById(id)).filter((block): block is Blockly.Block => Boolean(block))
+      : ws.getAllBlocks(false);
+    const useExternalInputs = (block: Blockly.Block) => {
+      const valueInputCount = block.inputList.filter((input) => input.type === Blockly.inputs.inputTypes.VALUE).length;
+      if (valueInputCount < 2) return false;
+      if (block.inputsInlineDefault === false || valueInputCount >= 4) return true;
+      return block.rendered && (block as Blockly.BlockSvg).getHeightWidth().width > 400;
+    };
+    Blockly.Events.disable();
+    try {
+      for (const block of blocks) block.setInputsInline(true);
+      if (layout === "external") {
+        if (ws instanceof Blockly.WorkspaceSvg) ws.render();
+        for (const block of blocks) block.setInputsInline(!useExternalInputs(block));
+      }
+    } finally {
+      Blockly.Events.enable();
+    }
+  }, []);
+
+  const changeBlockInputLayout = useCallback((layout: BlockInputLayout) => {
+    if (layout === blockInputLayout) return;
+    blockInputLayoutRef.current = layout;
+    setBlockInputLayout(layout);
+    localStorage.setItem("visual-python:block-input-layout", layout);
+    if (!loadingWorkspace.current) {
+      setDirty(true);
+      setWorkspaceRevision((revision) => revision + 1);
+    }
+  }, [blockInputLayout]);
+
+  useEffect(() => {
+    blockInputLayoutRef.current = blockInputLayout;
+    localStorage.setItem("visual-python:block-input-layout", blockInputLayout);
+    if (workspace.current) applyBlockInputLayout(workspace.current, blockInputLayout);
+  }, [applyBlockInputLayout, blockInputLayout]);
+
   useEffect(() => {
     if (!host.current) return;
     const initialToolbox = pluginRegistry.extendToolbox(toolbox);
@@ -1394,6 +1693,22 @@ export default function App() {
         autoHide(onlyClosePopups);
       };
     }
+    const injectionDiv = ws.getInjectionDiv();
+    const handleDirectFieldPointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      injectionDiv.classList.toggle("blocklyDirectFieldEdit", Boolean(target?.closest(".blocklyTextInputField")));
+    };
+    const finishDirectFieldEdit = (event: FocusEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target?.classList.contains("blocklyHtmlInput")) return;
+      requestAnimationFrame(() => {
+        const selected = Blockly.common.getSelected();
+        if (selected?.workspace === ws) selected.unselect();
+        injectionDiv.classList.remove("blocklyDirectFieldEdit");
+      });
+    };
+    injectionDiv.addEventListener("pointerdown", handleDirectFieldPointerDown, true);
+    document.addEventListener("focusout", finishDirectFieldEdit, true);
     const toolboxElement = (ws.getToolbox() as unknown as { HtmlDiv?: HTMLDivElement | null } | null)?.HtmlDiv;
     const clearSearchForCategory = (event: PointerEvent) => {
       if (!blockSearchQueryRef.current || !(event.target as Element).closest(".blocklyToolboxCategory,.blocklyTreeRow")) return;
@@ -1446,6 +1761,10 @@ export default function App() {
       }
     }
     if (!restoredDraft) Blockly.serialization.workspaces.load(starterState, ws);
+    if (draft?.blockInputLayout) {
+      blockInputLayoutRef.current = draft.blockInputLayout;
+      setBlockInputLayout(draft.blockInputLayout);
+    }
     pruneUnusedVariables();
     setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
     ws.clearUndo();
@@ -1477,7 +1796,10 @@ export default function App() {
       if (event.isUiEvent || event.type === Blockly.Events.FINISHED_LOADING) return;
       if (event.type === Blockly.Events.BLOCK_CREATE) {
         const ids = (event as Blockly.Events.BlockCreate).ids ?? [];
-        queueMicrotask(() => refreshCreatedVoiceoverRoleFields(ids));
+        queueMicrotask(() => {
+          applyBlockInputLayout(ws, blockInputLayoutRef.current, ids);
+          refreshCreatedVoiceoverRoleFields(ids);
+        });
       }
       scheduleVariablePrune();
       setCode(generateWorkspacePython(ws));
@@ -1529,8 +1851,8 @@ export default function App() {
       });
     });
     observer.observe(host.current);
-    return () => { unsubscribePlugins(); toolboxElement?.removeEventListener("pointerdown", clearSearchForCategory); observer.disconnect(); if (resizeFrame !== null) cancelAnimationFrame(resizeFrame); ws.dispose(); };
-  }, [showBlockSearchResults]);
+    return () => { unsubscribePlugins(); toolboxElement?.removeEventListener("pointerdown", clearSearchForCategory); injectionDiv.removeEventListener("pointerdown", handleDirectFieldPointerDown, true); document.removeEventListener("focusout", finishDirectFieldEdit, true); observer.disconnect(); if (resizeFrame !== null) cancelAnimationFrame(resizeFrame); ws.dispose(); };
+  }, [applyBlockInputLayout, showBlockSearchResults]);
 
   useEffect(() => {
     const ws = workspace.current;
@@ -1545,15 +1867,15 @@ export default function App() {
   useEffect(() => { workspaceModeRef.current = workspaceMode; }, [workspaceMode]);
   useEffect(() => { sceneDocumentsRef.current = sceneDocuments; }, [sceneDocuments]);
   useEffect(() => { activeSceneIdRef.current = activeSceneId; }, [activeSceneId]);
-  useEffect(() => { if (workspaceMode !== "code") setAiAssistantOpen(false); }, [workspaceMode]);
   useEffect(() => { outputRef.current = output; }, [output]);
   useEffect(() => { runningRef.current = running; }, [running]);
   useEffect(() => { renderingManimRef.current = renderingManim; }, [renderingManim]);
-  useEffect(() => { manimVideoRef.current = manimVideo; }, [manimVideo]);
+  useEffect(() => { manimRenderOutputRef.current = manimRenderOutput; }, [manimRenderOutput]);
   useEffect(() => { problemsRef.current = problems; }, [problems]);
   useEffect(() => { contextProblemsRef.current = contextProblems; }, [contextProblems]);
   useEffect(() => { localStorage.setItem("visual-python:right-panel-width", String(rightPanelWidth)); }, [rightPanelWidth]);
   useEffect(() => { localStorage.setItem("visual-python:ai-panel-width", String(aiPanelWidth)); }, [aiPanelWidth]);
+  useEffect(() => { localStorage.setItem("visual-python:ai-assistant-open", String(aiAssistantOpen)); }, [aiAssistantOpen]);
   useEffect(() => { localStorage.setItem("visual-python:bottom-panel-open", String(bottomPanelOpen)); }, [bottomPanelOpen]);
   useEffect(() => { localStorage.setItem("visual-python:bottom-panel-height", String(bottomPanelHeight)); }, [bottomPanelHeight]);
   useEffect(() => { localStorage.setItem("visual-python:workspace-mode", workspaceMode); }, [workspaceMode]);
@@ -1664,9 +1986,9 @@ export default function App() {
     let listener: Awaited<ReturnType<typeof onAction>> | null = null;
     void onAction((notification) => {
       const target = notification.extra?.target;
-      if (target !== "video" && target !== "problems" && target !== "output") return;
+      if (target !== "preview" && target !== "problems" && target !== "output" && target !== "video") return;
       void invoke("restore_main_window").then(() => {
-        if (!disposed) openConsolePanel(target);
+        if (!disposed) openConsolePanel(target === "video" ? "preview" : target);
       });
     }).then((registered) => {
       if (disposed) void registered.unregister();
@@ -1827,6 +2149,7 @@ export default function App() {
     codeDiagnosticDecorations.current = editor.createDecorationsCollection();
     pyrightDiagnosticDecorations.current = editor.createDecorationsCollection();
     selectedBlockCodeDecorations.current = editor.createDecorationsCollection();
+    managedAudioMetadataDecorations.current = editor.createDecorationsCollection();
     if (!codeCompletionProvider.current) codeCompletionProvider.current = registerPythonCompletionProvider(monaco, () => pyrightClient.current);
     if (!codeSignatureHelpProvider.current) codeSignatureHelpProvider.current = registerPythonSignatureHelpProvider(monaco, () => pyrightClient.current);
     if (!codeNavigationProviders.current) codeNavigationProviders.current = registerPythonNavigationProviders(monaco, () => pyrightClient.current);
@@ -1846,10 +2169,24 @@ export default function App() {
     const position = editor.getPosition();
     if (position) setCodeCursorPosition({ lineNumber: position.lineNumber, column: position.column });
     setCodeIndentSize(editorIndentSize);
+    const renderManagedAudioMetadata = () => {
+      const currentModel = editor.getModel();
+      const decorations = managedAudioMetadataDecorations.current;
+      if (!currentModel || !decorations) return;
+      decorations.set(findManagedAudioMetadataRanges(currentModel.getValue()).map((range) => ({
+        range: new monaco.Range(range.lineNumber, range.startColumn, range.lineNumber, range.endColumn),
+        options: {
+          inlineClassName: "managed-audio-metadata-hidden",
+          inlineClassNameAffectsLetterSpacing: true,
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      })));
+    };
+    renderManagedAudioMetadata();
     codeEditorStatusListeners.current = [
       editor.onDidChangeCursorPosition(({ position: nextPosition }) => setCodeCursorPosition({ lineNumber: nextPosition.lineNumber, column: nextPosition.column })),
       ...(model ? [model.onDidChangeOptions(() => setCodeIndentSize(model.getOptions().tabSize))] : []),
-      ...(model ? [model.onDidChangeContent(clearAiCodeChange)] : []),
+      ...(model ? [model.onDidChangeContent(() => { clearAiCodeChange(); renderManagedAudioMetadata(); })] : []),
       editor.onKeyDown((event) => {
         if (event.keyCode !== monaco.KeyCode.Escape || (!aiCodeChangeDecorations.current && !aiCodeChangeViewZone.current)) return;
         event.preventDefault();
@@ -1968,7 +2305,11 @@ export default function App() {
 
   useEffect(() => {
     if (!renderingManim) return;
-    const updateElapsed = () => setManimRenderElapsed(Math.max(0, Math.floor((Date.now() - manimRenderStartedAt.current) / 1000)));
+    const updateElapsed = () => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - manimRenderStartedAt.current) / 1000));
+      manimRenderElapsedRef.current = elapsed;
+      setManimRenderElapsed(elapsed);
+    };
     updateElapsed();
     const timer = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(timer);
@@ -1979,6 +2320,24 @@ export default function App() {
     setDirty(true);
     setWorkspaceRevision((revision) => revision + 1);
   }, []);
+
+  const commitImageDimension = useCallback((axis: "width" | "height", rawValue: string) => {
+    const value = normalizeImageDimensionInput(rawValue);
+    const ratio = manimRenderConfig.imageWidth / manimRenderConfig.imageHeight;
+    const patch: Partial<ManimRenderConfig> = { imageSizeMode: "custom" };
+    if (axis === "width") {
+      patch.imageWidth = value;
+      if (manimRenderConfig.lockImageAspectRatio) patch.imageHeight = normalizeImageDimensionInput(value / ratio);
+    } else {
+      patch.imageHeight = value;
+      if (manimRenderConfig.lockImageAspectRatio) patch.imageWidth = normalizeImageDimensionInput(value * ratio);
+    }
+    updateManimRenderConfig(patch);
+  }, [manimRenderConfig.imageHeight, manimRenderConfig.imageWidth, manimRenderConfig.lockImageAspectRatio, updateManimRenderConfig]);
+
+  const applyImageResolutionPreset = useCallback((width: number, height: number) => {
+    updateManimRenderConfig({ imageSizeMode: "custom", imageWidth: width, imageHeight: height });
+  }, [updateManimRenderConfig]);
 
   const updateTtsConfig = useCallback((patch: Partial<TtsConfig>) => {
     setTtsConfigState((current) => saveTtsConfig({ ...current, ...patch }));
@@ -1991,9 +2350,10 @@ export default function App() {
     const role = resolveVoiceoverRole(roleId);
     const textBlock = block.getInputTargetBlock("TEXT");
     const text = textBlock?.type === "text" ? String(textBlock.getFieldValue("TEXT") ?? "") : "";
-    const config = role ? { model: role.model, voice: role.voice, speed: role.speed } : { model: ttsConfig.model, voice: ttsConfig.voice, speed: ttsConfig.speed };
+    const source = role ?? ttsConfig;
+    const config = { model: source.model, voice: source.voice, speed: source.speed, ...ttsExpressionFrom(source) };
     return JSON.stringify({ roleId, text, ...config });
-  }, [ttsConfig.model, ttsConfig.speed, ttsConfig.voice, voiceoverRoles]);
+  }, [ttsConfig, voiceoverRoles]);
 
   const refreshVoiceoverBlockTooltip = useCallback((block: Blockly.Block) => {
     if (block.type !== "visual_python_manim_voiceover" && block.type !== "visual_python_manim_voiceover_with_animation") return;
@@ -2002,13 +2362,14 @@ export default function App() {
     const model = role?.model || ttsConfig.model;
     const voice = role?.voice || ttsConfig.voice;
     const speed = role?.speed ?? ttsConfig.speed;
+    const expression = ttsExpressionSummary(role ?? ttsConfig);
     const modelLabel = bailianTtsModels.find((item) => item.id === model)?.label || model;
     const voiceLabel = getBailianVoiceOptions(model).find((item) => item.id === voice)?.label || voice;
     const metadata = readVoiceoverBlockMetadata(block);
     const duration = metadata?.signature === voiceoverBlockSignature(block) ? `\n预计时长：${metadata.durationSeconds.toFixed(2)} 秒` : "\n预计时长：渲染或试听后显示";
     const sync = block.type === "visual_python_manim_voiceover_with_animation" ? "\n同步规则：动画较短时自动补足等待" : "";
-    block.setTooltip(`角色：${role?.name || "默认旁白"}\n模型：${modelLabel}\n音色：${voiceLabel}\n语速：${speed.toFixed(2)}x${duration}${sync}`);
-  }, [ttsConfig.model, ttsConfig.speed, ttsConfig.voice, voiceoverBlockSignature, voiceoverRoles]);
+    block.setTooltip(`角色：${role?.name || "默认旁白"}\n模型：${modelLabel}\n音色：${voiceLabel}\n语速：${speed.toFixed(2)}x\n表达：${expression}${duration}${sync}`);
+  }, [ttsConfig, voiceoverBlockSignature, voiceoverRoles]);
 
   useEffect(() => {
     for (const block of workspace.current?.getAllBlocks(false) ?? []) refreshVoiceoverBlockTooltip(block);
@@ -2045,13 +2406,520 @@ export default function App() {
       voice: bailianTtsModels[0].voices[0].id,
       speed: 1,
       previewText: "",
+      ...defaultTtsExpression,
     }]);
   }, [persistVoiceoverRoles, voiceoverRoles]);
 
-  const removeVoiceoverRole = useCallback((id: string) => {
-    if (!window.confirm("删除这个配音角色吗？使用它的积木将自动改为默认旁白。")) return;
-    persistVoiceoverRoles(voiceoverRoles.filter((role) => role.id !== id));
+  const openVoiceCloneDialog = useCallback(() => {
+    managedVoicePreviewRequest.current += 1;
+    ttsPreviewAudio.current?.pause();
+    voiceoverPreviewAudio.current?.pause();
+    voiceoverPreviewAudio.current = null;
+    setTestingTts(false);
+    setTestingVoiceoverRoleId(null);
+    setVoiceCloneName(`复刻音色 ${voiceoverRoles.filter((role) => role.model === bailianVoiceCloneModel).length + 1}`);
+    setVoiceCloneSamplePath("");
+    setVoiceCloneRecordedSample(false);
+    setVoiceCloneTemporarySample(false);
+    setVoiceCloneSampleLabel("");
+    setVoiceCloneLanguage("zh");
+    setVoiceCloneConsent(false);
+    setVoiceCloneError("");
+    setVoiceSampleQuality(null);
+    setVoiceSampleAudioData(null);
+    setVoiceSampleTrimRange({ start: 0, end: 0 });
+    setTrimmingVoiceSample(false);
+    setVoiceRecordingLevel(0);
+    setVoiceCloneDialogTab("create");
+    setRemoteClonedVoicesLoaded(false);
+    setRemoteClonedVoiceError("");
+    setConfirmingRemoteVoiceDelete(null);
+    setVoiceCloneDialogOpen(true);
+  }, [voiceoverRoles]);
+
+  const discardVoiceRecordingSession = useCallback(() => {
+    const session = voiceRecordingSession.current;
+    voiceRecordingSession.current = null;
+    if (session) {
+      session.processor.onaudioprocess = null;
+      session.source.disconnect();
+      session.processor.disconnect();
+      session.gain.disconnect();
+      session.stream.getTracks().forEach((track) => track.stop());
+      void session.context.close();
+    }
+    setVoiceRecording(false);
+    setVoiceRecordingSeconds(0);
+    setVoiceRecordingLevel(0);
+  }, []);
+
+  const stopVoiceCloneSamplePreview = useCallback(() => {
+    voiceCloneSampleAudio.current?.pause();
+    voiceCloneSampleAudio.current = null;
+    setPreviewingVoiceCloneSample(false);
+    setVoiceSamplePlaybackTime(null);
+  }, []);
+
+  const pauseVoiceCloneSamplePreview = useCallback(() => {
+    const audio = voiceCloneSampleAudio.current;
+    if (!audio) return;
+    audio.pause();
+    setVoiceSamplePlaybackTime(audio.currentTime);
+    setPreviewingVoiceCloneSample(false);
+  }, []);
+
+  const stopRemoteVoicePreview = useCallback(() => {
+    remoteVoicePreviewRequest.current += 1;
+    remoteVoicePreviewAudio.current?.pause();
+    remoteVoicePreviewAudio.current = null;
+    setRemoteVoicePreviewId(null);
+    setRemoteVoicePreviewPlaying(false);
+    setRemoteVoicePreviewTime(0);
+    setRemoteVoicePreviewDuration(0);
+    setRemoteVoicePreviewLoadingId(null);
+  }, []);
+
+  const stopCompetingVoicePreviews = useCallback((active: "default" | "voiceover" | "sample" | "remote", invalidatePending = true) => {
+    if (invalidatePending) managedVoicePreviewRequest.current += 1;
+    if (active !== "default") {
+      ttsPreviewAudio.current?.pause();
+      setTestingTts(false);
+    }
+    if (active !== "voiceover") {
+      voiceoverPreviewAudio.current?.pause();
+      voiceoverPreviewAudio.current = null;
+      voiceoverPreviewBlockId.current = null;
+      setTestingVoiceoverRoleId(null);
+    }
+    if (active !== "sample") stopVoiceCloneSamplePreview();
+    if (active !== "remote") stopRemoteVoicePreview();
+  }, [stopRemoteVoicePreview, stopVoiceCloneSamplePreview]);
+
+  const previewVoiceCloneSample = useCallback(async () => {
+    if (previewingVoiceCloneSample) {
+      pauseVoiceCloneSamplePreview();
+      return;
+    }
+    if (!voiceCloneSamplePath) return;
+    stopCompetingVoicePreviews("sample");
+    const pausedAudio = voiceCloneSampleAudio.current;
+    if (pausedAudio) {
+      try {
+        setVoiceSamplePlaybackTime(pausedAudio.currentTime);
+        setPreviewingVoiceCloneSample(true);
+        await pausedAudio.play();
+      } catch (error) {
+        stopVoiceCloneSamplePreview();
+        setVoiceCloneError(`无法继续试听声音样本：${String(error)}`);
+      }
+      return;
+    }
+    const audio = new Audio(convertFileSrc(voiceCloneSamplePath));
+    voiceCloneSampleAudio.current = audio;
+    const selectionEnd = voiceSampleTrimRange.end;
+    const stopAtSelectionEnd = () => {
+      setVoiceSamplePlaybackTime(audio.currentTime);
+      if (selectionEnd > 0 && audio.currentTime >= selectionEnd - 0.03) stopVoiceCloneSamplePreview();
+    };
+    audio.addEventListener("timeupdate", stopAtSelectionEnd);
+    audio.addEventListener("ended", () => {
+      if (voiceCloneSampleAudio.current === audio) voiceCloneSampleAudio.current = null;
+      setPreviewingVoiceCloneSample(false);
+      setVoiceSamplePlaybackTime(null);
+    }, { once: true });
+    try {
+      if (voiceSampleTrimRange.start > 0) audio.currentTime = voiceSampleTrimRange.start;
+      setVoiceSamplePlaybackTime(voiceSampleTrimRange.start);
+      setPreviewingVoiceCloneSample(true);
+      await audio.play();
+    } catch (error) {
+      stopVoiceCloneSamplePreview();
+      setVoiceCloneError(`无法试听声音样本：${String(error)}`);
+    }
+  }, [pauseVoiceCloneSamplePreview, previewingVoiceCloneSample, stopCompetingVoicePreviews, stopVoiceCloneSamplePreview, voiceCloneSamplePath, voiceSampleTrimRange.end, voiceSampleTrimRange.start]);
+
+  const deleteTemporaryVoiceSample = useCallback(async (path = voiceCloneSamplePath, temporary = voiceCloneTemporarySample) => {
+    if (!temporary || !path) return;
+    await invoke("delete_voice_clone_recording", { path }).catch(() => undefined);
+    if (path === voiceCloneSamplePath) setVoiceCloneTemporarySample(false);
+  }, [voiceCloneSamplePath, voiceCloneTemporarySample]);
+
+  const closeVoiceCloneDialog = useCallback(() => {
+    if (creatingVoiceClone || savingVoiceRecording || trimmingVoiceSample) return;
+    discardVoiceRecordingSession();
+    stopVoiceCloneSamplePreview();
+    stopRemoteVoicePreview();
+    void deleteTemporaryVoiceSample();
+    setVoiceCloneDialogOpen(false);
+  }, [creatingVoiceClone, deleteTemporaryVoiceSample, discardVoiceRecordingSession, savingVoiceRecording, stopRemoteVoicePreview, stopVoiceCloneSamplePreview, trimmingVoiceSample]);
+
+  const analyzeVoiceCloneSampleFile = useCallback(async (path: string) => {
+    setAnalyzingVoiceSample(true);
+    setVoiceSampleQuality(null);
+    try {
+      const response = await fetch(convertFileSrc(path));
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const context = new AudioContext();
+      try {
+        const buffer = await context.decodeAudioData(await response.arrayBuffer());
+        const mono = new Float32Array(buffer.length);
+        for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+          const source = buffer.getChannelData(channel);
+          for (let index = 0; index < source.length; index += 1) mono[index] += source[index] / buffer.numberOfChannels;
+        }
+        const quality = analyzeVoiceSample(mono, buffer.sampleRate);
+        setVoiceSampleQuality(quality);
+        setVoiceSampleAudioData({ samples: mono, sampleRate: buffer.sampleRate });
+        setVoiceSampleTrimRange({ start: 0, end: quality.durationSeconds });
+      } finally {
+        await context.close();
+      }
+    } catch (error) {
+      setVoiceSampleAudioData(null);
+      setVoiceSampleTrimRange({ start: 0, end: 0 });
+      setVoiceCloneError(`已选择文件，但无法预检音频质量：${String(error)}`);
+    } finally {
+      setAnalyzingVoiceSample(false);
+    }
+  }, []);
+
+  const chooseVoiceCloneSample = useCallback(async () => {
+    stopVoiceCloneSamplePreview();
+    const path = await open({
+      title: "选择声音样本",
+      multiple: false,
+      directory: false,
+      filters: [{ name: "声音样本", extensions: ["wav", "mp3", "m4a"] }],
+    });
+    if (typeof path === "string") {
+      await deleteTemporaryVoiceSample();
+      setVoiceCloneSamplePath(path);
+      setVoiceCloneRecordedSample(false);
+      setVoiceCloneTemporarySample(false);
+      setVoiceCloneSampleLabel(path.split(/[\\/]/).pop() || "声音样本");
+      setVoiceCloneError("");
+      void analyzeVoiceCloneSampleFile(path);
+    }
+  }, [analyzeVoiceCloneSampleFile, deleteTemporaryVoiceSample, stopVoiceCloneSamplePreview]);
+
+  const startVoiceRecording = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setVoiceCloneError("当前系统不支持麦克风录音。");
+      return;
+    }
+    try {
+      stopVoiceCloneSamplePreview();
+      await deleteTemporaryVoiceSample();
+      setVoiceCloneSamplePath("");
+      setVoiceCloneRecordedSample(false);
+      setVoiceCloneTemporarySample(false);
+      setVoiceCloneSampleLabel("");
+      setVoiceCloneError("");
+      setVoiceSampleQuality(null);
+      setVoiceSampleAudioData(null);
+      setVoiceSampleTrimRange({ start: 0, end: 0 });
+      setVoiceRecordingLevel(0);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      const context = new AudioContext();
+      await context.resume();
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(4096, 1, 1);
+      const gain = context.createGain();
+      gain.gain.value = 0;
+      const chunks: Float32Array[] = [];
+      processor.onaudioprocess = (event) => {
+        const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
+        chunks.push(chunk);
+        setVoiceRecordingLevel(pcmSignalLevel(chunk));
+      };
+      source.connect(processor);
+      processor.connect(gain);
+      gain.connect(context.destination);
+      voiceRecordingSession.current = { context, stream, source, processor, gain, chunks, sampleRate: context.sampleRate };
+      setVoiceRecordingSeconds(0);
+      setVoiceRecording(true);
+    } catch (error) {
+      discardVoiceRecordingSession();
+      setVoiceCloneError(`无法开始录音：${String(error)}`);
+    }
+  }, [deleteTemporaryVoiceSample, discardVoiceRecordingSession, stopVoiceCloneSamplePreview]);
+
+  const stopVoiceRecording = useCallback(async () => {
+    const session = voiceRecordingSession.current;
+    if (!session) return;
+    voiceRecordingSession.current = null;
+    session.processor.onaudioprocess = null;
+    session.source.disconnect();
+    session.processor.disconnect();
+    session.gain.disconnect();
+    session.stream.getTracks().forEach((track) => track.stop());
+    setVoiceRecording(false);
+    setSavingVoiceRecording(true);
+    try {
+      await session.context.close();
+      const merged = mergeAudioChunks(session.chunks);
+      const { samples, sampleRate } = resampleMonoPcm(merged, session.sampleRate);
+      const path = await invoke<string>("save_voice_clone_recording", { audioBase64: bytesToBase64(encodeMonoPcmWav(samples, sampleRate)) });
+      setVoiceCloneSamplePath(path);
+      setVoiceCloneRecordedSample(true);
+      setVoiceCloneTemporarySample(true);
+      setVoiceCloneSampleLabel("麦克风录音");
+      const savedQuality = analyzeVoiceSample(samples, sampleRate);
+      setVoiceSampleQuality(savedQuality);
+      setVoiceSampleAudioData({ samples, sampleRate });
+      setVoiceSampleTrimRange({ start: 0, end: savedQuality.durationSeconds });
+      setVoiceRecordingSeconds(Math.round(savedQuality.durationSeconds));
+      setVoiceRecordingLevel(0);
+      setVoiceCloneError("");
+    } catch (error) {
+      setVoiceCloneError(`无法保存录音：${String(error)}`);
+    } finally {
+      setSavingVoiceRecording(false);
+    }
+  }, []);
+  stopVoiceRecordingRef.current = () => { void stopVoiceRecording(); };
+
+  const applyVoiceSampleTrim = useCallback(async () => {
+    if (!voiceSampleAudioData || !voiceCloneSamplePath || trimmingVoiceSample) return;
+    const trimmed = trimMonoPcm(voiceSampleAudioData.samples, voiceSampleAudioData.sampleRate, voiceSampleTrimRange.start, voiceSampleTrimRange.end);
+    const { samples, sampleRate } = resampleMonoPcm(trimmed, voiceSampleAudioData.sampleRate);
+    const quality = analyzeVoiceSample(samples, sampleRate);
+    if (quality.durationSeconds < 10) {
+      setVoiceCloneError("声音样本至少需要保留 10 秒，并尽量包含连续、清晰的人声。");
+      return;
+    }
+    setTrimmingVoiceSample(true);
+    setVoiceCloneError("");
+    stopVoiceCloneSamplePreview();
+    try {
+      const path = await invoke<string>("save_voice_clone_recording", { audioBase64: bytesToBase64(encodeMonoPcmWav(samples, sampleRate)) });
+      setVoiceCloneSamplePath(path);
+      setVoiceCloneTemporarySample(true);
+      setVoiceSampleAudioData({ samples, sampleRate });
+      setVoiceSampleQuality(quality);
+      setVoiceSampleTrimRange({ start: 0, end: quality.durationSeconds });
+      if (voiceCloneRecordedSample) setVoiceRecordingSeconds(Math.round(quality.durationSeconds));
+    } catch (error) {
+      setVoiceCloneError(`无法裁剪声音样本：${String(error)}`);
+    } finally {
+      setTrimmingVoiceSample(false);
+    }
+  }, [stopVoiceCloneSamplePreview, trimmingVoiceSample, voiceCloneRecordedSample, voiceCloneSamplePath, voiceSampleAudioData, voiceSampleTrimRange.end, voiceSampleTrimRange.start]);
+
+  useEffect(() => {
+    if (!voiceRecording) return;
+    const timer = window.setInterval(() => {
+      setVoiceRecordingSeconds((seconds) => {
+        if (seconds >= 19) {
+          queueMicrotask(() => stopVoiceRecordingRef.current());
+          return 20;
+        }
+        return seconds + 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [voiceRecording]);
+
+  useEffect(() => () => {
+    const session = voiceRecordingSession.current;
+    session?.stream.getTracks().forEach((track) => track.stop());
+    void session?.context.close();
+    voiceCloneSampleAudio.current?.pause();
+    remoteVoicePreviewAudio.current?.pause();
+    ttsPreviewAudio.current?.pause();
+  }, []);
+
+  const loadRemoteClonedVoices = useCallback(async () => {
+    if (!ttsConfig.baseUrl.trim()) {
+      setRemoteClonedVoiceError("请先填写百炼接口地址。");
+      return;
+    }
+    stopRemoteVoicePreview();
+    setLoadingRemoteClonedVoices(true);
+    setRemoteClonedVoiceError("");
+    setConfirmingRemoteVoiceDelete(null);
+    try {
+      const config = saveTtsConfig(ttsConfig);
+      const voices = await invoke<RemoteClonedVoice[]>("list_cloned_voices", { config, apiKey: ttsApiKey.trim() || null });
+      setRemoteClonedVoices(voices);
+      setRemoteClonedVoicesLoaded(true);
+      setTtsHasApiKey(await invoke<boolean>("has_tts_api_key", { config }));
+      setTtsApiKey("");
+    } catch (error) {
+      setRemoteClonedVoiceError(String(error));
+    } finally {
+      setLoadingRemoteClonedVoices(false);
+    }
+  }, [stopRemoteVoicePreview, ttsApiKey, ttsConfig]);
+
+  const previewRemoteClonedVoice = useCallback(async (remote: RemoteClonedVoice) => {
+    const activeAudio = remoteVoicePreviewAudio.current;
+    if (remoteVoicePreviewId === remote.voice && activeAudio) {
+      if (remoteVoicePreviewPlaying) {
+        activeAudio.pause();
+        setRemoteVoicePreviewTime(activeAudio.currentTime);
+        setRemoteVoicePreviewPlaying(false);
+      } else {
+        try {
+          stopCompetingVoicePreviews("remote");
+          setRemoteVoicePreviewTime(activeAudio.currentTime);
+          setRemoteVoicePreviewPlaying(true);
+          await activeAudio.play();
+        } catch (error) {
+          stopRemoteVoicePreview();
+          setRemoteClonedVoiceError(`无法继续试听云端音色：${String(error)}`);
+        }
+      }
+      return;
+    }
+
+    stopCompetingVoicePreviews("remote");
+    stopRemoteVoicePreview();
+    const requestId = remoteVoicePreviewRequest.current;
+    setRemoteVoicePreviewLoadingId(remote.voice);
+    setRemoteClonedVoiceError("");
+    try {
+      const config = saveTtsConfig(ttsConfig);
+      const result = await invoke<TtsPreviewResult>("synthesize_tts_preview", {
+        config: { ...config, model: remote.targetModel, voice: remote.voice, speed: 1, audioFormat: "wav" },
+        text: ttsPreviewText.trim() || "欢迎使用 Visual Python，这是声音复刻试听。",
+        apiKey: ttsApiKey.trim() || null,
+        storagePath: ttsStoragePath || null,
+      });
+      if (remoteVoicePreviewRequest.current !== requestId) return;
+      const audio = new Audio(convertFileSrc(result.path));
+      remoteVoicePreviewAudio.current = audio;
+      audio.addEventListener("ended", () => {
+        if (remoteVoicePreviewAudio.current === audio) stopRemoteVoicePreview();
+      }, { once: true });
+      setRemoteVoicePreviewId(remote.voice);
+      setRemoteVoicePreviewTime(0);
+      setRemoteVoicePreviewDuration(result.durationSeconds);
+      setRemoteVoicePreviewPlaying(true);
+      await audio.play();
+      setTtsHasApiKey(await invoke<boolean>("has_tts_api_key", { config }));
+      setTtsApiKey("");
+    } catch (error) {
+      stopRemoteVoicePreview();
+      setRemoteClonedVoiceError(`云端音色试听失败：${String(error)}`);
+    } finally {
+      if (remoteVoicePreviewRequest.current === requestId) setRemoteVoicePreviewLoadingId(null);
+    }
+  }, [remoteVoicePreviewId, remoteVoicePreviewPlaying, stopCompetingVoicePreviews, stopRemoteVoicePreview, ttsApiKey, ttsConfig, ttsPreviewText, ttsStoragePath]);
+
+  const switchVoiceCloneDialogTab = useCallback((tab: "create" | "remote") => {
+    if (voiceRecording || savingVoiceRecording || trimmingVoiceSample || creatingVoiceClone) return;
+    setVoiceCloneDialogTab(tab);
+    setConfirmingRemoteVoiceDelete(null);
+    if (tab === "remote") stopVoiceCloneSamplePreview();
+    else stopRemoteVoicePreview();
+    if (tab === "remote" && !remoteClonedVoicesLoaded) void loadRemoteClonedVoices();
+  }, [creatingVoiceClone, loadRemoteClonedVoices, remoteClonedVoicesLoaded, savingVoiceRecording, stopRemoteVoicePreview, stopVoiceCloneSamplePreview, trimmingVoiceSample, voiceRecording]);
+
+  const importRemoteClonedVoice = useCallback((remote: RemoteClonedVoice) => {
+    if (voiceoverRoles.some((role) => role.model === remote.targetModel && role.voice === remote.voice)) return;
+    if (voiceoverRoles.length >= 20) {
+      setRemoteClonedVoiceError("配音角色已达到 20 个上限。");
+      return;
+    }
+    persistVoiceoverRoles([...voiceoverRoles, {
+      id: `role-${Date.now()}`,
+      name: `复刻音色 ${voiceoverRoles.filter((role) => role.model === bailianVoiceCloneModel).length + 1}`,
+      model: remote.targetModel,
+      voice: remote.voice,
+      speed: 1,
+      previewText: "",
+      ...defaultTtsExpression,
+    }]);
   }, [persistVoiceoverRoles, voiceoverRoles]);
+
+  const deleteRemoteClonedVoice = useCallback(async (remote: RemoteClonedVoice) => {
+    if (confirmingRemoteVoiceDelete !== remote.voice) {
+      setConfirmingRemoteVoiceDelete(remote.voice);
+      return;
+    }
+    setLoadingRemoteClonedVoices(true);
+    setRemoteClonedVoiceError("");
+    if (remoteVoicePreviewId === remote.voice) stopRemoteVoicePreview();
+    try {
+      const config = saveTtsConfig(ttsConfig);
+      await invoke("delete_cloned_voice", { config, voice: remote.voice, apiKey: ttsApiKey.trim() || null });
+      setRemoteClonedVoices((voices) => voices.filter((voice) => voice.voice !== remote.voice));
+      persistVoiceoverRoles(voiceoverRoles.filter((role) => !(role.model === remote.targetModel && role.voice === remote.voice)));
+      setConfirmingRemoteVoiceDelete(null);
+      setTtsHasApiKey(await invoke<boolean>("has_tts_api_key", { config }));
+      setTtsApiKey("");
+    } catch (error) {
+      setRemoteClonedVoiceError(String(error));
+    } finally {
+      setLoadingRemoteClonedVoices(false);
+    }
+  }, [confirmingRemoteVoiceDelete, persistVoiceoverRoles, remoteVoicePreviewId, stopRemoteVoicePreview, ttsApiKey, ttsConfig, voiceoverRoles]);
+
+  const createVoiceClone = useCallback(async () => {
+    const name = voiceCloneName.trim();
+    if (!name) return setVoiceCloneError("请填写音色名称。");
+    if (!voiceCloneSamplePath) return setVoiceCloneError("请选择声音样本。");
+    if (!voiceCloneConsent) return setVoiceCloneError("请先确认已获得声音所有者授权。");
+    if (!ttsConfig.baseUrl.trim()) return setVoiceCloneError("请先填写百炼接口地址。");
+    if (analyzingVoiceSample) return setVoiceCloneError("正在检查声音样本，请稍候。");
+    if (voiceSampleQuality?.severity === "error") return setVoiceCloneError(`声音样本质量不足：${voiceSampleQuality.issues.join("；")}`);
+    setCreatingVoiceClone(true);
+    setVoiceCloneError("");
+    try {
+      const config = saveTtsConfig(ttsConfig);
+      const result = await invoke<VoiceCloneResult>("create_cloned_voice", {
+        config,
+        samplePath: voiceCloneSamplePath,
+        preferredName: `vp${Date.now().toString(36).slice(-7)}`,
+        language: voiceCloneLanguage,
+        apiKey: ttsApiKey.trim() || null,
+      });
+      persistVoiceoverRoles([...voiceoverRoles, {
+        id: `role-${Date.now()}`,
+        name: name.slice(0, 24),
+        model: result.targetModel,
+        voice: result.voice,
+        speed: 1,
+        previewText: "",
+        ...defaultTtsExpression,
+      }]);
+      setTtsHasApiKey(await invoke<boolean>("has_tts_api_key", { config }));
+      setTtsApiKey("");
+      await deleteTemporaryVoiceSample(voiceCloneSamplePath, voiceCloneTemporarySample);
+      setVoiceCloneSamplePath("");
+      setVoiceCloneDialogOpen(false);
+      showAppNotice("声音复刻已完成，可以在角色列表中试听。", "info");
+    } catch (error) {
+      setVoiceCloneError(String(error));
+    } finally {
+      setCreatingVoiceClone(false);
+    }
+  }, [analyzingVoiceSample, deleteTemporaryVoiceSample, persistVoiceoverRoles, showAppNotice, ttsApiKey, ttsConfig, voiceCloneConsent, voiceCloneLanguage, voiceCloneName, voiceCloneSamplePath, voiceCloneTemporarySample, voiceSampleQuality, voiceoverRoles]);
+
+  const removeVoiceoverRole = useCallback(async (id: string) => {
+    const role = voiceoverRoles.find((item) => item.id === id);
+    if (!role) return;
+    const cloned = isBailianClonedVoice(role.model, role.voice);
+    const sharedClone = cloned && voiceoverRoles.some((item) => item.id !== id && item.model === role.model && item.voice === role.voice);
+    if (!(await requestConfirmation({
+      title: "删除配音角色？",
+      message: cloned && !sharedClone ? "角色将从工程中移除，同时删除百炼中的复刻音色。" : "使用该角色的积木将自动改为默认旁白。",
+      confirmLabel: "删除角色",
+      tone: "danger",
+    }))) return;
+    if (cloned && !sharedClone) {
+      try {
+        const config = saveTtsConfig(ttsConfig);
+        await invoke("delete_cloned_voice", { config, voice: role.voice, apiKey: ttsApiKey.trim() || null });
+        setTtsHasApiKey(await invoke<boolean>("has_tts_api_key", { config }));
+        setTtsApiKey("");
+      } catch (error) {
+        showAppNotice(`角色已移除，但百炼远程音色删除失败：${String(error)}`);
+      }
+    }
+    persistVoiceoverRoles(voiceoverRoles.filter((role) => role.id !== id));
+  }, [persistVoiceoverRoles, requestConfirmation, showAppNotice, ttsApiKey, ttsConfig, voiceoverRoles]);
 
   const duplicateVoiceoverRole = useCallback((source: VoiceoverRole) => {
     if (voiceoverRoles.length >= 20) return;
@@ -2083,22 +2951,22 @@ export default function App() {
       await writeTextFile(path, serializeVoiceoverRoles(voiceoverRoles));
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `已导出 ${voiceoverRoles.length} 个配音角色。\n` }]);
     } catch (error) {
-      Blockly.dialog.alert(`导出配音角色失败：${String(error)}`);
+      showAppNotice(`导出配音角色失败：${String(error)}`);
     }
-  }, [voiceoverRoles]);
+  }, [showAppNotice, voiceoverRoles]);
 
   const importVoiceoverRoles = useCallback(async () => {
     const path = await open({ title: "导入配音角色", multiple: false, directory: false, filters: [{ name: "配音角色", extensions: ["json"] }] });
     if (typeof path !== "string") return;
     try {
       const roles = parseVoiceoverRolesFile(await readTextFile(path));
-      if (voiceoverRoles.length && !window.confirm(`导入文件包含 ${roles.length} 个角色，将替换当前全部角色。是否继续？`)) return;
+      if (voiceoverRoles.length && !(await requestConfirmation({ title: "替换全部配音角色？", message: `导入文件包含 ${roles.length} 个角色，当前角色列表将被覆盖。`, confirmLabel: "导入并替换", tone: "warning" }))) return;
       persistVoiceoverRoles(roles);
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `已导入 ${roles.length} 个配音角色。\n` }]);
     } catch (error) {
-      Blockly.dialog.alert(`导入配音角色失败：${String(error)}`);
+      showAppNotice(`导入配音角色失败：${String(error)}`);
     }
-  }, [persistVoiceoverRoles, voiceoverRoles.length]);
+  }, [persistVoiceoverRoles, requestConfirmation, showAppNotice, voiceoverRoles.length]);
 
   useEffect(() => subscribeVoiceoverRoles((roles) => {
     setVoiceoverRoles(roles);
@@ -2116,6 +2984,8 @@ export default function App() {
 
 
   const testTts = useCallback(async () => {
+    stopCompetingVoicePreviews("default");
+    const requestId = managedVoicePreviewRequest.current;
     setTestingTts(true);
     setTtsPreviewError("");
     setTtsPreviewUrl("");
@@ -2123,15 +2993,17 @@ export default function App() {
       const normalizedConfig = saveTtsConfig(ttsConfig);
       setTtsConfigState(normalizedConfig);
       const result = await invoke<TtsPreviewResult>("synthesize_tts_preview", { config: normalizedConfig, text: ttsPreviewText, apiKey: ttsApiKey.trim() || null, storagePath: ttsStoragePath || null });
-      setTtsPreviewUrl(convertFileSrc(result.path));
+      if (managedVoicePreviewRequest.current !== requestId) return;
       setTtsHasApiKey(await invoke<boolean>("has_tts_api_key", { config: normalizedConfig }));
+      if (managedVoicePreviewRequest.current !== requestId) return;
       setTtsApiKey("");
+      setTtsPreviewUrl(convertFileSrc(result.path));
     } catch (error) {
       setTtsPreviewError(String(error));
     } finally {
-      setTestingTts(false);
+      if (managedVoicePreviewRequest.current === requestId) setTestingTts(false);
     }
-  }, [ttsApiKey, ttsConfig, ttsPreviewText, ttsStoragePath]);
+  }, [stopCompetingVoicePreviews, ttsApiKey, ttsConfig, ttsPreviewText, ttsStoragePath]);
 
   const testVoiceoverRole = useCallback(async (role: VoiceoverRole) => {
     const text = role.previewText.trim() || ttsPreviewText.trim();
@@ -2139,17 +3011,22 @@ export default function App() {
       setTtsPreviewError("请先填写试听文本。");
       return;
     }
+    stopCompetingVoicePreviews("voiceover");
+    const requestId = managedVoicePreviewRequest.current;
     voiceoverPreviewAudio.current?.pause();
+    voiceoverPreviewAudio.current = null;
+    voiceoverPreviewBlockId.current = null;
     setTestingVoiceoverRoleId(role.id);
     setTtsPreviewError("");
     try {
       const config = saveTtsConfig(ttsConfig);
       const result = await invoke<TtsPreviewResult>("synthesize_tts_preview", {
-        config: { ...config, model: role.model, voice: role.voice, speed: role.speed, audioFormat: "wav" },
+        config: { ...ttsConfigForRole(config, role), audioFormat: "wav" },
         text,
         apiKey: ttsApiKey.trim() || null,
         storagePath: ttsStoragePath || null,
       });
+      if (managedVoicePreviewRequest.current !== requestId) return;
       const audio = new Audio(convertFileSrc(result.path));
       voiceoverPreviewAudio.current = audio;
       audio.addEventListener("ended", () => {
@@ -2165,18 +3042,30 @@ export default function App() {
     } catch (error) {
       setTtsPreviewError(`角色试听失败：${String(error)}`);
     } finally {
-      setTestingVoiceoverRoleId(null);
+      if (managedVoicePreviewRequest.current === requestId) setTestingVoiceoverRoleId(null);
     }
-  }, [ttsApiKey, ttsConfig, ttsPreviewText, ttsStoragePath]);
+  }, [stopCompetingVoicePreviews, ttsApiKey, ttsConfig, ttsPreviewText, ttsStoragePath]);
 
   const previewVoiceoverBlock = useCallback(async (block: Blockly.Block) => {
+    if (voiceoverPreviewBlockId.current === block.id) {
+      managedVoicePreviewRequest.current += 1;
+      voiceoverPreviewAudio.current?.pause();
+      if (voiceoverPreviewAudio.current) voiceoverPreviewAudio.current.currentTime = 0;
+      voiceoverPreviewAudio.current = null;
+      voiceoverPreviewBlockId.current = null;
+      return;
+    }
     const textBlock = block.getInputTargetBlock("TEXT");
     const text = textBlock?.type === "text" ? String(textBlock.getFieldValue("TEXT") ?? "").trim() : "";
     if (!text) {
-      Blockly.dialog.alert("这段配音需要直接连接一个非空的 Python 文本积木，才能单独试听。");
+      showBlockingAlert({ title: "缺少试听文本", message: "这段配音需要直接连接一个非空的 Python 文本积木，才能单独试听。" });
       return;
     }
+    stopCompetingVoicePreviews("voiceover");
+    const requestId = managedVoicePreviewRequest.current;
     voiceoverPreviewAudio.current?.pause();
+    voiceoverPreviewAudio.current = null;
+    voiceoverPreviewBlockId.current = block.id;
     setActivePanel("output");
     setBottomPanelOpen(true);
     const summary = `${text.slice(0, 24)}${text.length > 24 ? "..." : ""}`;
@@ -2184,18 +3073,21 @@ export default function App() {
     try {
       const normalizedConfig = saveTtsConfig(ttsConfig);
       const role = resolveVoiceoverRole(String(block.getFieldValue("ROLE") || "default"));
-      const previewConfig = role ? { ...normalizedConfig, model: role.model, voice: role.voice, speed: role.speed } : normalizedConfig;
+      const previewConfig = role ? ttsConfigForRole(normalizedConfig, role) : normalizedConfig;
       const result = await invoke<TtsPreviewResult>("synthesize_tts_preview", {
         config: previewConfig,
         text,
         apiKey: ttsApiKey.trim() || null,
         storagePath: ttsStoragePath || null,
       });
+      if (managedVoicePreviewRequest.current !== requestId) return;
       recordVoiceoverBlockDuration(block.id, result.durationSeconds);
       const audio = new Audio(convertFileSrc(result.path));
       voiceoverPreviewAudio.current = audio;
       audio.addEventListener("ended", () => {
-        if (voiceoverPreviewAudio.current === audio) voiceoverPreviewAudio.current = null;
+        if (voiceoverPreviewAudio.current !== audio) return;
+        voiceoverPreviewAudio.current = null;
+        voiceoverPreviewBlockId.current = null;
       }, { once: true });
       await audio.play();
       setTtsHasApiKey(await invoke<boolean>("has_tts_api_key", { config: normalizedConfig }));
@@ -2206,37 +3098,21 @@ export default function App() {
         data: `正在试听：${summary}（${result.durationSeconds.toFixed(2)} 秒${result.cached ? "，已复用缓存" : ""}）\n`,
       }]);
     } catch (error) {
+      if (voiceoverPreviewBlockId.current === block.id) voiceoverPreviewBlockId.current = null;
       const message = `配音试听失败：${String(error)}`;
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-      Blockly.dialog.alert(message);
     }
-  }, [recordVoiceoverBlockDuration, ttsApiKey, ttsConfig, ttsStoragePath]);
-  previewVoiceoverBlockAction.current = previewVoiceoverBlock;
+  }, [recordVoiceoverBlockDuration, showBlockingAlert, stopCompetingVoicePreviews, ttsApiKey, ttsConfig, ttsStoragePath]);
 
   useEffect(() => {
-    const id = "visual-python-preview-manim-voiceover";
-    const registry = Blockly.ContextMenuRegistry.registry;
-    if (registry.getItem(id)) return;
-    registry.register({
-      id,
-      scopeType: Blockly.ContextMenuRegistry.ScopeType.BLOCK,
-      weight: 4,
-      displayText: "试听此段配音",
-      preconditionFn: ({ block }) => {
-        if (!block || (block.type !== "visual_python_manim_voiceover" && block.type !== "visual_python_manim_voiceover_with_animation")) return "hidden";
-        const textBlock = block.getInputTargetBlock("TEXT");
-        return textBlock?.type === "text" && String(textBlock.getFieldValue("TEXT") ?? "").trim() ? "enabled" : "disabled";
-      },
-      callback: ({ block }) => {
-        if (block) void previewVoiceoverBlockAction.current(block);
-      },
-    });
+    setVoiceoverBlockPreviewHandler(previewVoiceoverBlock);
     return () => {
+      setVoiceoverBlockPreviewHandler(null);
       voiceoverPreviewAudio.current?.pause();
       voiceoverPreviewAudio.current = null;
-      if (registry.getItem(id)) registry.unregister(id);
+      voiceoverPreviewBlockId.current = null;
     };
-  }, []);
+  }, [previewVoiceoverBlock]);
 
   const forgetTtsApiKey = useCallback(async () => {
     try {
@@ -2285,9 +3161,9 @@ export default function App() {
     try {
       await invoke("open_manim_render_folder", { storagePath: manimStoragePath || null });
     } catch (error) {
-      Blockly.dialog.alert(`无法打开 Manim 渲染目录：${String(error)}`);
+      showAppNotice(`无法打开 Manim 渲染目录：${String(error)}`);
     }
-  }, [manimStoragePath]);
+  }, [manimStoragePath, showAppNotice]);
 
   const chooseManimStorageFolder = useCallback(async () => {
     const selected = await open({ directory: true, multiple: false, title: "选择 Manim 渲染目录" });
@@ -2317,40 +3193,41 @@ export default function App() {
     try {
       await invoke("open_tts_cache_folder", { storagePath: ttsStoragePath || null });
     } catch (error) {
-      Blockly.dialog.alert(`无法打开配音缓存目录：${String(error)}`);
+      showAppNotice(`无法打开配音缓存目录：${String(error)}`);
     }
-  }, [ttsStoragePath]);
+  }, [showAppNotice, ttsStoragePath]);
 
   const clearManimRenderFiles = useCallback(async () => {
     if (renderingManim || clearingManimStorage) return;
-    if (!window.confirm("确定清理全部 Manim 渲染文件吗？这将删除已生成的视频、中间文件和缓存，且无法撤销。")) return;
+    if (!(await requestConfirmation({ title: "清理全部渲染文件？", message: "已生成的视频、图片、中间文件和渲染缓存都将被永久删除。", confirmLabel: "全部清理", tone: "danger" }))) return;
     setClearingManimStorage(true);
     try {
       const info = await invoke<ManimStorageInfo>("clear_manim_render_files", { storagePath: manimStoragePath || null });
       setManimStorageInfo(info);
-      setManimVideo(null);
+      manimRenderOutputRef.current = null;
+      setManimRenderOutput(null);
       enqueueOutput("system", "Manim 渲染文件已清理。\n");
     } catch (error) {
-      Blockly.dialog.alert(`无法清理 Manim 渲染文件：${String(error)}`);
+      showAppNotice(`无法清理 Manim 渲染文件：${String(error)}`);
     } finally {
       setClearingManimStorage(false);
     }
-  }, [clearingManimStorage, enqueueOutput, manimStoragePath, renderingManim]);
+  }, [clearingManimStorage, enqueueOutput, manimStoragePath, renderingManim, requestConfirmation, showAppNotice]);
 
   const clearTtsCache = useCallback(async () => {
     if (renderingManim || clearingTtsCache) return;
-    if (!window.confirm("确定清理全部配音缓存吗？下次渲染时需要重新生成并可能产生调用费用。")) return;
+    if (!(await requestConfirmation({ title: "清理全部配音缓存？", message: "下次渲染时需要重新生成配音，并可能产生接口调用费用。", confirmLabel: "清理缓存", tone: "danger" }))) return;
     setClearingTtsCache(true);
     try {
       setTtsCacheInfo(await invoke<TtsCacheInfo>("clear_tts_cache", { storagePath: ttsStoragePath || null }));
       setTtsPreviewUrl("");
       enqueueOutput("system", "配音缓存已清理。\n");
     } catch (error) {
-      Blockly.dialog.alert(`无法清理配音缓存：${String(error)}`);
+      showAppNotice(`无法清理配音缓存：${String(error)}`);
     } finally {
       setClearingTtsCache(false);
     }
-  }, [clearingTtsCache, enqueueOutput, renderingManim, ttsStoragePath]);
+  }, [clearingTtsCache, enqueueOutput, renderingManim, requestConfirmation, showAppNotice, ttsStoragePath]);
 
   useEffect(() => {
     if (!exampleMenuOpen || exampleLibrary) return;
@@ -2387,13 +3264,13 @@ export default function App() {
         return;
       }
       const persistedDocuments = sceneDocuments.map((document) => document.id === activeSceneId ? { ...document, code: sourceCode, name: sceneDocumentName(sourceCode, document.name) } : document);
-      const draft: DraftProject = { version: 1, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: activeSceneId || undefined, workspaceMode, resources: projectResourcesRef.current };
+      const draft: DraftProject = { version: 1, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: activeSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
       localStorage.setItem("visual-python:draft", JSON.stringify(draft));
       autosaveTimer.current = null;
     };
     autosaveTimer.current = window.setTimeout(saveDraft, 800);
     return () => { if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current); };
-  }, [activeSceneId, dirty, projectName, projectPath, sceneDocuments, sourceCode, sourceCodeInitialized, voiceoverRoles, workspaceMode, workspaceRevision]);
+  }, [activeSceneId, blockInputLayout, dirty, projectName, projectPath, sceneDocuments, sourceCode, sourceCodeInitialized, voiceoverRoles, workspaceMode, workspaceRevision]);
 
   const rememberRecent = useCallback((path: string, name: string) => {
     setRecentProjects((items) => {
@@ -2436,7 +3313,7 @@ export default function App() {
     if (pluginRegistry.getRecord(pluginId)) return true;
     if (!trustedExternalPlugins[pluginId]) {
       if (!options.promptForTrust) return false;
-      if (!window.confirm(`外部插件“${entry.manifest?.name || pluginId}”将执行本地 JavaScript 代码。确认信任并启用吗？`)) return false;
+      if (!(await requestConfirmation({ title: "信任并启用外部插件？", message: `“${entry.manifest?.name || pluginId}”将获得执行本地 JavaScript 代码的权限。请仅启用来源可信的插件。`, confirmLabel: "信任并启用", tone: "warning" }))) return false;
     }
 
     try {
@@ -2472,10 +3349,10 @@ export default function App() {
       const message = `外部插件加载失败：${String(error)}`;
       setExternalPluginErrors((current) => ({ ...current, [pluginId]: String(error) }));
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-      if (!options.silent) Blockly.dialog.alert(message);
+      if (!options.silent) openConsolePanel("output");
       return false;
     }
-  }, [trustedExternalPlugins]);
+  }, [openConsolePanel, requestConfirmation, trustedExternalPlugins]);
 
   const restoreTrustedExternalPlugins = useCallback(async (entries: ExternalPluginDiscovery[]) => {
     for (const entry of entries) {
@@ -2518,11 +3395,11 @@ export default function App() {
     } catch (error) {
       const message = `插件安装失败：${String(error)}`;
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-      Blockly.dialog.alert(message);
+      openConsolePanel("output");
     } finally {
       setDiscoveringPlugins(false);
     }
-  }, [discoverExternalPlugins]);
+  }, [discoverExternalPlugins, openConsolePanel]);
 
   const collectPluginPythonPackages = useCallback(() => {
     const packages = new Set<string>();
@@ -2573,7 +3450,7 @@ export default function App() {
     }
     const mirrorArgs = usePipMirror ? ` -i ${pipMirrorUrl}` : "";
     const command = `"${pythonEnvironment.path}" -m pip install${mirrorArgs} ${missing.join(" ")}`;
-    if (!window.confirm(`将在当前 Python 环境中安装缺失依赖：\n\n${missing.join(", ")}\n\n执行命令：\n${command}\n\n确定继续吗？`)) return;
+    if (!(await requestConfirmation({ title: "安装缺失的 Python 依赖？", message: `将在当前 Python 环境中安装：${missing.join(", ")}`, detail: command, confirmLabel: "开始安装", tone: "primary" }))) return;
     setPluginsOpen(false);
     setInstallingPackages(true);
     setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `> ${command}\n\n` }]);
@@ -2583,9 +3460,9 @@ export default function App() {
       packageInstallStopping.current = false;
       setInstallingPackages(false);
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `依赖安装失败：${String(error)}\n` }]);
-      Blockly.dialog.alert(`依赖安装失败：${String(error)}`);
+      openConsolePanel("output");
     }
-  }, [packageStatus, pythonEnvironment, usePipMirror]);
+  }, [openConsolePanel, packageStatus, pythonEnvironment, requestConfirmation, usePipMirror]);
 
   const choosePythonExecutable = useCallback(async () => {
     const path = await open({ multiple: false, filters: [{ name: "Python executable", extensions: ["exe"] }] });
@@ -2631,6 +3508,7 @@ export default function App() {
         }
         const status = payload.timed_out ? "运行超时" : payload.stopped ? "程序已停止" : `进程退出代码：${payload.exit_code}`;
         enqueueOutput("system", `${status}\n`);
+        pythonRunElapsed.current = pythonRunStartedAt.current ? Math.max(0, Math.floor((Date.now() - pythonRunStartedAt.current) / 1000)) : 0;
         taskId.current = null; setRunning(false);
       }),
       listen<PackageInstallOutputEvent>("package-install-output", ({ payload }) => {
@@ -2647,13 +3525,13 @@ export default function App() {
           const packageNames = payload.packages.length ? payload.packages.join(", ") : "Python";
           const message = `已安装 ${packageNames} 依赖。`;
           enqueueOutput("system", `${message}\n`);
+          openConsolePanel("output");
           void checkPluginPythonPackages();
-          Blockly.dialog.alert(message);
           return;
         }
         const message = `依赖安装失败：${payload.error || "未知错误"}`;
         enqueueOutput("stderr", `${message}\n`);
-        Blockly.dialog.alert(message);
+        openConsolePanel("output");
       }),
       listen<ManimOutputEvent>("manim-output", ({ payload }) => {
         if (manimTaskId.current === null) return;
@@ -2661,7 +3539,11 @@ export default function App() {
         if (manimTaskId.current !== payload.task_id) return;
         enqueueOutput(payload.stream, payload.data);
         manimProgressBuffer.current = `${manimProgressBuffer.current}${payload.data}`.slice(-8000);
-        setManimRenderProgress((current) => current ? parseManimRenderProgress(manimProgressBuffer.current, current) : current);
+        setManimRenderProgress((current) => {
+          const next = current ? parseManimRenderProgress(manimProgressBuffer.current, current) : current;
+          manimRenderProgressRef.current = next;
+          return next;
+        });
         if (payload.stream === "stderr") manimStderrBuffer.current = `${manimStderrBuffer.current}${payload.data}`.slice(-24000);
       }),
       listen<ManimFinishedEvent>("manim-finished", ({ payload }) => {
@@ -2670,20 +3552,40 @@ export default function App() {
         if (manimTaskId.current !== payload.task_id) return;
         manimTaskId.current = null;
         manimRenderAttempt.current = null;
+        const imageCaptureRequest = manimImageCaptureRequest.current;
+        manimImageCaptureRequest.current = null;
+        manimRenderElapsedRef.current = manimRenderStartedAt.current ? Math.max(0, Math.floor((Date.now() - manimRenderStartedAt.current) / 1000)) : 0;
         setRenderingManim(false);
         if (payload.stopped) {
           enqueueOutput("system", "Manim 渲染已停止。\n");
           return;
         }
         if (payload.success) {
-          const message = `Manim 渲染完成：${payload.scene}\n${payload.video_path ? `视频文件：${payload.video_path}` : `输出目录：${payload.work_dir}`}`;
+          const playedAnimationCount = payload.played_animation_count ?? null;
+          if (payload.output_type === "image" && imageCaptureRequest?.mode === "animation" && playedAnimationCount !== null && imageCaptureRequest.step > playedAnimationCount) {
+            const correctedConfig = playedAnimationCount > 0
+              ? { imageCaptureMode: "animation" as const, imageAnimationStep: playedAnimationCount }
+              : { imageCaptureMode: "final" as const };
+            updateManimRenderConfig(correctedConfig);
+            const correction = playedAnimationCount > 0
+              ? `场景实际只有 ${playedAnimationCount} 个播放步骤，已将截取位置调整为第 ${playedAnimationCount} 步。`
+              : "场景中没有 play() 或 wait() 播放步骤，已将截取位置调整为最终画面。";
+            const warning = `请求的第 ${imageCaptureRequest.step} 个播放步骤不存在，当前图片保存的是场景最终画面。`;
+            setProblems([{ id: problemId.current++, kind: "context", line: 0, message: warning, suggestion: correction }]);
+            enqueueOutput("system", `${warning}\n${correction}\n`);
+            showAppNotice(`${warning}${correction}`, "info");
+          }
+          const outputLabel = payload.output_type === "image" ? "图片" : "视频";
+          const message = `Manim 渲染完成：${payload.scene}\n${payload.output_path ? `${outputLabel}文件：${payload.output_path}` : `输出目录：${payload.work_dir}`}`;
           enqueueOutput("system", `${message}\n`);
           void refreshManimStorage();
-          const outputName = payload.video_path?.split(/[\\/]/).pop() || payload.scene;
-          void notifyWhenAppIsInBackground(payload.video_path ? "video" : "output", "Manim 渲染完成", `${outputName} 已保存`);
-          if (payload.video_path) {
-            setManimVideo({ scene: payload.scene, path: payload.video_path, url: convertFileSrc(payload.video_path), workDir: payload.work_dir });
-            openConsolePanel("video");
+          const outputName = payload.output_path?.split(/[\\/]/).pop() || payload.scene;
+          void notifyWhenAppIsInBackground(payload.output_path ? "preview" : "output", "Manim 渲染完成", `${outputName} 已保存`);
+          if (payload.output_path) {
+            const renderOutput = { type: payload.output_type, scene: payload.scene, path: payload.output_path, url: convertFileSrc(payload.output_path), workDir: payload.work_dir, transparentBackground: payload.transparent_background } satisfies ManimRenderOutput;
+            manimRenderOutputRef.current = renderOutput;
+            setManimRenderOutput(renderOutput);
+            openConsolePanel("preview");
           } else {
             openConsolePanel("output");
           }
@@ -2700,18 +3602,17 @@ export default function App() {
         setActivePanel("problems");
         if (blockId) requestAnimationFrame(() => focusBlock(blockId));
         enqueueOutput("stderr", `${message}\n`);
-        Blockly.dialog.alert(`${message}\n\n修改建议：${diagnosis.suggestion}`);
       }),
     ]);
     return () => { void unlisteners.then((listeners) => listeners.forEach((unlisten) => unlisten())); };
-  }, [checkPluginPythonPackages, enqueueOutput, focusBlock, notifyWhenAppIsInBackground, refreshManimStorage]);
+  }, [checkPluginPythonPackages, enqueueOutput, focusBlock, notifyWhenAppIsInBackground, openConsolePanel, refreshManimStorage, showAppNotice, updateManimRenderConfig]);
 
   const writeProject = useCallback(async (path: string, sourceOverride?: string, saveAs = false) => {
     if (!workspace.current) return false;
     const currentSceneId = activeSceneIdRef.current;
     const savedSource = sourceOverride ?? sourceCodeRef.current;
     const persistedDocuments = sceneDocumentsRef.current.map((document) => document.id === currentSceneId ? { ...document, code: savedSource, name: sceneDocumentName(savedSource, document.name) } : document);
-    const data: ProjectFile = { version: 1, name: path.split(/[\\/]/).pop() || projectName, workspace: Blockly.serialization.workspaces.save(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: currentSceneId || undefined, workspaceMode, resources: projectResourcesRef.current };
+    const data: ProjectFile = { version: 1, name: path.split(/[\\/]/).pop() || projectName, workspace: Blockly.serialization.workspaces.save(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: currentSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
     const contents = JSON.stringify(data, null, 2);
     if (saveAs) {
       await invoke("save_project_as", { sourceProjectPath: projectPathRef.current, destinationProjectPath: path, contents });
@@ -2723,7 +3624,7 @@ export default function App() {
     setProjectName(data.name); setProjectPath(path); setDirty(false); localStorage.removeItem("visual-python:draft"); rememberRecent(path, data.name);
     setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `已保存：${path}\n` }]);
     return true;
-  }, [cancelAutosave, projectName, rememberRecent, sourceCodeInitialized, workspaceMode]);
+  }, [blockInputLayout, cancelAutosave, projectName, rememberRecent, sourceCodeInitialized, workspaceMode]);
 
   const removeRecentProjectPath = useCallback((path: string) => {
     setRecentProjects((items) => {
@@ -2743,7 +3644,7 @@ export default function App() {
     const normalizedName = normalizeProjectFileName(projectNameDraft);
     if (!normalizedName) {
       setProjectNameDraft(projectFileBaseName(projectName));
-      Blockly.dialog.alert("工程名称不能为空，也不能包含 \\ / : * ? \" < > | 等字符。");
+      showBlockingAlert({ title: "工程名称无效", message: "工程名称不能为空，也不能包含 \\ / : * ? \" < > | 等字符。" });
       return;
     }
     if (normalizedName === projectName) {
@@ -2771,15 +3672,17 @@ export default function App() {
         setDirty(true);
         const message = `工程已重命名，但保存最新内容失败：${String(error)}`;
         setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-        Blockly.dialog.alert(message);
+        openConsolePanel("output");
       }
     } catch (error) {
       setProjectNameDraft(projectFileBaseName(projectName));
-      Blockly.dialog.alert(`无法重命名工程：${String(error)}`);
+      const message = `无法重命名工程：${String(error)}`;
+      setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
+      openConsolePanel("output");
     } finally {
       setRenamingProject(false);
     }
-  }, [projectName, projectNameDraft, projectPath, removeRecentProjectPath, renamingProject, writeProject]);
+  }, [openConsolePanel, projectName, projectNameDraft, projectPath, removeRecentProjectPath, renamingProject, showBlockingAlert, writeProject]);
 
   const saveProjectAs = useCallback(async (sourceOverride?: string) => {
     try {
@@ -2790,10 +3693,10 @@ export default function App() {
     } catch (error) {
       const message = `另存工程失败：${String(error)}`;
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-      Blockly.dialog.alert(message);
+      openConsolePanel("output");
       return false;
     }
-  }, [autoFormatOnSave, formatCurrentPythonCode, projectName, projectPath, workspaceMode, writeProject]);
+  }, [autoFormatOnSave, formatCurrentPythonCode, openConsolePanel, projectName, projectPath, workspaceMode, writeProject]);
 
   const saveProject = useCallback(async () => {
     try {
@@ -2803,46 +3706,51 @@ export default function App() {
     } catch (error) {
       const message = `保存工程失败：${String(error)}`;
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-      Blockly.dialog.alert(message);
+      openConsolePanel("output");
       return false;
     }
-  }, [autoFormatOnSave, formatCurrentPythonCode, projectPath, saveProjectAs, workspaceMode, writeProject]);
+  }, [autoFormatOnSave, formatCurrentPythonCode, openConsolePanel, projectPath, saveProjectAs, workspaceMode, writeProject]);
 
-  const confirmProjectReplacement = useCallback(async () => {
-    if (!dirty) return true;
-    return new Promise<boolean>((resolve) => {
-      projectReplacementResolver.current?.(false);
-      projectReplacementResolver.current = resolve;
-      setProjectReplacementPromptOpen(true);
+  const confirmUnsavedChanges = useCallback(async (): Promise<UnsavedChangesResolution> => {
+    if (!dirty) return "clean";
+    return new Promise<UnsavedChangesResolution>((resolve) => {
+      unsavedChangesResolver.current?.("cancelled");
+      unsavedChangesResolver.current = resolve;
+      setUnsavedChangesPromptOpen(true);
     });
   }, [dirty]);
 
-  const finishProjectReplacementPrompt = useCallback((continueOperation: boolean) => {
-    setProjectReplacementPromptOpen(false);
-    const resolve = projectReplacementResolver.current;
-    projectReplacementResolver.current = null;
-    resolve?.(continueOperation);
+  const finishUnsavedChangesPrompt = useCallback((resolution: UnsavedChangesResolution) => {
+    setUnsavedChangesPromptOpen(false);
+    const resolve = unsavedChangesResolver.current;
+    unsavedChangesResolver.current = null;
+    resolve?.(resolution);
   }, []);
 
-  const saveBeforeProjectReplacement = useCallback(async () => {
-    if (savingBeforeProjectReplacement) return;
-    setSavingBeforeProjectReplacement(true);
+  const saveBeforeContinuing = useCallback(async () => {
+    if (savingUnsavedChanges) return;
+    setSavingUnsavedChanges(true);
     try {
-      finishProjectReplacementPrompt(await saveProject());
+      finishUnsavedChangesPrompt(await saveProject() ? "saved" : "cancelled");
     } catch (error) {
-      Blockly.dialog.alert(`保存当前工程失败：${String(error)}`);
-      finishProjectReplacementPrompt(false);
+      setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `保存当前工程失败：${String(error)}\n` }]);
+      openConsolePanel("output");
+      finishUnsavedChangesPrompt("cancelled");
     } finally {
-      setSavingBeforeProjectReplacement(false);
+      setSavingUnsavedChanges(false);
     }
-  }, [finishProjectReplacementPrompt, saveProject, savingBeforeProjectReplacement]);
+  }, [finishUnsavedChangesPrompt, openConsolePanel, saveProject, savingUnsavedChanges]);
+
+  const confirmProjectReplacement = useCallback(async () => {
+    return (await confirmUnsavedChanges()) !== "cancelled";
+  }, [confirmUnsavedChanges]);
 
   const loadProject = useCallback(async (path: string, options: { skipDirtyCheck?: boolean } = {}) => {
     if (!workspace.current) return;
     if (!options.skipDirtyCheck && !(await confirmProjectReplacement())) return;
     let projectFileExists = false;
     try {
-      const fileContents = await readTextFile(path);
+      const fileContents = await invoke<string>("read_project_file", { projectPath: path });
       projectFileExists = true;
       const data = parseProjectFile(fileContents);
       const pluginIssues = await ensureProjectPlugins(data.plugins?.requirements);
@@ -2852,6 +3760,10 @@ export default function App() {
         throw new Error(pluginIssues.map((issue) => issue.message).join("；"));
       }
       const validatedWorkspace = validateWorkspaceState(data.workspace);
+      if (data.blockInputLayout) {
+        blockInputLayoutRef.current = data.blockInputLayout;
+        setBlockInputLayout(data.blockInputLayout);
+      }
       cancelAutosave();
       sceneConsoleStates.current.clear();
       loadingWorkspace.current = true;
@@ -2870,7 +3782,7 @@ export default function App() {
       projectResourcesRef.current = data.resources ?? [];
       setProjectResources(data.resources ?? []);
       setProjectName(data.name || path.split(/[\\/]/).pop() || "untitled.vpy"); setProjectPath(path); setDirty(false); localStorage.removeItem("visual-python:draft");
-      setCode(generatedCode); setSceneDocuments(loadedDocuments); setActiveSceneId(loadedActiveSceneId); setSourceCode(loadedActiveCode); setSourceCodeInitialized(typeof data.sourceCode === "string" || loadedMode === "code"); setWorkspaceMode(loadedMode); setProblems([]); setManimVideo(null); rememberRecent(path, data.name);
+      setCode(generatedCode); setSceneDocuments(loadedDocuments); setActiveSceneId(loadedActiveSceneId); setSourceCode(loadedActiveCode); setSourceCodeInitialized(typeof data.sourceCode === "string" || loadedMode === "code"); setWorkspaceMode(loadedMode); setProblems([]); setManimRenderOutput(null); rememberRecent(path, data.name);
       setOutput([{ id: outputId.current++, stream: "system", data: `已打开：${path}\n` }]);
       requestAnimationFrame(() => requestAnimationFrame(() => {
         workspace.current?.clearUndo();
@@ -2918,7 +3830,7 @@ export default function App() {
     projectResourcesRef.current = [];
     setProjectResources([]);
     const initialDocument = workspaceMode === "code" ? createSceneDocument([], "MainScene") : null;
-    setProjectName("untitled.vpy"); setProjectPath(null); setDirty(false); setCode(""); setSceneDocuments(initialDocument ? [initialDocument] : []); setActiveSceneId(initialDocument?.id || ""); setSourceCode(initialDocument?.code || ""); setSourceCodeInitialized(workspaceMode === "code"); setProblems([]); setManimVideo(null); localStorage.removeItem("visual-python:draft");
+    setProjectName("untitled.vpy"); setProjectPath(null); setDirty(false); setCode(""); setSceneDocuments(initialDocument ? [initialDocument] : []); setActiveSceneId(initialDocument?.id || ""); setSourceCode(initialDocument?.code || ""); setSourceCodeInitialized(workspaceMode === "code"); setProblems([]); setManimRenderOutput(null); localStorage.removeItem("visual-python:draft");
     setOutput([{ id: outputId.current++, stream: "system", data: "已创建新工程。\n" }]);
     setProjectMenuOpen(false); requestAnimationFrame(() => {
       workspace.current?.clearUndo();
@@ -2935,7 +3847,7 @@ export default function App() {
     } catch (error) {
       const message = `无法启用示例所需插件：${String(error)}`;
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-      Blockly.dialog.alert(message);
+      openConsolePanel("output");
       return;
     }
     const currentWorkspace = workspace.current;
@@ -2961,7 +3873,7 @@ export default function App() {
     setWorkspaceMode("split");
     setBottomPanelOpen(true);
     setProblems([]);
-    setManimVideo(null);
+    setManimRenderOutput(null);
     setOutput([{ id: outputId.current++, stream: "system", data: `已加载示例：${example.title}\n` }]);
     setExampleMenuOpen(false);
     localStorage.removeItem("visual-python:draft");
@@ -2969,7 +3881,7 @@ export default function App() {
       if (workspace.current === currentWorkspace) { currentWorkspace.clearUndo(); currentWorkspace.zoomToFit(); }
       loadingWorkspace.current = false;
     });
-  }, [cancelAutosave, confirmProjectReplacement]);
+  }, [cancelAutosave, confirmProjectReplacement, openConsolePanel]);
 
   const exportPython = useCallback(async () => {
     const currentScene = sceneDocuments.find((document) => document.id === activeSceneId);
@@ -3011,6 +3923,8 @@ export default function App() {
 
   const runCode = useCallback(async () => {
     if (running) return;
+    pythonRunStartedAt.current = 0;
+    pythonRunElapsed.current = 0;
     setProblems([]);
     setCodeRuntimeDiagnostic(null);
     setBottomPanelOpen(true);
@@ -3044,9 +3958,16 @@ export default function App() {
       return;
     }
     taskId.current = 0;
+    pythonRunStartedAt.current = Date.now();
+    pythonRunElapsed.current = 0;
     setRunning(true); setOutput([{ id: outputId.current++, stream: "system", data: `> Python 运行 ${projectName}\n\n` }]);
     try {
-      const startedTaskId = await invoke<number>("start_python", { code: runSource.code, timeoutSecs: 60, pythonPath: pythonEnvironment?.path || null });
+      const startedTaskId = await invoke<number>("start_python", {
+        code: runSource.code,
+        timeoutSecs: 60,
+        pythonPath: pythonEnvironment?.path || null,
+        projectPath: projectPathRef.current,
+      });
       if (taskId.current === 0) taskId.current = startedTaskId;
     } catch (error) {
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `运行失败：${String(error)}\n` }]);
@@ -3055,8 +3976,23 @@ export default function App() {
     }
   }, [activeCode, focusBlock, projectName, pythonEnvironment, running, validateBeforeExecution, workspaceMode]);
 
-  const renderManim = useCallback(async () => {
+  const renderManim = useCallback(async (options?: { outputType?: "video" | "image"; transparentBackground?: boolean; imageWidth?: number; imageHeight?: number; imageCaptureMode?: "final" | "animation"; imageAnimationStep?: number }) => {
     if (renderingManim) return;
+    const effectiveRenderConfig = options
+      ? {
+        ...manimRenderConfig,
+        ...(options.outputType ? { outputType: options.outputType } : {}),
+        ...(typeof options.transparentBackground === "boolean" ? { transparentBackground: options.transparentBackground } : {}),
+        ...(typeof options.imageWidth === "number" && typeof options.imageHeight === "number" ? { imageSizeMode: "custom" as const, imageWidth: options.imageWidth, imageHeight: options.imageHeight } : {}),
+        ...(options.imageCaptureMode ? { imageCaptureMode: options.imageCaptureMode } : {}),
+        ...(typeof options.imageAnimationStep === "number" ? { imageAnimationStep: options.imageAnimationStep } : {}),
+      }
+      : manimRenderConfig;
+    if (effectiveRenderConfig.outputType !== manimRenderConfig.outputType || effectiveRenderConfig.transparentBackground !== manimRenderConfig.transparentBackground || effectiveRenderConfig.imageSizeMode !== manimRenderConfig.imageSizeMode || effectiveRenderConfig.imageWidth !== manimRenderConfig.imageWidth || effectiveRenderConfig.imageHeight !== manimRenderConfig.imageHeight || effectiveRenderConfig.imageCaptureMode !== manimRenderConfig.imageCaptureMode || effectiveRenderConfig.imageAnimationStep !== manimRenderConfig.imageAnimationStep) {
+      updateManimRenderConfig({ outputType: effectiveRenderConfig.outputType, transparentBackground: effectiveRenderConfig.transparentBackground, imageSizeMode: effectiveRenderConfig.imageSizeMode, imageWidth: effectiveRenderConfig.imageWidth, imageHeight: effectiveRenderConfig.imageHeight, imageCaptureMode: effectiveRenderConfig.imageCaptureMode, imageAnimationStep: effectiveRenderConfig.imageAnimationStep });
+    }
+    manimRenderProgressRef.current = null;
+    manimRenderElapsedRef.current = 0;
     void ensureDesktopNotificationPermission();
     setProblems([]);
     setBottomPanelOpen(true);
@@ -3065,14 +4001,13 @@ export default function App() {
       ? generateWorkspacePythonWithBlockMap(workspace.current)
       : { code: sourceCodeRef.current, blockIdByLine: new Map<number, string>() };
     const sceneNames = extractManimSceneNames(renderSource.code);
-    const sceneName = sceneNames.includes(manimRenderConfig.selectedScene) ? manimRenderConfig.selectedScene : sceneNames[0];
+    const sceneName = sceneNames.includes(effectiveRenderConfig.selectedScene) ? effectiveRenderConfig.selectedScene : sceneNames[0];
     if (!sceneName) {
       const message = workspaceMode === "code"
         ? "没有找到 Manim 场景类。请定义一个继承 Scene 的场景类。"
         : "没有找到 Manim 场景类。请先添加“Manim 场景”积木。";
       setProblems([{ id: problemId.current++, kind: "plugin", line: 0, message }]);
       setActivePanel("problems");
-      Blockly.dialog.alert(message);
       return;
     }
     if (!pythonEnvironment) {
@@ -3081,7 +4016,7 @@ export default function App() {
       return;
     }
     const voiceoverInspection = inspectVoiceovers(renderSource.code, voiceoverRoles.map((role) => role.id));
-    if (!voiceoverInspection.valid) {
+    if (effectiveRenderConfig.outputType === "video" && !voiceoverInspection.valid) {
       const voiceoverProblems = voiceoverInspection.issues.map((issue) => ({
         id: problemId.current++,
         kind: "plugin" as const,
@@ -3094,7 +4029,7 @@ export default function App() {
       return;
     }
     const hasVoiceovers = voiceoverInspection.cueCount + voiceoverInspection.synchronizedCount > 0;
-    if (hasVoiceovers) {
+    if (effectiveRenderConfig.outputType === "video" && hasVoiceovers) {
       const hasTtsKey = Boolean(ttsApiKey.trim()) || await invoke<boolean>("has_tts_api_key", { config: ttsConfig }).catch(() => false);
       const configurationIssue = !ttsConfig.baseUrl.trim()
         ? "当前代码包含配音，但尚未配置百炼接口地址。请先在 Manim 设置的视频配音中完成配置。"
@@ -3107,7 +4042,11 @@ export default function App() {
         setOutput([{ id: outputId.current++, stream: "stderr", data: `${configurationIssue}\n` }]);
         setManimSettingsSection("voice");
         setManimRenderSettingsOpen(true);
-        Blockly.dialog.alert(`${configurationIssue}\n\n渲染已停止，已为你打开“Manim 设置 > 视频配音”。完成配置后请重新渲染。`);
+        showBlockingAlert({
+          title: "需要配置视频配音",
+          message: configurationIssue,
+          detail: "渲染已停止，已为你打开“Manim 设置 > 视频配音”。完成配置后请重新渲染。",
+        });
         return;
       }
     }
@@ -3129,15 +4068,36 @@ export default function App() {
     const assertActiveAttempt = () => attempt.assertActive(manimRenderAttempt.current);
     manimStderrBuffer.current = "";
     manimProgressBuffer.current = "";
+    manimImageCaptureRequest.current = effectiveRenderConfig.outputType === "image"
+      ? { mode: effectiveRenderConfig.imageCaptureMode, step: effectiveRenderConfig.imageAnimationStep }
+      : null;
     manimRenderStartedAt.current = Date.now();
+    manimRenderElapsedRef.current = 0;
     setManimRenderElapsed(0);
-    setManimRenderProgress(initialManimRenderProgress(sceneName));
+    const initialProgress = initialManimRenderProgress(sceneName);
+    manimRenderProgressRef.current = initialProgress;
+    setManimRenderProgress(initialProgress);
     setRenderingManim(true);
-    manimVideoRef.current = null;
-    setManimVideo(null);
+    manimRenderOutputRef.current = null;
+    setManimRenderOutput(null);
     setActivePanel("output");
     setOutput([{ id: outputId.current++, stream: "system", data: `> Manim 渲染 ${sceneName}\n\n` }]);
     try {
+      if (effectiveRenderConfig.outputType === "image") {
+        const stillImage = prepareManimStillImage(renderSource.code);
+        if (stillImage.omittedAudioSegments) {
+          setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `图片输出已忽略 ${stillImage.omittedAudioSegments} 段配音或本地音频。\n` }]);
+        }
+        manimTaskId.current = 0;
+        const outputFileName = buildManimOutputFilename(projectName, sceneName, effectiveRenderConfig.outputFileName, new Date(), "image");
+        const startedTaskId = await invoke<number>("render_manim", { code: stillImage.code, sceneName, pythonPath: pythonEnvironment.path, renderConfig: effectiveRenderConfig, storagePath: manimStoragePath || null, outputFileName });
+        if (manimTaskId.current === 0) manimTaskId.current = startedTaskId;
+        if (attempt.cancelled || manimRenderAttempt.current !== attempt) {
+          await invoke("stop_manim_render", { taskId: startedTaskId });
+          throw new ManimRenderCancelledError();
+        }
+        return;
+      }
       const voiceoverConfig = { ...ttsConfig, audioFormat: "wav" as const };
       let cachedVoiceoverClipCount = 0;
       const preparedLocalAudio = await prepareManimLocalAudio(renderSource.code, async (request) => {
@@ -3164,7 +4124,7 @@ export default function App() {
         const summary = `${text.slice(0, 24)}${text.length > 24 ? "..." : ""}`;
         setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `正在准备配音：${summary}\n` }]);
         const role = resolveVoiceoverRole(roleId);
-        const segmentConfig = role ? { ...voiceoverConfig, model: role.model, voice: role.voice, speed: role.speed } : voiceoverConfig;
+        const segmentConfig = role ? ttsConfigForRole(voiceoverConfig, role) : voiceoverConfig;
         let result: TtsPreviewResult;
         try {
           result = await invoke<TtsPreviewResult>("synthesize_tts_preview", { config: segmentConfig, text, apiKey: ttsApiKey.trim() || null, storagePath: ttsStoragePath || null });
@@ -3200,8 +4160,8 @@ export default function App() {
         }]);
         setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `已准备 ${preparedVoiceovers.clipCount} 段配音，开始渲染。\n` }]);
       }
-      const outputFileName = buildManimOutputFilename(projectName, sceneName, manimRenderConfig.outputFileName);
-      const startedTaskId = await invoke<number>("render_manim", { code: preparedVoiceovers.code, sceneName, pythonPath: pythonEnvironment.path, renderConfig: manimRenderConfig, storagePath: manimStoragePath || null, outputFileName });
+      const outputFileName = buildManimOutputFilename(projectName, sceneName, effectiveRenderConfig.outputFileName, new Date(), "video");
+      const startedTaskId = await invoke<number>("render_manim", { code: preparedVoiceovers.code, sceneName, pythonPath: pythonEnvironment.path, renderConfig: effectiveRenderConfig, storagePath: manimStoragePath || null, outputFileName });
       if (manimTaskId.current === 0) manimTaskId.current = startedTaskId;
       if (attempt.cancelled || manimRenderAttempt.current !== attempt) {
         await invoke("stop_manim_render", { taskId: startedTaskId });
@@ -3209,26 +4169,28 @@ export default function App() {
       }
     } catch (error) {
       if (error instanceof ManimRenderCancelledError || attempt.cancelled || manimRenderAttempt.current !== attempt) {
+        manimImageCaptureRequest.current = null;
         if (manimRenderAttempt.current === attempt) {
           manimRenderAttempt.current = null;
           manimTaskId.current = null;
           setRenderingManim(false);
+          manimRenderProgressRef.current = null;
           setManimRenderProgress(null);
         }
         return;
       }
       manimRenderAttempt.current = null;
       manimTaskId.current = null;
+      manimImageCaptureRequest.current = null;
       setRenderingManim(false);
       if (error instanceof ManimLocalAudioError) {
         const blockId = error.request.blockId;
         const line = blockId ? [...renderSource.blockIdByLine.entries()].find(([, id]) => id === blockId)?.[0] || 0 : 0;
-        const suggestion = "请右键该积木重新选择本地音频文件，并确认文件仍然存在且可以正常播放。";
+        const suggestion = "请点击该积木上的文件夹图标重新选择本地音频文件，并确认文件仍然存在且可以正常播放。";
         setProblems([{ id: problemId.current++, kind: "plugin", line, message: error.message, blockId, suggestion }]);
         setActivePanel("problems");
         if (blockId) requestAnimationFrame(() => focusBlock(blockId));
         setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${error.message}\n${suggestion}\n` }]);
-        Blockly.dialog.alert(`${error.message}\n\n${suggestion}`);
         return;
       }
       if (error instanceof ManimVoiceoverError) {
@@ -3239,14 +4201,14 @@ export default function App() {
         setActivePanel("problems");
         if (blockId) requestAnimationFrame(() => focusBlock(blockId));
         setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${error.message}\n${suggestion}\n` }]);
-        Blockly.dialog.alert(`${error.message}\n\n${suggestion}`);
         return;
       }
       const message = `Manim 渲染启动失败：${String(error)}`;
+      setProblems([{ id: problemId.current++, kind: "runtime", line: 0, message }]);
+      setActivePanel("problems");
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-      Blockly.dialog.alert(message);
     }
-  }, [activeCode, ensureDesktopNotificationPermission, focusBlock, manimRenderConfig, manimStoragePath, projectName, pythonEnvironment, recordVoiceoverBlockDuration, renderingManim, ttsApiKey, ttsConfig, ttsStoragePath, validateBeforeExecution, voiceoverRoles, workspaceMode]);
+  }, [activeCode, ensureDesktopNotificationPermission, focusBlock, manimRenderConfig, manimStoragePath, projectName, pythonEnvironment, recordVoiceoverBlockDuration, renderingManim, showBlockingAlert, ttsApiKey, ttsConfig, ttsStoragePath, updateManimRenderConfig, validateBeforeExecution, voiceoverRoles, workspaceMode]);
 
   const stopManimRender = useCallback(async () => {
     const attempt = manimRenderAttempt.current;
@@ -3256,6 +4218,7 @@ export default function App() {
     if (currentTaskId === null) {
       if (manimRenderAttempt.current === attempt) manimRenderAttempt.current = null;
       setRenderingManim(false);
+      manimRenderProgressRef.current = null;
       setManimRenderProgress(null);
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: "已取消 Manim 配音准备。\n" }]);
       return;
@@ -3268,32 +4231,33 @@ export default function App() {
         if (manimRenderAttempt.current === attempt) manimRenderAttempt.current = null;
         if (manimTaskId.current === currentTaskId) manimTaskId.current = null;
         setRenderingManim(false);
+        manimRenderProgressRef.current = null;
         setManimRenderProgress(null);
       }
     } catch (error) {
       const message = `停止 Manim 渲染失败：${String(error)}`;
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-      Blockly.dialog.alert(message);
+      openConsolePanel("output");
     }
-  }, [renderingManim]);
+  }, [openConsolePanel, renderingManim]);
 
-  const openSystemVideo = useCallback(async () => {
-    if (!manimVideo) return;
+  const openSystemRenderOutput = useCallback(async () => {
+    if (!manimRenderOutput) return;
     try {
-      await invoke("open_system_video", { path: manimVideo.path });
+      await invoke("open_system_video", { path: manimRenderOutput.path });
     } catch (error) {
-      Blockly.dialog.alert(`无法打开视频：${String(error)}`);
+      showAppNotice(`无法打开渲染结果：${String(error)}`);
     }
-  }, [manimVideo]);
+  }, [manimRenderOutput, showAppNotice]);
 
-  const revealVideoInFolder = useCallback(async () => {
-    if (!manimVideo) return;
+  const revealRenderOutputInFolder = useCallback(async () => {
+    if (!manimRenderOutput) return;
     try {
-      await invoke("reveal_video_in_folder", { path: manimVideo.path });
+      await invoke("reveal_video_in_folder", { path: manimRenderOutput.path });
     } catch (error) {
-      Blockly.dialog.alert(`无法打开所在文件夹：${String(error)}`);
+      showAppNotice(`无法打开所在文件夹：${String(error)}`);
     }
-  }, [manimVideo]);
+  }, [manimRenderOutput, showAppNotice]);
 
   const stopCode = useCallback(async () => {
     if (taskId.current === null) return;
@@ -3304,12 +4268,12 @@ export default function App() {
 
   const manimSceneNames = extractManimSceneNames(activeCode);
   const manimSceneName = manimSceneNames.includes(manimRenderConfig.selectedScene) ? manimRenderConfig.selectedScene : manimSceneNames[0];
-  const manimOutputFilenamePreview = buildManimOutputFilename(projectName, manimSceneName || "MainScene", manimRenderConfig.outputFileName);
+  const manimOutputFilenamePreview = buildManimOutputFilename(projectName, manimSceneName || "MainScene", manimRenderConfig.outputFileName, new Date(), manimRenderConfig.outputType);
   const hasMultipleManimScenes = manimSceneNames.length > 1;
   useEffect(() => { if (!hasMultipleManimScenes) setManimSceneMenuOpen(false); }, [hasMultipleManimScenes]);
-  const primaryActionLabel = renderingManim ? "停止渲染" : running ? "停止" : manimSceneName ? "渲染" : "运行";
-  const primaryActionTitle = renderingManim ? "停止 Manim 渲染" : running ? "停止运行" : manimSceneName ? `渲染 Manim 场景 ${manimSceneName}` : "运行当前 Python 代码";
-  const primaryActionIcon = renderingManim || running ? <Square size={14} fill="currentColor"/> : manimSceneName ? <Film size={15}/> : <Play size={15} fill="currentColor"/>;
+  const primaryActionLabel = renderingManim ? "停止渲染" : running ? "停止" : manimSceneName ? manimRenderConfig.outputType === "image" ? "生成图片" : "渲染" : "运行";
+  const primaryActionTitle = renderingManim ? "停止 Manim 渲染" : running ? "停止运行" : manimSceneName ? `${manimRenderConfig.outputType === "image" ? "生成图片" : "渲染"}：${manimSceneName}` : "运行当前 Python 代码";
+  const primaryActionIcon = renderingManim || running ? <Square size={14} fill="currentColor"/> : manimSceneName ? manimRenderConfig.outputType === "image" ? <ImageIcon size={15}/> : <Film size={15}/> : <Play size={15} fill="currentColor"/>;
   const primaryActionClass = `run-button ${renderingManim || running ? "stopping" : ""} ${manimSceneName && !running ? "manim" : ""}`;
   const manimPluginActive = pluginRecords.some((record) => record.plugin.manifest.id === "visual-python.manim" && record.state === "active");
   const codeOutline = workspaceMode === "code" ? getPythonOutline(sourceCode) : [];
@@ -3341,8 +4305,8 @@ export default function App() {
     : document);
   const focusManimSceneTab = (sceneId: string) => {
     if (sceneId === activeSceneIdRef.current) return codeEditor.current?.focus();
-    if (aiAgentSceneIdRef.current) return Blockly.dialog.alert("AI 正在修改当前场景。请先停止或等待任务完成，再切换场景。");
-    if (runningRef.current || renderingManimRef.current) return Blockly.dialog.alert("请先停止当前运行或渲染任务，再切换场景。");
+    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法切换场景", message: "AI 正在修改当前场景。请先停止或等待任务完成，再切换场景。" });
+    if (runningRef.current || renderingManimRef.current) return showBlockingAlert({ title: "暂时无法切换场景", message: "请先停止当前运行或渲染任务，再切换场景。" });
     const documents = persistActiveSceneDocument();
     const document = documents.find((item) => item.id === sceneId);
     if (!document) return;
@@ -3357,7 +4321,7 @@ export default function App() {
     requestAnimationFrame(() => codeEditor.current?.focus());
   };
   const addManimSceneTab = () => {
-    if (aiAgentSceneIdRef.current) return Blockly.dialog.alert("AI 正在修改当前场景。请先停止或等待任务完成，再新建场景。");
+    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法新建场景", message: "AI 正在修改当前场景。请先停止或等待任务完成，再新建场景。" });
     const documents = persistActiveSceneDocument();
     const document = createSceneDocument(documents.map((item) => item.name));
     const nextDocuments = [...documents, document];
@@ -3377,14 +4341,14 @@ export default function App() {
     updateManimRenderConfig({ selectedScene: document.name });
     requestAnimationFrame(() => { codeEditor.current?.setPosition({ lineNumber: 6, column: 9 }); codeEditor.current?.focus(); });
   };
-  const closeManimSceneTab = (sceneId: string) => {
-    if (aiAgentSceneIdRef.current) return Blockly.dialog.alert("AI 正在修改当前场景。请先停止或等待任务完成，再删除场景。");
+  const closeManimSceneTab = async (sceneId: string) => {
+    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法删除场景", message: "AI 正在修改当前场景。请先停止或等待任务完成，再删除场景。" });
     const documents = persistActiveSceneDocument();
     const index = documents.findIndex((document) => document.id === sceneId);
     const closing = documents[index];
     if (!closing) return;
-    if (documents.length === 1) return Blockly.dialog.alert("工程至少需要保留一个场景。");
-    if (!window.confirm(`确定删除场景“${closing.name}”吗？该场景的完整代码都会被删除。`)) return;
+    if (documents.length === 1) return showBlockingAlert({ title: "无法删除场景", message: "工程至少需要保留一个场景。" });
+    if (!(await requestConfirmation({ title: `删除场景“${closing.name}”？`, message: "该场景的完整代码将被永久删除。", confirmLabel: "删除场景", tone: "danger" }))) return;
     const remainingScenes = documents.filter((document) => document.id !== sceneId);
     const nextActive = sceneId === activeSceneIdRef.current ? remainingScenes[Math.min(index, remainingScenes.length - 1)] : remainingScenes.find((document) => document.id === activeSceneIdRef.current)!;
     codeValidationVersion.current += 1;
@@ -3480,7 +4444,7 @@ export default function App() {
       textarea.remove();
       if (!copied) throw new Error("浏览器拒绝了复制操作");
     } catch (error) {
-      Blockly.dialog.alert(`复制失败：${String(error)}`);
+      showAppNotice(`复制失败：${String(error)}`);
     }
   };
   const openConsoleContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -3495,7 +4459,7 @@ export default function App() {
       : undefined;
     const problemCanBeLocated = Boolean(problem?.blockId || (workspaceMode === "code" && problem && problem.line > 0));
     const menuItemCount = activePanel === "output" ? 3
-      : activePanel === "video" ? 4
+      : activePanel === "preview" ? 4
       : 2 + (selectedText ? 1 : 0) + (problem ? 1 : 0) + (problemCanBeLocated ? 1 : 0);
     const menuWidth = 220;
     const estimatedMenuHeight = 19 + menuItemCount * 34;
@@ -3563,7 +4527,7 @@ export default function App() {
 
   const previewProjectResource = useCallback(async (resource: ProjectResource) => {
     const path = resolveProjectResourceReference(projectResourceReference(resource.id), projectResourcesRef.current, projectPathRef.current);
-    if (!path) return Blockly.dialog.alert("无法找到这个工程资源。");
+    if (!path) return showAppNotice("无法找到这个工程资源。");
     localAudioPreview.current?.pause();
     if (resourcePreviewId === resource.id) {
       localAudioPreview.current = null;
@@ -3582,9 +4546,9 @@ export default function App() {
     } catch (error) {
       localAudioPreview.current = null;
       setResourcePreviewId(null);
-      Blockly.dialog.alert(`无法试听音频资源：${String(error)}`);
+      showAppNotice(`无法试听音频资源：${String(error)}`);
     }
-  }, [resourcePreviewId]);
+  }, [resourcePreviewId, showAppNotice]);
 
   const replaceProjectResource = useCallback(async (resource: ProjectResource) => {
     const currentProjectPath = projectPathRef.current;
@@ -3598,9 +4562,9 @@ export default function App() {
       setProjectResources(next);
       setProjectResourceStatus((status) => ({ ...status, [resource.path]: { path: resource.path, exists: true, size: replacement.size } }));
     } catch (error) {
-      Blockly.dialog.alert(`无法替换音频资源：${String(error)}`);
+      showAppNotice(`无法替换音频资源：${String(error)}`);
     }
-  }, []);
+  }, [showAppNotice]);
 
   useEffect(() => {
     if (!projectPath || !projectResources.length) {
@@ -3614,15 +4578,15 @@ export default function App() {
         setProjectResourceStatus(Object.fromEntries(items.map((item) => [item.path, item])));
       })
       .catch((error) => {
-        if (!disposed) Blockly.dialog.alert(`无法检查工程资源：${String(error)}`);
+        if (!disposed) showAppNotice(`无法检查工程资源：${String(error)}`);
       });
     return () => { disposed = true; };
-  }, [projectPath, projectResources]);
+  }, [projectPath, projectResources, showAppNotice]);
 
   const importAudioFromResourcePanel = useCallback(async () => {
     const currentProjectPath = projectPathRef.current;
     if (!currentProjectPath) {
-      Blockly.dialog.alert("请先保存工程，再添加音频资源。");
+      showBlockingAlert({ title: "请先保存工程", message: "保存工程后才能添加音频资源。" });
       return;
     }
     const sourcePath = await open({ multiple: false, directory: false, filters: [{ name: "音频文件", extensions: ["wav", "mp3", "ogg", "flac", "m4a", "aac"] }] });
@@ -3638,9 +4602,9 @@ export default function App() {
       setProjectResources(next);
       setProjectResourceStatus((status) => ({ ...status, [resource.path]: { path: resource.path, exists: true, size: resource.size } }));
     } catch (error) {
-      Blockly.dialog.alert(`无法导入音频资源：${String(error)}`);
+      showAppNotice(`无法导入音频资源：${String(error)}`);
     }
-  }, []);
+  }, [showAppNotice, showBlockingAlert]);
 
   useEffect(() => {
     const acceptsResource = (event: DragEvent) => event.dataTransfer?.types.includes("application/x-visual-python-resource") && isBlockWorkspaceMode(workspaceMode);
@@ -3687,10 +4651,10 @@ export default function App() {
   const deleteProjectResource = useCallback(async (resource: ProjectResource) => {
     const usageCount = projectResourceUsage.get(resource.id) ?? 0;
     if (usageCount) {
-      Blockly.dialog.alert(`这个资源仍被 ${usageCount} 个积木使用，请先移除对应积木中的资源引用。`);
+      showBlockingAlert({ title: "资源仍在使用", message: `这个资源仍被 ${usageCount} 个积木使用，请先移除对应积木中的资源引用。` });
       return;
     }
-    if (!window.confirm(`确定从工程中删除“${resource.originalName}”吗？此操作会同时删除磁盘文件。`)) return;
+    if (!(await requestConfirmation({ title: `删除资源“${resource.originalName}”？`, message: "该资源将从工程和磁盘中永久删除。", confirmLabel: "删除资源", tone: "danger" }))) return;
     const currentProjectPath = projectPathRef.current;
     if (!currentProjectPath) return;
     try {
@@ -3699,9 +4663,9 @@ export default function App() {
       projectResourcesRef.current = next;
       setProjectResources(next);
     } catch (error) {
-      Blockly.dialog.alert(`无法删除工程资源：${String(error)}`);
+      showAppNotice(`无法删除工程资源：${String(error)}`);
     }
-  }, [projectResourceUsage]);
+  }, [projectResourceUsage, requestConfirmation, showAppNotice, showBlockingAlert]);
 
   const unusedProjectResources = useMemo(
     () => projectResources.filter((resource) => !(projectResourceUsage.get(resource.id) ?? 0)),
@@ -3711,7 +4675,7 @@ export default function App() {
   const cleanUnusedProjectResources = useCallback(async () => {
     const currentProjectPath = projectPathRef.current;
     if (!currentProjectPath || !unusedProjectResources.length) return;
-    if (!window.confirm(`确定清理 ${unusedProjectResources.length} 个未使用资源吗？对应的磁盘文件也会被删除。`)) return;
+    if (!(await requestConfirmation({ title: `清理 ${unusedProjectResources.length} 个未使用资源？`, message: "这些资源及对应的磁盘文件都将被永久删除。", confirmLabel: "清理资源", tone: "danger" }))) return;
     const deletedIds = new Set<string>();
     const failures: string[] = [];
     for (const resource of unusedProjectResources) {
@@ -3732,8 +4696,12 @@ export default function App() {
         setResourcePreviewId(null);
       }
     }
-    if (failures.length) Blockly.dialog.alert(`部分资源未能删除：\n${failures.join("\n")}`);
-  }, [resourcePreviewId, unusedProjectResources]);
+    if (failures.length) {
+      setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `部分资源未能删除：\n${failures.join("\n")}\n` }]);
+      openConsolePanel("output");
+      showAppNotice("部分资源未能删除，详情已显示在输出面板。");
+    }
+  }, [openConsolePanel, requestConfirmation, resourcePreviewId, showAppNotice, unusedProjectResources]);
 
   const revealProjectResource = useCallback(async (resource: ProjectResource) => {
     const currentProjectPath = projectPathRef.current;
@@ -3741,9 +4709,9 @@ export default function App() {
     try {
       await invoke("reveal_project_resource", { projectPath: currentProjectPath, resourcePath: resource.path });
     } catch (error) {
-      Blockly.dialog.alert(`无法打开资源所在位置：${String(error)}`);
+      showAppNotice(`无法打开资源所在位置：${String(error)}`);
     }
-  }, []);
+  }, [showAppNotice]);
 
   const formatResourceSize = (size: number) => size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`;
   const runPrimaryAction = useCallback(() => {
@@ -3756,7 +4724,7 @@ export default function App() {
     const onWorkbenchShortcut = (event: KeyboardEvent) => {
       const action = getWorkbenchShortcutAction(event);
       if (!action) return;
-      const overlayOpen = settingsOpen || pluginsOpen || resourcesOpen || closePromptOpen || manimRenderSettingsOpen || formulaEditorRequest !== null || projectMenuOpen || exampleMenuOpen || shortcutMenuOpen || manimSceneMenuOpen || pythonEnvironmentMenuOpen || codeOutlineOpen;
+      const overlayOpen = settingsOpen || pluginsOpen || resourcesOpen || closePromptOpen || unsavedChangesPromptOpen || confirmationRequest !== null || blockingAlert !== null || manimRenderSettingsOpen || voiceCloneDialogOpen || formulaEditorRequest !== null || projectMenuOpen || exampleMenuOpen || shortcutMenuOpen || helpMenuOpen || manimSceneMenuOpen || pythonEnvironmentMenuOpen || codeOutlineOpen;
       if (overlayOpen) return;
       if (action.type === "run") {
         if (running || renderingManim) return;
@@ -3776,7 +4744,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onWorkbenchShortcut, true);
     return () => window.removeEventListener("keydown", onWorkbenchShortcut, true);
-  }, [changeWorkspaceMode, closePromptOpen, codeOutlineOpen, exampleMenuOpen, formulaEditorRequest, manimRenderSettingsOpen, manimSceneMenuOpen, pluginsOpen, projectMenuOpen, pythonEnvironmentMenuOpen, renderManim, renderingManim, resourcesOpen, runPrimaryAction, running, settingsOpen, shortcutMenuOpen]);
+  }, [blockingAlert, changeWorkspaceMode, closePromptOpen, codeOutlineOpen, confirmationRequest, exampleMenuOpen, formulaEditorRequest, helpMenuOpen, manimRenderSettingsOpen, manimSceneMenuOpen, pluginsOpen, projectMenuOpen, pythonEnvironmentMenuOpen, renderManim, renderingManim, resourcesOpen, runPrimaryAction, running, settingsOpen, shortcutMenuOpen, unsavedChangesPromptOpen, voiceCloneDialogOpen]);
 
   const sendInput = useCallback(async () => {
     const currentTask = taskId.current;
@@ -3794,41 +4762,21 @@ export default function App() {
     else localStorage.setItem("visual-python:close-behavior", behavior);
   }, []);
 
-  const prepareApplicationExit = useCallback(() => {
-    if (dirty && !window.confirm("当前工程有未保存修改，确定要退出应用吗？")) return false;
-    cancelAutosave();
-    if (dirty && workspace.current) {
-      const persistedDocuments = sceneDocuments.map((document) => document.id === activeSceneId ? { ...document, code: sourceCode, name: sceneDocumentName(sourceCode, document.name) } : document);
-      const draft: DraftProject = {
-        version: 1,
-        name: projectName,
-        path: projectPath,
-        savedAt: Date.now(),
-        workspace: Blockly.serialization.workspaces.save(workspace.current),
-        plugins: pluginRegistry.createProjectState(workspace.current),
-        sourceCode: sourceCodeInitialized ? sourceCode : undefined,
-        sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined,
-        activeSceneId: activeSceneId || undefined,
-        workspaceMode,
-        resources: projectResourcesRef.current,
-      };
-      localStorage.setItem("visual-python:draft", JSON.stringify(draft));
-    }
-    return true;
-  }, [activeSceneId, cancelAutosave, dirty, projectName, projectPath, sceneDocuments, sourceCode, sourceCodeInitialized, voiceoverRoles, workspaceMode]);
-
   const quitApplication = useCallback(async (rememberChoice = false) => {
-    if (!prepareApplicationExit()) return false;
-    if (rememberChoice) updateCloseBehavior("exit");
     setClosePromptOpen(false);
+    const unsavedResolution = await confirmUnsavedChanges();
+    if (unsavedResolution === "cancelled") return false;
+    cancelAutosave();
+    localStorage.removeItem("visual-python:draft");
+    if (rememberChoice) updateCloseBehavior("exit");
     try {
       await invoke("exit_application");
       return true;
     } catch (error) {
-      Blockly.dialog.alert(`无法退出应用：${String(error)}`);
+      showAppNotice(`无法退出应用：${String(error)}`);
       return false;
     }
-  }, [prepareApplicationExit, updateCloseBehavior]);
+  }, [cancelAutosave, confirmUnsavedChanges, showAppNotice, updateCloseBehavior]);
 
   const minimizeToTray = useCallback(async (rememberChoice = false) => {
     if (rememberChoice) updateCloseBehavior("tray");
@@ -3836,9 +4784,9 @@ export default function App() {
     try {
       await invoke("hide_main_window");
     } catch (error) {
-      Blockly.dialog.alert(`无法最小化到托盘：${String(error)}`);
+      showAppNotice(`无法最小化到托盘：${String(error)}`);
     }
-  }, [updateCloseBehavior]);
+  }, [showAppNotice, updateCloseBehavior]);
 
   const closeWindow = useCallback(() => {
     if (closeBehavior === "tray") {
@@ -3884,12 +4832,12 @@ export default function App() {
       const blockTypes = new Set(pluginRegistry.getBlockTypes(record.plugin.manifest.id));
       const usedBlocks = workspace.current?.getAllBlocks(false).filter((block) => blockTypes.has(block.type)) ?? [];
       if (usedBlocks.length) {
-        Blockly.dialog.alert(`画布中仍有 ${usedBlocks.length} 个“${record.plugin.manifest.name}”积木，请先删除这些积木再停用插件。`);
+        showBlockingAlert({ title: "插件仍在使用", message: `画布中仍有 ${usedBlocks.length} 个“${record.plugin.manifest.name}”积木，请先删除这些积木再停用插件。` });
         return;
       }
     }
     await setPluginEnabled(record.plugin.manifest.id, !enabled);
-  }, []);
+  }, [showBlockingAlert]);
 
   const toggleExternalPlugin = useCallback(async (entry: ExternalPluginDiscovery) => {
     const pluginId = entry.manifest?.id;
@@ -3911,11 +4859,11 @@ export default function App() {
       const blockTypes = new Set(pluginRegistry.getBlockTypes(pluginId));
       const usedBlocks = workspace.current?.getAllBlocks(false).filter((block) => blockTypes.has(block.type)) ?? [];
       if (usedBlocks.length) {
-        Blockly.dialog.alert(`画布中仍有 ${usedBlocks.length} 个“${record.plugin.manifest.name}”积木，请先删除这些积木再删除插件。`);
+        showBlockingAlert({ title: "插件仍在使用", message: `画布中仍有 ${usedBlocks.length} 个“${record.plugin.manifest.name}”积木，请先删除这些积木再删除插件。` });
         return;
       }
     }
-    if (!window.confirm(`确定要从磁盘删除插件“${label}”吗？`)) return;
+    if (!(await requestConfirmation({ title: `删除插件“${label}”？`, message: "插件文件将从磁盘中永久删除。", confirmLabel: "删除插件", tone: "danger" }))) return;
     try {
       await invoke("delete_external_plugin", { pluginPath: entry.path });
       if (pluginId && pluginRegistry.getRecord(pluginId)) {
@@ -3939,9 +4887,9 @@ export default function App() {
     } catch (error) {
       const message = `插件删除失败：${String(error)}`;
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
-      Blockly.dialog.alert(message);
+      openConsolePanel("output");
     }
-  }, []);
+  }, [openConsolePanel, requestConfirmation, showBlockingAlert]);
 
   const startRightPanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (workspaceMode !== "split") return;
@@ -3965,12 +4913,22 @@ export default function App() {
   const runAiCodeAgentTask = useCallback(async ({
     prompt,
     history,
+    agentMode,
+    initialPlan,
     onActivity,
+    onProgress,
+    permissionMode,
+    onPermissionRequest,
     signal,
   }: {
     prompt: string;
     history: AiConversationTurn[];
+    agentMode: AiAgentMode;
+    initialPlan?: AiAgentPlanStep[];
     onActivity: (activity: AiAgentActivity) => void;
+    onProgress: (progress: AiAgentProgress) => void;
+    permissionMode: AiAgentPermissionMode;
+    onPermissionRequest: (request: AiAgentPermissionRequest) => Promise<boolean>;
     signal: AbortSignal;
   }): Promise<AiAgentResult> => {
     if (workspaceModeRef.current !== "code") throw new Error("AI 编程助手仅在纯代码模式下可用");
@@ -3983,7 +4941,7 @@ export default function App() {
       const mutating = activity.toolName && ["create_scene", "rename_scene", "delete_scene", "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "add_voiceover", "add_synchronized_voiceover", "format_code", "undo_code", "redo_code"].includes(activity.toolName);
       if (activity.status === "error") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "error" }));
       else if (activity.toolName === "switch_scene") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "working" }));
-      else if (activity.toolName === "inspect_rendered_video") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "rendered" }));
+      else if (activity.toolName === "inspect_rendered_output") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "rendered" }));
       else if (activity.toolName === "validate_scene") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "validated" }));
       else if (mutating) setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "changed" }));
       onActivity(activity);
@@ -3993,6 +4951,23 @@ export default function App() {
       : { ...document });
     const taskBeforeActiveSceneId = agentSceneId;
     let projectDirty = dirty;
+    let checkpointDocuments = taskBeforeDocuments;
+    let checkpointActiveSceneId = taskBeforeActiveSceneId;
+    let checkpointDirty = dirty;
+    let checkpointCompletedSteps = initialPlan?.filter(({ status }) => status === "completed").length ?? 0;
+    const snapshotCurrentDocuments = () => sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current
+      ? { ...document, code: sourceCodeRef.current, name: sceneDocumentName(sourceCodeRef.current, document.name) }
+      : { ...document });
+    const reportProgressWithCheckpoint = (progress: AiAgentProgress) => {
+      const completedSteps = progress.taskPlan?.filter(({ status }) => status === "completed").length ?? 0;
+      if (completedSteps > checkpointCompletedSteps) {
+        checkpointDocuments = snapshotCurrentDocuments();
+        checkpointActiveSceneId = checkpointDocuments.some(({ id }) => id === agentSceneId) ? agentSceneId : activeSceneIdRef.current;
+        checkpointDirty = projectDirty;
+        checkpointCompletedSteps = completedSteps;
+      }
+      onProgress(progress);
+    };
     let codePreviewOriginal: string | null = null;
 
     const waitWithSignal = (milliseconds: number) => new Promise<void>((resolve, reject) => {
@@ -4115,7 +5090,7 @@ export default function App() {
 
       if (name === "create_scene") {
         const requestedName = typeof args.name === "string" && args.name.trim() ? args.name.trim() : "NewScene";
-        if (!/^[A-Za-z_]\w*$/.test(requestedName)) throw new Error("场景名称必须是有效的 Python 类名");
+        if (!isPythonIdentifier(requestedName)) throw new Error("场景名称必须是有效的 Python 类名");
         const documents = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current ? { ...document, code: sourceCodeRef.current, name: sceneDocumentName(sourceCodeRef.current, document.name) } : document);
         const document = createSceneDocument(documents.map((item) => item.name), requestedName);
         const nextDocuments = [...documents, document];
@@ -4131,7 +5106,7 @@ export default function App() {
         projectDirty = true;
         updateManimRenderConfig({ selectedScene: document.name });
         await waitWithSignal(0);
-        return { created: true, id: document.id, name: document.name, code: document.code };
+        return { created: true, changed: true, id: document.id, name: document.name, code: document.code };
       }
 
       if (name === "rename_scene") {
@@ -4155,6 +5130,7 @@ export default function App() {
         projectDirty = true;
         return {
           renamed: true,
+          changed: target.name !== renamed.name || target.code !== renamed.code,
           id: sceneId,
           name: nextName,
           diff: createCodeChangePreview(target.code, renamed.code),
@@ -4169,7 +5145,6 @@ export default function App() {
         const target = documents[index];
         if (!target) throw new Error(`场景不存在：${sceneId}。请重新调用 list_scenes。`);
         if (documents.length === 1) throw new Error("工程至少需要保留一个场景");
-        if (!window.confirm(`AI 请求删除场景“${target.name}”。该场景的完整代码都会被删除，是否继续？`)) throw new Error("用户取消了删除场景");
         const remaining = documents.filter((document) => document.id !== sceneId);
         sceneDocumentsRef.current = remaining;
         setSceneDocuments(remaining);
@@ -4185,7 +5160,7 @@ export default function App() {
         }
         setDirty(true);
         projectDirty = true;
-        return { deleted: true, id: sceneId, name: target.name, activeSceneId: activeSceneIdRef.current };
+        return { deleted: true, changed: true, id: sceneId, name: target.name, activeSceneId: activeSceneIdRef.current };
       }
 
       if (name === "get_context") {
@@ -4281,7 +5256,6 @@ export default function App() {
         const statuses = await invoke<PythonPackageStatus[]>("check_python_packages", { pythonPath: pythonEnvironment.path, packages });
         const missing = statuses.filter((status) => !status.installed).map((status) => status.name);
         if (!missing.length) return { installed: true, packages: [], detail: "依赖已经安装" };
-        if (!window.confirm(`AI 请求安装 Python 依赖：\n\n${missing.join(", ")}\n\n是否继续？`)) throw new Error("用户取消了依赖安装");
         setInstallingPackages(true);
         let resolveFinished!: (payload: PackageInstallFinishedEvent) => void;
         let rejectFinished!: (error: unknown) => void;
@@ -4307,12 +5281,17 @@ export default function App() {
         }
       }
 
-      if (name === "inspect_rendered_video") {
-        const video = manimVideoRef.current;
-        if (!video) throw new Error("当前场景还没有渲染视频");
-        const result = await inspectVideoQuality(video.url);
+      if (name === "inspect_rendered_output") {
+        const renderOutput = manimRenderOutputRef.current;
+        if (!renderOutput) throw new Error("当前场景还没有渲染结果");
+        if (renderOutput.type === "image") {
+          const result = await inspectImageQuality(renderOutput.url);
+          const valid = result.width > 0 && result.height > 0 && result.blankImageLikely !== true;
+          return { valid, type: renderOutput.type, scene: renderOutput.scene, path: renderOutput.path, ...result, ...(result.blankImageLikely === true ? { warning: "图片亮度几乎没有变化，疑似空白画面" } : {}) };
+        }
+        const result = await inspectVideoQuality(renderOutput.url);
         const valid = result.durationSeconds > 0 && result.width > 0 && result.height > 0 && result.blankFrameLikely !== true;
-        return { valid, scene: video.scene, path: video.path, ...result, ...(result.blankFrameLikely === true ? { warning: "视频中点画面亮度几乎没有变化，疑似空白画面" } : {}) };
+        return { valid, type: renderOutput.type, scene: renderOutput.scene, path: renderOutput.path, ...result, ...(result.blankFrameLikely === true ? { warning: "视频中点画面亮度几乎没有变化，疑似空白画面" } : {}) };
       }
 
       if (name === "replace_code") {
@@ -4375,10 +5354,10 @@ export default function App() {
           configured: Boolean(ttsConfig.baseUrl.trim() && hasApiKey),
           hasApiKey,
           provider: ttsConfig.provider,
-          defaultVoice: { model: ttsConfig.model, voice: ttsConfig.voice, speed: ttsConfig.speed },
+          defaultVoice: { model: ttsConfig.model, voice: ttsConfig.voice, speed: ttsConfig.speed, ...ttsExpressionFrom(ttsConfig) },
           roles: [
-            { id: "default", name: "默认旁白", model: ttsConfig.model, voice: ttsConfig.voice, speed: ttsConfig.speed },
-            ...voiceoverRoles.map(({ id, name: roleName, model, voice, speed }) => ({ id, name: roleName, model, voice, speed })),
+            { id: "default", name: "默认旁白", model: ttsConfig.model, voice: ttsConfig.voice, speed: ttsConfig.speed, ...ttsExpressionFrom(ttsConfig) },
+            ...voiceoverRoles.map((role) => ({ id: role.id, name: role.name, model: role.model, voice: role.voice, speed: role.speed, ...ttsExpressionFrom(role) })),
           ],
         };
       }
@@ -4437,22 +5416,37 @@ export default function App() {
       }
 
       if (name === "format_code") {
+        const previousCode = sourceCodeRef.current;
         const formatted = await formatCurrentPythonCode(false);
         if (formatted === null) throw new Error("代码格式化失败，请先检查语法问题");
         sourceCodeRef.current = formatted;
-        return { formatted: true, lineCount: formatted ? formatted.split("\n").length : 0 };
+        const changed = previousCode !== formatted;
+        return {
+          formatted: true,
+          changed,
+          diff: changed ? createCodeChangePreview(previousCode, formatted) : "",
+          lineCount: formatted ? formatted.split("\n").length : 0,
+          __codeChange: changed ? { before: previousCode, after: formatted, sceneId: activeSceneIdRef.current, sceneName: sceneDocumentsRef.current.find((document) => document.id === activeSceneIdRef.current)?.name } : undefined,
+        };
       }
 
       if (name === "undo_code" || name === "redo_code") {
         const editor = codeEditor.current;
         if (!editor) throw new Error("代码编辑器尚未就绪");
+        const previousCode = editor.getValue();
         editor.trigger("ai-code-agent", name === "undo_code" ? "undo" : "redo", null);
         await waitWithSignal(0);
         const code = editor.getValue();
+        const changed = previousCode !== code;
         sourceCodeRef.current = code;
         setSourceCode(code);
-        setDirty(true);
-        return { lineCount: code ? code.split("\n").length : 0 };
+        if (changed) setDirty(true);
+        return {
+          changed,
+          diff: changed ? createCodeChangePreview(previousCode, code) : "",
+          lineCount: code ? code.split("\n").length : 0,
+          __codeChange: changed ? { before: previousCode, after: code, sceneId: activeSceneIdRef.current, sceneName: sceneDocumentsRef.current.find((document) => document.id === activeSceneIdRef.current)?.name } : undefined,
+        };
       }
 
       if (name === "run_project") {
@@ -4461,19 +5455,44 @@ export default function App() {
       }
 
       if (name === "render_manim") {
-        await renderManim();
+        const outputType = args.outputType === undefined ? manimRenderConfig.outputType : args.outputType;
+        if (outputType !== "video" && outputType !== "image") throw new Error("outputType 必须是 video 或 image");
+        if (args.transparentBackground !== undefined && typeof args.transparentBackground !== "boolean") throw new Error("transparentBackground 必须是布尔值");
+        const transparentBackground = typeof args.transparentBackground === "boolean" ? args.transparentBackground : manimRenderConfig.transparentBackground;
+        const hasImageWidth = args.imageWidth !== undefined;
+        const hasImageHeight = args.imageHeight !== undefined;
+        if (hasImageWidth !== hasImageHeight) throw new Error("自定义图片尺寸必须同时提供 imageWidth 和 imageHeight");
+        if (hasImageWidth && (typeof args.imageWidth !== "number" || !Number.isInteger(args.imageWidth) || args.imageWidth < 64 || args.imageWidth > 8192 || typeof args.imageHeight !== "number" || !Number.isInteger(args.imageHeight) || args.imageHeight < 64 || args.imageHeight > 8192)) throw new Error("图片宽高必须是 64 到 8192 之间的整数");
+        const imageWidth = hasImageWidth ? args.imageWidth as number : undefined;
+        const imageHeight = hasImageHeight ? args.imageHeight as number : undefined;
+        if (args.imageCaptureMode !== undefined && args.imageCaptureMode !== "final" && args.imageCaptureMode !== "animation") throw new Error("imageCaptureMode 必须是 final 或 animation");
+        if (args.imageAnimationStep !== undefined && (typeof args.imageAnimationStep !== "number" || !Number.isInteger(args.imageAnimationStep) || args.imageAnimationStep < 1 || args.imageAnimationStep > 10_000)) throw new Error("imageAnimationStep 必须是 1 到 10000 之间的整数");
+        const imageAnimationStep = typeof args.imageAnimationStep === "number" ? args.imageAnimationStep : manimRenderConfig.imageAnimationStep;
+        const imageCaptureMode = args.imageCaptureMode === "final" || args.imageCaptureMode === "animation" ? args.imageCaptureMode : args.imageAnimationStep !== undefined ? "animation" : manimRenderConfig.imageCaptureMode;
+        await renderManim({ outputType, transparentBackground, imageWidth, imageHeight, imageCaptureMode, imageAnimationStep });
         const started = manimTaskId.current !== null || manimRenderAttempt.current !== null;
         if (!started) throw new Error(problemsRef.current.at(-1)?.message || "Manim 渲染未能启动");
-        return { started, next: "使用 wait 后调用 get_execution_state" };
+        return { started, outputType, ...(outputType === "image" ? { transparentBackground, imageCaptureMode, ...(imageCaptureMode === "animation" ? { imageAnimationStep } : {}), ...(imageWidth && imageHeight ? { imageWidth, imageHeight } : {}) } : {}), next: "使用 wait 后调用 get_execution_state" };
       }
 
       if (name === "get_execution_state") {
+        const runningPython = taskId.current !== null;
+        const rendering = manimTaskId.current !== null || manimRenderAttempt.current !== null;
+        const pythonElapsedSeconds = runningPython && pythonRunStartedAt.current
+          ? Math.max(0, Math.floor((Date.now() - pythonRunStartedAt.current) / 1000))
+          : pythonRunElapsed.current;
+        const renderElapsedSeconds = rendering && manimRenderStartedAt.current
+          ? Math.max(0, Math.floor((Date.now() - manimRenderStartedAt.current) / 1000))
+          : manimRenderElapsedRef.current;
         return {
-          running: taskId.current !== null,
-          rendering: manimTaskId.current !== null || manimRenderAttempt.current !== null,
+          running: runningPython,
+          rendering,
+          pythonElapsedSeconds,
+          renderElapsedSeconds,
+          renderProgress: manimRenderProgressRef.current,
           output: outputRef.current.slice(-120).map(({ stream, data }) => ({ stream, data })),
           problems: problemsRef.current.map(({ kind, line, message, suggestion }) => ({ kind, line, message, suggestion })),
-          video: manimVideoRef.current ? { scene: manimVideoRef.current.scene, path: manimVideoRef.current.path } : null,
+          renderOutput: manimRenderOutputRef.current ? { type: manimRenderOutputRef.current.type, scene: manimRenderOutputRef.current.scene, path: manimRenderOutputRef.current.path, transparentBackground: manimRenderOutputRef.current.transparentBackground } : null,
         };
       }
 
@@ -4505,7 +5524,12 @@ export default function App() {
       const result = await runAiCodeAgent({
         prompt,
         history,
+        agentMode,
+        initialPlan,
         onActivity: reportActivity,
+        onProgress: reportProgressWithCheckpoint,
+        permissionMode,
+        onPermissionRequest,
         signal,
         host: {
           executeTool,
@@ -4516,8 +5540,12 @@ export default function App() {
             return {
               project: { name: projectName, path: projectPathRef.current, dirty: projectDirty, scene: { id: activeSceneIdRef.current, name: document?.name || "当前场景" }, sceneCount: sceneDocumentsRef.current.length },
               code: sourceCodeRef.current,
+              lineCount: sourceCodeRef.current ? sourceCodeRef.current.split("\n").length : 0,
+              pythonEnvironment: pythonEnvironment ? { version: pythonEnvironment.version, path: pythonEnvironment.path } : null,
               running: taskId.current !== null,
               rendering: manimTaskId.current !== null || manimRenderAttempt.current !== null,
+              manimOutput: { type: manimRenderConfig.outputType, transparentBackground: manimRenderConfig.transparentBackground, imageSizeMode: manimRenderConfig.imageSizeMode, imageWidth: manimRenderConfig.imageWidth, imageHeight: manimRenderConfig.imageHeight, imageCaptureMode: manimRenderConfig.imageCaptureMode, imageAnimationStep: manimRenderConfig.imageAnimationStep },
+              renderOutput: manimRenderOutputRef.current ? { type: manimRenderOutputRef.current.type, scene: manimRenderOutputRef.current.scene, path: manimRenderOutputRef.current.path, transparentBackground: manimRenderOutputRef.current.transparentBackground } : null,
             };
           },
           getLineCount: () => sourceCodeRef.current ? sourceCodeRef.current.split("\n").length : 0,
@@ -4542,8 +5570,8 @@ export default function App() {
       };
     } catch (error) {
       setSceneAiStatuses((statuses) => ({ ...statuses, [activeSceneIdRef.current || agentSceneId]: "error" }));
-      const restored = taskBeforeDocuments.map((document) => ({ ...document }));
-      const active = restored.find((document) => document.id === taskBeforeActiveSceneId) ?? restored[0];
+      const restored = checkpointDocuments.map((document) => ({ ...document }));
+      const active = restored.find((document) => document.id === checkpointActiveSceneId) ?? restored[0];
       if (active) switchSceneConsoleState(activeSceneIdRef.current, active.id);
       sceneDocumentsRef.current = restored;
       activeSceneIdRef.current = active?.id || "";
@@ -4551,7 +5579,7 @@ export default function App() {
       setSceneDocuments(restored);
       setActiveSceneId(active?.id || "");
       setSourceCode(active?.code || "");
-      setDirty(dirty);
+      setDirty(checkpointDirty);
       if (active) updateManimRenderConfig({ selectedScene: extractManimSceneNames(active.code)[0] || active.name });
       throw error;
     } finally {
@@ -4560,7 +5588,7 @@ export default function App() {
         setAiAgentBusy(false);
       }, 0);
     }
-  }, [dirty, formatCurrentPythonCode, projectName, pythonEnvironment, renderManim, runCode, stopCode, stopManimRender, ttsConfig, voiceoverRoles, writeProject]);
+  }, [dirty, formatCurrentPythonCode, manimRenderConfig.imageAnimationStep, manimRenderConfig.imageCaptureMode, manimRenderConfig.imageHeight, manimRenderConfig.imageSizeMode, manimRenderConfig.imageWidth, manimRenderConfig.outputType, manimRenderConfig.transparentBackground, projectName, pythonEnvironment, renderManim, runCode, stopCode, stopManimRender, ttsConfig, voiceoverRoles, writeProject]);
 
   const applyAiTaskSnapshot = useCallback((change: AiTaskChangeSnapshot, direction: "undo" | "apply") => {
     if (aiAgentSceneIdRef.current) return false;
@@ -4568,7 +5596,10 @@ export default function App() {
     const replacement = direction === "undo" ? change.before : change.after;
     const current = persistActiveSceneDocument();
     if (JSON.stringify(current) !== JSON.stringify(expected)) {
-      Blockly.dialog.alert(direction === "undo" ? "任务完成后场景代码又发生了变化，无法整体撤销。" : "撤销后场景代码又发生了变化，无法重新应用。");
+      showBlockingAlert({
+        title: direction === "undo" ? "无法撤销任务" : "无法重新应用任务",
+        message: direction === "undo" ? "任务完成后场景代码又发生了变化，无法整体撤销。" : "撤销后场景代码又发生了变化，无法重新应用。",
+      });
       return false;
     }
     const documents = replacement.map((document) => ({ ...document }));
@@ -4584,7 +5615,7 @@ export default function App() {
     setDirty(true);
     updateManimRenderConfig({ selectedScene: extractManimSceneNames(active.code)[0] || active.name });
     return true;
-  }, []);
+  }, [showBlockingAlert]);
 
   const revealAiCodeChange = useCallback((diff: string, requestedLine?: number) => {
     const editor = codeEditor.current;
@@ -4639,12 +5670,112 @@ export default function App() {
     editor.focus();
   }, [clearAiCodeChange]);
 
+  const revealAiProblem = useCallback((line: number) => {
+    if (!Number.isInteger(line) || line < 1) return;
+    codeEditor.current?.revealLineInCenter(line);
+    codeEditor.current?.setPosition({ lineNumber: line, column: 1 });
+    codeEditor.current?.focus();
+  }, []);
+
+  const selectedEditorText = () => {
+    const editor = codeEditor.current;
+    const model = editor?.getModel();
+    if (!editor || !model) return "";
+    return (editor.getSelections() || []).filter((selection) => !selection.isEmpty()).map((selection) => model.getValueInRange(selection)).join("\n");
+  };
+  const readSystemClipboardText = async () => {
+    try {
+      return await readClipboardText();
+    } catch (desktopError) {
+      if (navigator.clipboard?.readText) return navigator.clipboard.readText();
+      throw desktopError;
+    }
+  };
+  const writeSystemClipboardText = async (text: string) => {
+    try {
+      await writeClipboardText(text);
+    } catch (desktopError) {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return; }
+      throw desktopError;
+    }
+  };
+  const reportEditorClipboardError = (action: string, error: unknown) => {
+    const message = `${action}失败：${String(error)}`;
+    setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
+    openConsolePanel("output");
+  };
+  const copyCodeEditorSelection = async () => {
+    const text = selectedEditorText();
+    if (!text) return;
+    try { await writeSystemClipboardText(text); }
+    catch (error) { reportEditorClipboardError("复制", error); }
+  };
+  const cutCodeEditorSelection = async () => {
+    const editor = codeEditor.current;
+    const selections = editor?.getSelections()?.filter((selection) => !selection.isEmpty()) || [];
+    const text = selectedEditorText();
+    if (!editor || !selections.length || !text) return;
+    try {
+      await writeSystemClipboardText(text);
+      editor.pushUndoStop();
+      editor.executeEdits("visual-python-context-menu", selections.map((range) => ({ range, text: "", forceMoveMarkers: true })));
+      editor.pushUndoStop();
+    } catch (error) {
+      reportEditorClipboardError("剪切", error);
+    } finally {
+      editor.focus();
+    }
+  };
+  const pasteIntoCodeEditor = async () => {
+    const editor = codeEditor.current;
+    if (!editor) return;
+    try {
+      const text = await readSystemClipboardText();
+      editor.focus();
+      if (text) editor.trigger("visual-python-context-menu", "paste", { text, pasteOnNewLine: false, multicursorText: null, mode: null });
+    } catch (error) {
+      reportEditorClipboardError("粘贴", error);
+    } finally {
+      editor.focus();
+    }
+  };
+  const openCodeEditorContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (workspaceMode !== "code") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const hasSelection = Boolean(codeEditor.current?.getSelections()?.some((selection) => !selection.isEmpty()));
+    const menuWidth = 220;
+    const estimatedMenuHeight = 290;
+    setConsoleContextMenu(null);
+    setCodeEditorContextMenu({
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - estimatedMenuHeight - 8)),
+      hasSelection,
+    });
+  };
+  const runCodeEditorContextAction = (action: () => void | Promise<void>) => {
+    setCodeEditorContextMenu(null);
+    void action();
+  };
+  const handleCodeEditorContextMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!codeEditorContextMenuRef.current || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const items = [...codeEditorContextMenuRef.current.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+    if (!items.length) return;
+    event.preventDefault();
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex = event.key === "Home" ? 0
+      : event.key === "End" ? items.length - 1
+      : event.key === "ArrowDown" ? (currentIndex + 1 + items.length) % items.length
+      : (currentIndex - 1 + items.length) % items.length;
+    items[nextIndex]?.focus();
+  };
+
   const undoAiCodeChange = useCallback((change: AiCodeChangeSnapshot): boolean => {
     if (change.sceneId && change.sceneId !== activeSceneIdRef.current) {
       const documents = persistActiveSceneDocument();
       const target = documents.find((document) => document.id === change.sceneId);
       if (!target || target.code !== change.after) {
-        Blockly.dialog.alert(`场景“${change.sceneName || change.sceneId}”在这次 AI 修改后又发生了变化，无法直接撤销此记录。`);
+        showBlockingAlert({ title: "无法撤销修改", message: `场景“${change.sceneName || change.sceneId}”在这次 AI 修改后又发生了变化，无法直接撤销此记录。` });
         return false;
       }
       const updated = { ...target, code: change.before, name: sceneDocumentName(change.before, target.name) };
@@ -4663,7 +5794,11 @@ export default function App() {
     const model = editor?.getModel();
     if (!editor || !model) return false;
     if (model.getValue() !== change.after) {
-      Blockly.dialog.alert("当前代码在这次 AI 修改后又发生了变化。为避免覆盖后续修改，无法直接撤销此记录。请使用编辑器的撤销功能逐步回退。");
+      showBlockingAlert({
+        title: "无法撤销修改",
+        message: "当前代码在这次 AI 修改后又发生了变化。为避免覆盖后续修改，无法直接撤销此记录。",
+        detail: "请使用编辑器的撤销功能逐步回退。",
+      });
       return false;
     }
     clearAiCodeChange();
@@ -4680,14 +5815,14 @@ export default function App() {
     setDirty(true);
     editor.focus();
     return true;
-  }, [clearAiCodeChange]);
+  }, [clearAiCodeChange, showBlockingAlert]);
 
   const applyAiCodeChange = useCallback((change: AiCodeChangeSnapshot): boolean => {
     if (change.sceneId && change.sceneId !== activeSceneIdRef.current) {
       const documents = persistActiveSceneDocument();
       const target = documents.find((document) => document.id === change.sceneId);
       if (!target || target.code !== change.before) {
-        Blockly.dialog.alert(`场景“${change.sceneName || change.sceneId}”在撤销后又发生了变化，无法重新应用此记录。`);
+        showBlockingAlert({ title: "无法重新应用修改", message: `场景“${change.sceneName || change.sceneId}”在撤销后又发生了变化，无法重新应用此记录。` });
         return false;
       }
       const updated = { ...target, code: change.after, name: sceneDocumentName(change.after, target.name) };
@@ -4706,7 +5841,7 @@ export default function App() {
     const model = editor?.getModel();
     if (!editor || !model) return false;
     if (model.getValue() !== change.before) {
-      Blockly.dialog.alert("当前代码在撤销后又发生了变化。为避免覆盖后续修改，无法重新应用此记录。");
+      showBlockingAlert({ title: "无法重新应用修改", message: "当前代码在撤销后又发生了变化。为避免覆盖后续修改，无法重新应用此记录。" });
       return false;
     }
     clearAiCodeChange();
@@ -4723,9 +5858,9 @@ export default function App() {
     setDirty(true);
     editor.focus();
     return true;
-  }, [clearAiCodeChange]);
+  }, [clearAiCodeChange, showBlockingAlert]);
   const startAiPanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!aiAssistantOpen) return;
+    if (!aiAssistantVisible) return;
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = aiPanelWidth;
@@ -4740,7 +5875,7 @@ export default function App() {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
-  }, [aiAssistantOpen, aiPanelWidth]);
+  }, [aiAssistantVisible, aiPanelWidth]);
 
   const startBottomPanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!effectiveBottomPanelOpen) return;
@@ -4796,6 +5931,14 @@ export default function App() {
     if (page === "plugins") setPluginsOpen(true);
     else setResourcesOpen(true);
   };
+  const openManimGuide = async () => {
+    setHelpMenuOpen(false);
+    try {
+      await invoke("open_manim_guide");
+    } catch (error) {
+      showBlockingAlert({ title: "无法打开使用说明", message: "Manim 使用说明未能通过系统浏览器打开。", detail: String(error) });
+    }
+  };
   const renderManagementNavigation = () => <aside className="management-navigation" aria-label="管理中心导航">
     <header><span className="management-brand"><Settings size={18}/></span><span><strong>管理中心</strong><small>Visual Python</small></span></header>
     <div className="management-navigation-scroll">
@@ -4808,23 +5951,28 @@ export default function App() {
 
   return <main className="app-shell">
     <header className="topbar" data-tauri-drag-region onContextMenu={(event) => { if (!(event.target as HTMLElement).closest("input")) event.preventDefault(); }} onPointerDownCapture={prepareNativeWindowDrag} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest("button,input")) void appWindow.toggleMaximize(); }}>
-      <div className="brand" data-tauri-drag-region><span className="brand-mark" data-tauri-drag-region><Braces size={17} data-tauri-drag-region/></span><strong data-tauri-drag-region>Visual Python</strong><div className="top-menu-group" data-tauri-drag-region ref={topMenuRef}><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => { setProjectMenuOpen((open) => !open); setExampleMenuOpen(false); setShortcutMenuOpen(false); }}>工程 <ChevronDown size={13}/></button>{projectMenuOpen && <div className="project-menu project-main-menu">
+      <div className="brand" data-tauri-drag-region><span className="brand-mark" data-tauri-drag-region><Braces size={17} data-tauri-drag-region/></span><strong data-tauri-drag-region>Visual Python</strong><div className="top-menu-group" data-tauri-drag-region ref={topMenuRef}><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => { setProjectMenuOpen((open) => !open); setExampleMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); }}>工程 <ChevronDown size={13}/></button>{projectMenuOpen && <div className="project-menu project-main-menu">
         <button onClick={newProject}><FilePlus2 size={15}/><span>新建工程</span><kbd>Ctrl+N</kbd></button>
         <button onClick={() => { setProjectMenuOpen(false); void openProject(); }}><FolderOpen size={15}/><span>打开工程</span><kbd>Ctrl+O</kbd></button>
         <button onClick={() => { setProjectMenuOpen(false); void saveProject(); }}><Save size={15}/><span>保存</span><kbd>Ctrl+S</kbd></button>
         <button onClick={() => { setProjectMenuOpen(false); void saveProjectAs(); }}><SaveAll size={15}/><span>另存为</span><kbd>Ctrl+Shift+S</kbd></button>
         <button onClick={() => { setProjectMenuOpen(false); void exportPython(); }}><Download size={15}/><span>导出 Python</span></button>
         <div className="project-menu-category recent-projects-category"><button aria-haspopup="menu"><FileCode2 size={15}/><span>最近工程</span><ChevronRight size={14}/></button><div className="project-menu project-submenu recent-projects-menu" role="menu" aria-label="最近工程">{recentProjects.length > 0 ? recentProjects.map((item) => <button className="recent-project" role="menuitem" key={item.path} title={item.path} onClick={() => { setProjectMenuOpen(false); void loadProject(item.path); }}><FileCode2 size={15}/><span><strong>{item.name}</strong><small>{item.path}</small></span></button>) : <button className="recent-project-empty" role="menuitem" disabled><FileCode2 size={15}/><span>暂无最近工程</span></button>}</div></div>
-      </div>}</div><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={exampleMenuOpen} onClick={() => { setExampleMenuOpen((open) => !open); setProjectMenuOpen(false); setShortcutMenuOpen(false); }}>示例 <ChevronDown size={13}/></button>{exampleMenuOpen && <div className="project-menu example-menu">
+      </div>}</div><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={exampleMenuOpen} onClick={() => { setExampleMenuOpen((open) => !open); setProjectMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); }}>示例 <ChevronDown size={13}/></button>{exampleMenuOpen && <div className="project-menu example-menu">
         <div className="example-category"><button className="example-category-trigger"><BookOpen size={15}/><span>Python 基础</span><ChevronRight size={14}/></button><div className="project-menu example-submenu grouped-example-submenu">{pythonDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{pythonDifficultyLabels[difficulty]}</div>{pythonExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><BookOpen size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
         <div className="example-category"><button className="example-category-trigger"><Film size={15}/><span>Manim</span><ChevronRight size={14}/></button><div className="project-menu example-submenu manim-example-submenu">{manimDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{manimDifficultyLabels[difficulty]}</div>{manimExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><Film size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
       </div>}</div><div className="project-menu-wrap">
-        <button className="project-menu-trigger" aria-expanded={shortcutMenuOpen} disabled={workspaceMode !== "code"} onClick={() => { setShortcutMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); }}>编辑 <ChevronDown size={13}/></button>
+        <button className="project-menu-trigger" aria-expanded={shortcutMenuOpen} disabled={workspaceMode !== "code"} onClick={() => { setShortcutMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setHelpMenuOpen(false); }}>编辑 <ChevronDown size={13}/></button>
         {shortcutMenuOpen && <div className="project-menu shortcut-menu" role="menu" aria-label="编辑">
           <button role="menuitem" disabled={workspaceMode !== "code" || formattingCode} onClick={() => { setShortcutMenuOpen(false); void formatCurrentPythonCode(); }}><AlignLeft size={15}/><span>{formattingCode ? "正在格式化" : "格式化 Python 代码"}</span><kbd>Shift+Alt+F</kbd></button>
           <button role="menuitem" disabled={workspaceMode !== "code"} onClick={() => runCodeEditorAction("actions.find")}><Search size={15}/><span>查找</span><kbd>Ctrl+F</kbd></button>
           <button role="menuitem" disabled={workspaceMode !== "code"} onClick={() => runCodeEditorAction("editor.action.startFindReplaceAction")}><Replace size={15}/><span>查找并替换</span><kbd>Ctrl+H</kbd></button>
           <button role="menuitem" disabled={workspaceMode !== "code"} onClick={() => runCodeEditorAction("editor.action.gotoLine")}><ListOrdered size={15}/><span>跳转到行</span><kbd>Ctrl+G</kbd></button>
+        </div>}
+      </div><div className="project-menu-wrap">
+        <button className="project-menu-trigger" aria-expanded={helpMenuOpen} onClick={() => { setHelpMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setShortcutMenuOpen(false); }}>帮助 <ChevronDown size={13}/></button>
+        {helpMenuOpen && <div className="project-menu help-menu" role="menu" aria-label="帮助">
+          <button role="menuitem" onClick={() => void openManimGuide()}><BookOpen size={15}/><span>Manim 使用说明</span><ExternalLink size={13}/></button>
         </div>}
       </div></div></div>
       <div className="project-title" data-tauri-drag-region title={projectPath || "尚未保存"}><input value={projectNameDraft} onChange={(event) => setProjectNameDraft(projectFileBaseName(event.target.value))} onBlur={() => void commitProjectName()} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } else if (event.key === "Escape") { event.preventDefault(); cancelProjectNameCommit.current = true; setProjectNameDraft(projectFileBaseName(projectName)); event.currentTarget.blur(); } }} disabled={renamingProject} aria-label="工程文件名" title={renamingProject ? "正在重命名工程" : projectPath || "尚未保存"} spellCheck={false}/>{dirty ? <span className="dirty-dot" data-tauri-drag-region title="未保存"/> : <span className="saved-dot" data-tauri-drag-region title="已保存"/>}</div>
@@ -4848,16 +5996,16 @@ export default function App() {
         </div>
       </div>
     </header>
-    <section className={`workbench mode-${workspaceMode} ${aiAssistantOpen ? "ai-panel-open" : ""} ${effectiveBottomPanelOpen ? "" : "bottom-panel-collapsed"}`} style={{ "--right-panel-width": `${rightPanelWidth}px`, "--bottom-panel-height": `${bottomPanelHeight}px`, "--ai-panel-width": `${aiPanelWidth}px` } as CSSProperties}>
+    <section className={`workbench mode-${workspaceMode} ${aiAssistantVisible ? "ai-panel-open" : ""} ${effectiveBottomPanelOpen ? "" : "bottom-panel-collapsed"}`} style={{ "--right-panel-width": `${rightPanelWidth}px`, "--bottom-panel-height": `${bottomPanelHeight}px`, "--ai-panel-width": `${aiPanelWidth}px` } as CSSProperties}>
       <aside className="activity-rail" onContextMenu={(event) => event.preventDefault()}>
         <button className={`activity ${isBlockWorkspaceMode(workspaceMode) ? "active" : ""}`} title="切换到纯图形化" disabled={running || renderingManim} onClick={() => changeWorkspaceMode("visual")}><Blocks size={20}/></button>
-        <button className={`activity ${aiAssistantOpen ? "active" : ""}`} title={workspaceMode === "code" ? "AI 编程助手" : "AI 编程助手仅在纯代码模式可用"} aria-label="AI 编程助手" aria-pressed={aiAssistantOpen} disabled={workspaceMode !== "code"} onClick={() => setAiAssistantOpen((open) => !open)}><Sparkles size={20}/></button>
+        <button className={`activity ${aiAssistantVisible ? "active" : ""}`} title={workspaceMode === "code" ? "AI 编程助手" : "AI 编程助手仅在纯代码模式可用"} aria-label="AI 编程助手" aria-pressed={aiAssistantVisible} disabled={workspaceMode !== "code"} onClick={() => setAiAssistantOpen((open) => !open)}><Sparkles size={20}/></button>
         <div className="rail-spacer"/><button className={`activity ${settingsOpen || manimRenderSettingsOpen || pluginsOpen || resourcesOpen ? "active" : ""}`} title="设置" onClick={() => openApplicationSettings("appearance")}><Settings size={20}/></button>
       </aside>
       <section className="workspace-shell">
         <div className="workspace-content">
       <section className="block-panel">
-        <div className="block-search" style={{ width: blockToolboxWidth || 172 }} onPointerDown={() => {
+         <div className="block-search" style={{ width: blockToolboxWidth || 172 }} onPointerDown={() => {
           suppressToolboxAutoHide.current = true;
           requestAnimationFrame(() => { suppressToolboxAutoHide.current = false; });
         }}>
@@ -4865,9 +6013,13 @@ export default function App() {
           <input value={blockSearchQuery} onChange={(event) => showBlockSearchResults(event.target.value)} onKeyDown={(event) => {
             if (event.key === "Escape") { event.preventDefault(); closeBlockSearch(); }
           }} placeholder="搜索积木" aria-label="搜索积木" spellCheck={false}/>
-          {blockSearchQuery && <button onClick={closeBlockSearch} title="清空搜索" aria-label="清空搜索"><X size={13}/></button>}
-        </div>
-        <div className="block-outline-wrap" ref={blockOutlineRef}>
+           {blockSearchQuery && <button onClick={closeBlockSearch} title="清空搜索" aria-label="清空搜索"><X size={13}/></button>}
+         </div>
+         <div className="block-input-layout-switcher" role="group" aria-label="积木输入布局">
+           <button type="button" className={blockInputLayout === "inline" ? "selected" : ""} aria-pressed={blockInputLayout === "inline"} onClick={() => changeBlockInputLayout("inline")} title="将所有积木的输入排列在同一行">单行</button>
+           <button type="button" className={blockInputLayout === "external" ? "selected" : ""} aria-pressed={blockInputLayout === "external"} onClick={() => changeBlockInputLayout("external")} title="仅将超长积木的输入排列到积木下方">自动</button>
+         </div>
+         <div className="block-outline-wrap" ref={blockOutlineRef}>
           <button ref={blockOutlineTriggerRef} className="block-outline-trigger" disabled={!blockOutline.length} aria-label="积木大纲" title="积木大纲" aria-haspopup="dialog" aria-expanded={blockOutlineOpen} onClick={() => setBlockOutlineOpen((open) => !open)}><ListTree size={16}/></button>
           {blockOutlineOpen && <div className="block-outline-panel" role="dialog" aria-label="积木大纲">
             <header><div className="block-outline-heading"><strong>积木大纲</strong><span>{blockOutline.reduce((total, node) => total + node.blockCount, 0)} 个积木</span></div><div className="block-outline-view-switch" role="tablist" aria-label="大纲显示模式"><button role="tab" aria-selected={blockOutlineMode === "structure"} className={blockOutlineMode === "structure" ? "selected" : ""} onClick={() => setBlockOutlineMode("structure")}>结构</button><button role="tab" aria-selected={blockOutlineMode === "all"} className={blockOutlineMode === "all" ? "selected" : ""} onClick={() => setBlockOutlineMode("all")}>全部</button></div></header>
@@ -4880,29 +6032,40 @@ export default function App() {
       <div className="panel-resizer" onPointerDown={startRightPanelResize} role="separator" aria-label="调整辅助面板宽度" aria-orientation="vertical"/>
       <aside className="right-panel">
         <div className="panel-head"><div className="code-scene-tabs" role="tablist" aria-label="Python 场景">{workspaceMode === "code" ? sceneDocuments.map((scene) => { const aiStatus = sceneAiStatuses[scene.id]; const aiStatusLabel = aiStatus ? ({ working: "AI 正在处理", changed: "AI 已修改", error: "AI 处理出错", validated: "AI 已校验", rendered: "AI 已检查渲染" } as const)[aiStatus] : ""; return <div key={scene.id} className={`scene-tab ${scene.id === activeSceneId ? "active" : ""}`} role="tab" aria-selected={scene.id === activeSceneId}><button className="scene-tab-label" onClick={() => focusManimSceneTab(scene.id)} title={`打开场景 ${scene.name}`}><Film size={13}/><span>{scene.name}</span>{aiStatus && <i className={`scene-ai-status ${aiStatus}`} title={aiStatusLabel} aria-label={aiStatusLabel}/>}</button><button className="scene-tab-close" onClick={() => closeManimSceneTab(scene.id)} title={`删除场景 ${scene.name}`} aria-label={`删除场景 ${scene.name}`}><X size={12}/></button></div>; }) : <div className="panel-tab active"><Braces size={14}/> Python</div>}{workspaceMode === "code" && <button className="scene-tab-add" onClick={addManimSceneTab} title="新建独立 Manim 场景" aria-label="新建独立 Manim 场景"><Plus size={14}/></button>}</div><div className="panel-head-actions"><span className="read-only">{workspaceMode === "code" ? "独立场景" : "实时生成"}</span>{workspaceMode === "code" && <div className="code-outline-wrap" ref={codeOutlineRef}><button ref={codeOutlineTriggerRef} className="code-outline-trigger" disabled={!codeOutline.length} aria-label="代码结构大纲" title="代码结构大纲" aria-haspopup="menu" aria-expanded={codeOutlineOpen} onClick={() => setCodeOutlineOpen((open) => !open)}><ListTree size={15}/></button>{codeOutlineOpen && <div className="code-outline-menu" role="menu" aria-label="代码结构">{codeOutline.map((item) => <button key={`${item.kind}-${item.lineNumber}-${item.label}`} role="menuitem" onClick={() => focusCodeOutlineItem(item)} title={`第 ${item.lineNumber} 行`}><span className={`code-outline-icon outline-${item.kind}`}>{item.kind === "function" ? <Braces size={14}/> : <Box size={14}/>}</span><span className="code-outline-label"><strong>{item.label}</strong><small>{item.kind === "function" ? item.signature : `class ${item.label}`}</small></span><span className="code-outline-line">{item.lineNumber}</span></button>)}</div>}</div>}</div></div>
-        <div className="editor-wrap"><Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `scene-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense></div>
+        <div className="editor-wrap" onContextMenu={openCodeEditorContextMenu}><Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `scene-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", contextmenu: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense></div>
       </aside>
         </div>
         <div className={`console-resizer ${!effectiveBottomPanelOpen ? "collapsed" : ""}`} onPointerDown={startBottomPanelResize} role="separator" aria-label="调整输出面板高度" aria-orientation="horizontal" aria-valuemin={160} aria-valuemax={600} aria-valuenow={bottomPanelHeight}/>
         <div ref={consolePanelRef} className={`console-panel ${effectiveBottomPanelOpen ? "" : "collapsed"}`} onContextMenu={openConsoleContextMenu}>
-          <div className="console-tabs"><button className={activePanel === "output" ? "active" : ""} onClick={() => openConsolePanel("output")}><Terminal size={13}/> 输出</button><button className={activePanel === "problems" ? "active" : ""} onClick={() => openConsolePanel("problems")}>问题 <span className="count">{displayedProblems.length}</span></button><button className={activePanel === "video" ? "active" : ""} onClick={() => openConsolePanel("video")}><Film size={13}/> 视频</button><span className="console-spacer"/><button className="clear-output" onClick={clearConsole} title="清空输出" aria-label="清空输出"><Trash2 size={13}/></button><button className="panel-collapse" onClick={() => setBottomPanelOpen((open) => !open)} title={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"} aria-label={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"}>{effectiveBottomPanelOpen ? <PanelBottomClose size={14}/> : <PanelBottomOpen size={14}/>}</button></div>
+          <div className="console-tabs"><button className={activePanel === "output" ? "active" : ""} onClick={() => openConsolePanel("output")}><Terminal size={13}/> 输出</button><button className={activePanel === "problems" ? "active" : ""} onClick={() => openConsolePanel("problems")}>问题 <span className="count">{displayedProblems.length}</span></button><button className={activePanel === "preview" ? "active" : ""} onClick={() => openConsolePanel("preview")}>{manimRenderOutput?.type === "image" ? <ImageIcon size={13}/> : <Film size={13}/>} 预览</button><span className="console-spacer"/><button className="clear-output" onClick={clearConsole} title="清空输出" aria-label="清空输出"><Trash2 size={13}/></button><button className="panel-collapse" onClick={() => setBottomPanelOpen((open) => !open)} title={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"} aria-label={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"}>{effectiveBottomPanelOpen ? <PanelBottomClose size={14}/> : <PanelBottomOpen size={14}/>}</button></div>
           <div className={`console-content ${renderingManim && manimRenderProgress ? "has-manim-render-status" : ""}`}>
             {renderingManim && manimRenderProgress && <div className={`manim-render-status phase-${manimRenderProgress.phase}`} role="progressbar" aria-label={`${manimRenderProgress.scene} ${manimRenderProgress.label}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={manimRenderProgress.percent}>
               <div className="manim-render-status-text"><Film size={13}/><strong>{manimRenderProgress.scene}</strong><span>{manimRenderProgress.label}</span></div>
               <time>{formatRenderElapsed(manimRenderElapsed)}</time>
               <div className={`manim-render-progress-track ${manimRenderProgress.percent === undefined ? "indeterminate" : ""}`}><span style={manimRenderProgress.percent === undefined ? undefined : { width: `${manimRenderProgress.percent}%` }}/></div>
             </div>}
-            {activePanel === "output" ? <div className="console-scroll"><pre>{output.map((entry) => <span key={entry.id} className={`output-${entry.stream}`}>{entry.data}</span>)}</pre></div> : activePanel === "problems" ? <div className="problem-list">{displayedProblems.length ? displayedProblems.map((problem) => { const resourceProblem = problem.kind === "resource"; const locatable = resourceProblem || Boolean(problem.blockId || (workspaceMode === "code" && problem.line > 0)); const problemTypeLabel = { context: "积木语法问题", syntax: "Python 语法问题", runtime: "运行时错误", timeout: "执行超时", environment: "Python 环境问题", plugin: "插件问题", resource: "工程资源问题" }[problem.kind]; return <div key={problem.id} data-problem-id={String(problem.id)} className={`problem-${problem.kind} ${locatable ? "problem-locatable" : ""}`} onClick={() => resourceProblem ? setResourcesOpen(true) : locatable && focusProblem(problem)} title={resourceProblem ? "点击打开工程资源" : problem.blockId ? "点击定位到积木" : locatable ? "点击定位到代码" : undefined}><span className="problem-badge" title={problemTypeLabel} aria-label={problemTypeLabel}>{{ context: <Braces size={11}/>, syntax: <Braces size={11}/>, runtime: <Terminal size={11}/>, timeout: <RefreshCw size={11}/>, environment: <Settings size={11}/>, plugin: <Plug size={11}/>, resource: <Box size={11}/> }[problem.kind]}</span><span><strong>{problem.message}</strong>{problem.suggestion && <em>{problem.suggestion}</em>}<small>{resourceProblem ? "工程资源 · 点击打开资源面板" : problem.blockId ? problem.kind === "context" ? "编辑期语法检查 · 点击定位到积木" : "已定位到相关积木" : problem.line ? `Python 第 ${problem.line} 行${workspaceMode === "code" ? " · 点击定位" : ""}` : { context: "编辑期语法检查", syntax: "语法检查", runtime: "运行时错误", timeout: "执行超时", environment: "Python 环境", plugin: "插件依赖", resource: "工程资源" }[problem.kind]}</small></span></div>; }) : <div className="no-problems">没有检测到问题。</div>}</div> : <div className="video-preview-panel">{manimVideo ? <><div className="video-preview-actions"><button onClick={() => void openSystemVideo()} title="使用本地播放器打开"><ExternalLink size={14}/></button><button onClick={() => void revealVideoInFolder()} title="打开所在文件夹"><FolderOpen size={14}/></button></div><video key={manimVideo.url} src={manimVideo.url} controls/></> : <div className="empty-video-preview"><Film size={24}/><strong>暂无渲染视频</strong><span>渲染 Manim 场景后会在这里预览。</span></div>}</div>}
+            {activePanel === "output" ? <div className="console-scroll"><pre>{output.map((entry) => <span key={entry.id} className={`output-${entry.stream}`}>{entry.data}</span>)}</pre></div> : activePanel === "problems" ? <div className="problem-list">{displayedProblems.length ? displayedProblems.map((problem) => { const resourceProblem = problem.kind === "resource"; const locatable = resourceProblem || Boolean(problem.blockId || (workspaceMode === "code" && problem.line > 0)); const problemTypeLabel = { context: "积木语法问题", syntax: "Python 语法问题", runtime: "运行时错误", timeout: "执行超时", environment: "Python 环境问题", plugin: "插件问题", resource: "工程资源问题" }[problem.kind]; return <div key={problem.id} data-problem-id={String(problem.id)} className={`problem-${problem.kind} ${locatable ? "problem-locatable" : ""}`} onClick={() => resourceProblem ? setResourcesOpen(true) : locatable && focusProblem(problem)} title={resourceProblem ? "点击打开工程资源" : problem.blockId ? "点击定位到积木" : locatable ? "点击定位到代码" : undefined}><span className="problem-badge" title={problemTypeLabel} aria-label={problemTypeLabel}>{{ context: <Braces size={11}/>, syntax: <Braces size={11}/>, runtime: <Terminal size={11}/>, timeout: <RefreshCw size={11}/>, environment: <Settings size={11}/>, plugin: <Plug size={11}/>, resource: <Box size={11}/> }[problem.kind]}</span><span><strong>{problem.message}</strong>{problem.suggestion && <em>{problem.suggestion}</em>}<small>{resourceProblem ? "工程资源 · 点击打开资源面板" : problem.blockId ? problem.kind === "context" ? "编辑期语法检查 · 点击定位到积木" : "已定位到相关积木" : problem.line ? `Python 第 ${problem.line} 行${workspaceMode === "code" ? " · 点击定位" : ""}` : { context: "编辑期语法检查", syntax: "语法检查", runtime: "运行时错误", timeout: "执行超时", environment: "Python 环境", plugin: "插件依赖", resource: "工程资源" }[problem.kind]}</small></span></div>; }) : <div className="no-problems">没有检测到问题。</div>}</div> : <div className={`video-preview-panel ${manimRenderOutput?.type === "image" && manimRenderOutput.transparentBackground ? "transparent-image" : ""}`}>{manimRenderOutput ? <><div className="video-preview-actions"><button onClick={() => void openSystemRenderOutput()} title={manimRenderOutput.type === "image" ? "使用本地图片查看器打开" : "使用本地播放器打开"}><ExternalLink size={14}/></button><button onClick={() => void revealRenderOutputInFolder()} title="打开所在文件夹"><FolderOpen size={14}/></button></div>{manimRenderOutput.type === "image" ? <img key={manimRenderOutput.url} src={manimRenderOutput.url} alt={`${manimRenderOutput.scene} 渲染结果`}/> : <video key={manimRenderOutput.url} src={manimRenderOutput.url} controls/>}</> : <div className="empty-video-preview"><ImageIcon size={24}/><strong>暂无渲染结果</strong><span>渲染 Manim 视频或图片后会在这里预览。</span></div>}</div>}
             {activePanel === "output" && <div className="stdin-row"><span className="stdin-prompt">›</span><input value={stdinValue} onChange={(event) => setStdinValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void sendInput(); }} placeholder={running ? "输入内容并按 Enter" : "程序运行时可输入"} disabled={!running}/><button onClick={sendInput} disabled={!running || !stdinValue.length} title="发送输入"><Send size={14}/></button></div>}
           </div>
         </div>
       </section>
-      <div className={`ai-panel-resizer ${aiAssistantOpen ? "" : "collapsed"}`} onPointerDown={startAiPanelResize} role="separator" aria-label="调整 AI 智能体宽度" aria-orientation="vertical" aria-valuemin={340} aria-valuemax={520} aria-valuenow={aiPanelWidth}/>
-      <aside className={`ai-drawer ${aiAssistantOpen ? "open" : ""}`} aria-hidden={!aiAssistantOpen}>
-        <AiAssistantPanel key={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} conversationScope={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} lineCount={sourceCode ? sourceCode.split("\n").length : 0} sceneName={sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前场景"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onUndoCodeChange={undoAiCodeChange} onApplyCodeChange={applyAiCodeChange} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")}/>
+      <div className={`ai-panel-resizer ${aiAssistantVisible ? "" : "collapsed"}`} onPointerDown={startAiPanelResize} role="separator" aria-label="调整 AI 智能体宽度" aria-orientation="vertical" aria-valuemin={340} aria-valuemax={520} aria-valuenow={aiPanelWidth}/>
+      <aside className={`ai-drawer ${aiAssistantVisible ? "open" : ""}`} aria-hidden={!aiAssistantVisible}>
+        <AiAssistantPanel key={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} conversationScope={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} lineCount={sourceCode ? sourceCode.split("\n").length : 0} sceneName={sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前场景"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onRevealProblem={revealAiProblem} onUndoCodeChange={undoAiCodeChange} onApplyCodeChange={applyAiCodeChange} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")} onClearConversationConfirm={() => requestConfirmation({ title: "清空当前 AI 对话？", message: "当前对话中的全部消息和任务记录都将被永久删除。", confirmLabel: "清空对话", tone: "danger" })}/>
       </aside>
     </section>
     <footer className="statusbar" onContextMenu={(event) => event.preventDefault()}><div className="python-environment-switcher" ref={pythonEnvironmentMenuRef}><button className="environment-status" aria-haspopup="menu" aria-expanded={pythonEnvironmentMenuOpen} disabled={running || renderingManim} onClick={() => { const next = !pythonEnvironmentMenuOpen; setPythonEnvironmentMenuOpen(next); if (next) void detectPythonEnvironments(); }}><span>{pythonEnvironment ? `Python ${pythonEnvironment.version}` : "未选择 Python"}</span></button>{pythonEnvironmentMenuOpen && <div className="python-environment-menu" role="menu" aria-label="切换 Python 解释器"><header><span><strong>Python 解释器</strong><small>{supportedPythonRangeLabel}</small></span><button className="python-environment-refresh" onClick={() => void detectPythonEnvironments()} disabled={detectingPython} title="重新检测" aria-label="重新检测 Python 解释器"><RefreshCw size={13} className={detectingPython ? "spin" : ""}/></button></header><div className="python-environment-options">{pythonEnvironments.length ? pythonEnvironments.map((environment) => { const selected = pythonEnvironment?.path.toLowerCase() === environment.path.toLowerCase(); return <button key={environment.path} className={`python-environment-option ${selected ? "selected" : ""}`} role="menuitemradio" aria-checked={selected} title={environment.path} onClick={() => selectPythonEnvironment(environment)}><span className="python-environment-option-check">{selected && <Check size={12}/>}</span><span><strong>Python {environment.version}</strong><small>{environment.implementation}{environment.virtual_env ? " · 虚拟环境" : ""}</small><code>{environment.path}</code></span></button>; }) : <div className="python-environment-empty"><Braces size={18}/><span>{detectingPython ? "正在检测 Python..." : `未检测到${supportedPythonRangeLabel}`}</span></div>}</div></div>}</div><span className="status-spacer"/>{workspaceMode === "code" && <div className="editor-status-items"><button onClick={() => runCodeEditorAction("editor.action.gotoLine")} title="跳转到行">行 {codeCursorPosition.lineNumber}，列 {codeCursorPosition.column}</button><span title="Python 缩进宽度">空格: {codeIndentSize}</span><span title="文件编码">UTF-8</span></div>}<span>{running ? "正在运行" : renderingManim ? "正在渲染" : "就绪"}</span></footer>
+    {codeEditorContextMenu && <div ref={codeEditorContextMenuRef} className="console-context-menu code-editor-context-menu" role="menu" aria-label="代码编辑操作" style={{ left: codeEditorContextMenu.x, top: codeEditorContextMenu.y }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={handleCodeEditorContextMenuKeyDown}>
+      <button role="menuitem" onClick={() => runCodeEditorContextAction(() => codeEditor.current?.trigger("context-menu", "undo", null))}><Undo2 size={15}/><span>撤销</span><kbd>Ctrl+Z</kbd></button>
+      <button role="menuitem" onClick={() => runCodeEditorContextAction(() => codeEditor.current?.trigger("context-menu", "redo", null))}><Redo2 size={15}/><span>重做</span><kbd>Ctrl+Y</kbd></button>
+      <div className="console-context-separator"/>
+      <button role="menuitem" disabled={!codeEditorContextMenu.hasSelection} onClick={() => runCodeEditorContextAction(cutCodeEditorSelection)}><Scissors size={15}/><span>剪切</span><kbd>Ctrl+X</kbd></button>
+      <button role="menuitem" disabled={!codeEditorContextMenu.hasSelection} onClick={() => runCodeEditorContextAction(copyCodeEditorSelection)}><Copy size={15}/><span>复制</span><kbd>Ctrl+C</kbd></button>
+      <button role="menuitem" onClick={() => runCodeEditorContextAction(pasteIntoCodeEditor)}><ClipboardPaste size={15}/><span>粘贴</span><kbd>Ctrl+V</kbd></button>
+      <button role="menuitem" onClick={() => runCodeEditorContextAction(() => codeEditor.current?.getAction("editor.action.selectAll")?.run())}><TextSelect size={15}/><span>全选</span><kbd>Ctrl+A</kbd></button>
+      <div className="console-context-separator"/>
+      <button role="menuitem" disabled={formattingCode} onClick={() => runCodeEditorContextAction(() => formatCodeAction.current())}><AlignLeft size={15}/><span>{formattingCode ? "正在格式化" : "格式化 Python 代码"}</span><kbd>Shift+Alt+F</kbd></button>
+    </div>}
     {consoleContextMenu && <div ref={consoleContextMenuRef} className="console-context-menu" role="menu" aria-label="面板操作" style={{ left: consoleContextMenu.x, top: consoleContextMenu.y }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={handleConsoleContextMenuKeyDown}>
       {consoleContextMenu.panel === "output" && <>
         <button role="menuitem" disabled={!consoleContextMenu.selectedText && !output.length} onClick={() => runConsoleContextAction(() => copyConsoleText(consoleContextMenu.selectedText || output.map((entry) => entry.data).join("")))}><Copy size={15}/><span>{consoleContextMenu.selectedText ? "复制所选内容" : "复制全部输出"}</span><kbd>Ctrl+C</kbd></button>
@@ -4914,10 +6077,10 @@ export default function App() {
         {contextMenuProblem && (contextMenuProblem.blockId || (workspaceMode === "code" && contextMenuProblem.line > 0)) && <button role="menuitem" onClick={() => runConsoleContextAction(() => focusProblem(contextMenuProblem))}><Search size={15}/><span>定位此问题</span></button>}
         <button role="menuitem" disabled={!displayedProblems.length} onClick={() => runConsoleContextAction(() => copyConsoleText(displayedProblems.map(formatProblemForClipboard).join("\n\n")))}><ListOrdered size={15}/><span>复制全部问题</span></button>
       </>}
-      {consoleContextMenu.panel === "video" && <>
-        <button role="menuitem" disabled={!manimVideo} onClick={() => runConsoleContextAction(openSystemVideo)}><ExternalLink size={15}/><span>使用本地播放器打开</span></button>
-        <button role="menuitem" disabled={!manimVideo} onClick={() => runConsoleContextAction(revealVideoInFolder)}><FolderOpen size={15}/><span>打开所在文件夹</span></button>
-        <button role="menuitem" disabled={!manimVideo} onClick={() => runConsoleContextAction(() => copyConsoleText(manimVideo?.path || ""))}><Copy size={15}/><span>复制视频路径</span></button>
+      {consoleContextMenu.panel === "preview" && <>
+        <button role="menuitem" disabled={!manimRenderOutput} onClick={() => runConsoleContextAction(openSystemRenderOutput)}><ExternalLink size={15}/><span>{manimRenderOutput?.type === "image" ? "使用本地图片查看器打开" : "使用本地播放器打开"}</span></button>
+        <button role="menuitem" disabled={!manimRenderOutput} onClick={() => runConsoleContextAction(revealRenderOutputInFolder)}><FolderOpen size={15}/><span>打开所在文件夹</span></button>
+        <button role="menuitem" disabled={!manimRenderOutput} onClick={() => runConsoleContextAction(() => copyConsoleText(manimRenderOutput?.path || ""))}><Copy size={15}/><span>复制{manimRenderOutput?.type === "image" ? "图片" : "视频"}路径</span></button>
       </>}
       <div className="console-context-separator" role="separator"/>
       <button role="menuitem" onClick={() => runConsoleContextAction(() => setBottomPanelOpen(false))}><PanelBottomClose size={15}/><span>折叠面板</span></button>
@@ -4926,12 +6089,39 @@ export default function App() {
     {manimRenderSettingsOpen && <div className="settings-backdrop management-center">{renderManagementNavigation()}<section className="settings-dialog manim-render-settings-dialog management-page" role="region" aria-label="Manim 渲染配置">
       <header><div><span className="settings-icon manim-settings-icon"><Film size={18}/></span><div><h2>Manim 渲染配置</h2><p>配置保存在当前工程中</p></div></div><button className="dialog-close" onClick={() => setManimRenderSettingsOpen(false)} title="关闭"><X size={18}/></button></header>
       <div className="manim-settings-shell"><nav className="settings-navigation manim-settings-navigation" aria-label="Manim 渲染配置分类">{([
-        { id: "output", label: "输出", detail: "质量与帧率", icon: <Film size={18}/> },
+        { id: "output", label: "输出", detail: "类型与尺寸", icon: manimRenderConfig.outputType === "image" ? <ImageIcon size={18}/> : <Film size={18}/> },
         { id: "renderer", label: "渲染器", detail: "引擎与缓存", icon: <Settings size={18}/> },
         { id: "voice", label: "配音", detail: "模型与试听", icon: <Volume2 size={18}/> },
         { id: "storage", label: "存储", detail: "文件与空间", icon: <FolderOpen size={18}/> },
       ] as Array<{ id: ManimSettingsSection; label: string; detail: string; icon: ReactNode }>).map((item) => <button key={item.id} className={manimSettingsSection === item.id ? "selected" : ""} aria-current={manimSettingsSection === item.id ? "page" : undefined} onClick={() => setManimSettingsSection(item.id)}><span>{item.icon}</span><span><strong>{item.label}</strong><small>{item.detail}</small></span><ChevronRight size={16}/></button>)}</nav><div className="manim-settings-pane">
-        {manimSettingsSection === "output" && <section className="manim-settings-page"><div className="manim-settings-page-header"><h3>输出</h3><p>设置视频清晰度与播放流畅度。</p></div><div className="manim-option-group"><div><strong>质量预设</strong><small>分辨率越高，渲染时间和文件体积越大</small></div><div className="manim-segmented">{([{ value: "preview", label: "预览", detail: "360p" }, { value: "low", label: "低", detail: "480p" }, { value: "medium", label: "中", detail: "720p" }, { value: "high", label: "高", detail: "1080p" }, { value: "four_k", label: "4K", detail: "2160p" }] as const).map((option) => <button key={option.value} className={manimRenderConfig.quality === option.value ? "selected" : ""} onClick={() => updateManimRenderConfig({ quality: option.value })}><strong>{option.label}</strong><small>{option.detail}</small></button>)}</div></div><div className="manim-option-group"><div><strong>帧率</strong><small>更高帧率适合快速运动和复杂动画</small></div><div className="manim-choice-row">{([15, 30, 60] as const).map((fps) => <button key={fps} className={manimRenderConfig.fps === fps ? "selected" : ""} onClick={() => updateManimRenderConfig({ fps })}>{fps} FPS</button>)}</div></div></section>}
+        {manimSettingsSection === "output" && <section className="manim-settings-page">
+          <div className="manim-settings-page-header"><h3>输出</h3><p>选择渲染结果类型与画面清晰度。</p></div>
+          <div className="manim-option-group">
+            <div><strong>输出类型</strong><small>{manimRenderConfig.outputType === "image" ? "生成场景静态画面的 PNG 图片，不合成配音或本地音频" : "生成包含完整动画与配音的 MP4 视频"}</small></div>
+            <div className="manim-output-type" role="group" aria-label="Manim 输出类型"><button className={manimRenderConfig.outputType === "video" ? "selected" : ""} onClick={() => updateManimRenderConfig({ outputType: "video" })}><Film size={18}/><span><strong>视频</strong><small>MP4 动画</small></span></button><button className={manimRenderConfig.outputType === "image" ? "selected" : ""} onClick={() => updateManimRenderConfig({ outputType: "image" })}><ImageIcon size={18}/><span><strong>图片</strong><small>PNG 静态画面</small></span></button></div>
+          </div>
+          {manimRenderConfig.outputType === "image" ? <>
+            <div className="manim-cache-row manim-transparent-row"><div><strong>透明背景</strong><small>保留 PNG 透明通道，适合叠加到课件、网页或其他视频中</small></div><button className={`plugin-toggle ${manimRenderConfig.transparentBackground ? "enabled" : ""}`} role="switch" aria-checked={manimRenderConfig.transparentBackground} aria-label="启用 PNG 透明背景" onClick={() => updateManimRenderConfig({ transparentBackground: !manimRenderConfig.transparentBackground })}><span/></button></div>
+            <div className="manim-option-group manim-image-size-group">
+              <div><strong>图片尺寸</strong><small>使用标准质量快速选择，或输入精确像素尺寸</small></div>
+              <div className="manim-image-size-mode" role="group" aria-label="图片尺寸模式"><button className={manimRenderConfig.imageSizeMode === "preset" ? "selected" : ""} onClick={() => updateManimRenderConfig({ imageSizeMode: "preset" })}>质量预设</button><button className={manimRenderConfig.imageSizeMode === "custom" ? "selected" : ""} onClick={() => updateManimRenderConfig({ imageSizeMode: "custom" })}>自定义尺寸</button></div>
+              {manimRenderConfig.imageSizeMode === "preset" ? <div className="manim-segmented">{([{ value: "preview", label: "预览", detail: "360p" }, { value: "low", label: "低", detail: "480p" }, { value: "medium", label: "中", detail: "720p" }, { value: "high", label: "高", detail: "1080p" }, { value: "four_k", label: "4K", detail: "2160p" }] as const).map((option) => <button key={option.value} className={manimRenderConfig.quality === option.value ? "selected" : ""} onClick={() => updateManimRenderConfig({ quality: option.value })}><strong>{option.label}</strong><small>{option.detail}</small></button>)}</div> : <div className="manim-custom-image-size">
+                <div className="manim-aspect-presets" role="group" aria-label="常用图片比例">{imageResolutionPresets.map((preset) => { const selected = manimRenderConfig.imageWidth === preset.width && manimRenderConfig.imageHeight === preset.height; return <button key={preset.label} className={selected ? "selected" : ""} onClick={() => applyImageResolutionPreset(preset.width, preset.height)}><strong>{preset.label}</strong><small>{preset.detail}</small></button>; })}</div>
+                <div className="manim-dimension-editor"><label><span>宽度</span><div><input key={`image-width-${manimRenderConfig.imageWidth}`} type="number" min={64} max={8192} step={1} defaultValue={manimRenderConfig.imageWidth} onBlur={(event) => commitImageDimension("width", event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}/><small>px</small></div></label><button className={manimRenderConfig.lockImageAspectRatio ? "locked" : ""} onClick={() => updateManimRenderConfig({ lockImageAspectRatio: !manimRenderConfig.lockImageAspectRatio })} title={manimRenderConfig.lockImageAspectRatio ? "解除宽高比锁定" : "锁定当前宽高比"} aria-label={manimRenderConfig.lockImageAspectRatio ? "解除宽高比锁定" : "锁定当前宽高比"}>{manimRenderConfig.lockImageAspectRatio ? <Link2 size={16}/> : <Unlink2 size={16}/>}</button><label><span>高度</span><div><input key={`image-height-${manimRenderConfig.imageHeight}`} type="number" min={64} max={8192} step={1} defaultValue={manimRenderConfig.imageHeight} onBlur={(event) => commitImageDimension("height", event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}/><small>px</small></div></label></div>
+                <small className="manim-dimension-limit">允许范围 64–8192 px · 当前比例 {(manimRenderConfig.imageWidth / manimRenderConfig.imageHeight).toFixed(3)}:1</small>
+              </div>}
+            </div>
+            <div className="manim-option-group manim-image-capture-group">
+              <div><strong>截取位置</strong><small>保存完整场景的最终状态，或在指定播放步骤完成后截取</small></div>
+              <div className="manim-image-size-mode" role="group" aria-label="图片截取位置"><button className={manimRenderConfig.imageCaptureMode === "final" ? "selected" : ""} onClick={() => updateManimRenderConfig({ imageCaptureMode: "final" })}>最终画面</button><button className={manimRenderConfig.imageCaptureMode === "animation" ? "selected" : ""} onClick={() => updateManimRenderConfig({ imageCaptureMode: "animation" })}>指定步骤</button></div>
+              {manimRenderConfig.imageCaptureMode === "animation" && <div className="manim-animation-step"><span>第</span><div><button onClick={() => updateManimRenderConfig({ imageAnimationStep: Math.max(1, manimRenderConfig.imageAnimationStep - 1) })} disabled={manimRenderConfig.imageAnimationStep <= 1} title="上一个步骤" aria-label="上一个步骤"><Minus size={15}/></button><input key={`image-step-${manimRenderConfig.imageAnimationStep}`} type="number" min={1} max={10_000} step={1} defaultValue={manimRenderConfig.imageAnimationStep} onBlur={(event) => updateManimRenderConfig({ imageAnimationStep: normalizeImageAnimationStepInput(event.currentTarget.value) })} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}/><button onClick={() => updateManimRenderConfig({ imageAnimationStep: Math.min(10_000, manimRenderConfig.imageAnimationStep + 1) })} disabled={manimRenderConfig.imageAnimationStep >= 10_000} title="下一个步骤" aria-label="下一个步骤"><Plus size={15}/></button></div><span>个播放步骤完成后</span></div>}
+              {manimRenderConfig.imageCaptureMode === "animation" && <small className="manim-dimension-limit">播放步骤按代码执行顺序编号，包括 <code>play()</code> 和 <code>wait()</code>。</small>}
+            </div>
+          </> : <>
+            <div className="manim-option-group"><div><strong>质量预设</strong><small>分辨率越高，渲染时间和文件体积越大</small></div><div className="manim-segmented">{([{ value: "preview", label: "预览", detail: "360p" }, { value: "low", label: "低", detail: "480p" }, { value: "medium", label: "中", detail: "720p" }, { value: "high", label: "高", detail: "1080p" }, { value: "four_k", label: "4K", detail: "2160p" }] as const).map((option) => <button key={option.value} className={manimRenderConfig.quality === option.value ? "selected" : ""} onClick={() => updateManimRenderConfig({ quality: option.value })}><strong>{option.label}</strong><small>{option.detail}</small></button>)}</div></div>
+            <div className="manim-option-group"><div><strong>帧率</strong><small>更高帧率适合快速运动和复杂动画</small></div><div className="manim-choice-row">{([15, 30, 60] as const).map((fps) => <button key={fps} className={manimRenderConfig.fps === fps ? "selected" : ""} onClick={() => updateManimRenderConfig({ fps })}>{fps} FPS</button>)}</div></div>
+          </>}
+        </section>}
         {manimSettingsSection === "renderer" && <section className="manim-settings-page"><div className="manim-settings-page-header"><h3>渲染器</h3><p>选择渲染引擎并控制缓存策略。</p></div><div className="manim-option-group"><div><strong>渲染引擎</strong><small>根据场景类型选择合适的渲染方式</small></div><div className="manim-renderer-options"><button className={manimRenderConfig.renderer === "cairo" ? "selected" : ""} onClick={() => updateManimRenderConfig({ renderer: "cairo" })}><strong>Cairo</strong><small>兼容性更好，适合大多数 2D 场景</small></button><button className={manimRenderConfig.renderer === "opengl" ? "selected" : ""} onClick={() => updateManimRenderConfig({ renderer: "opengl" })}><strong>OpenGL</strong><small>适合实时预览与需要 GPU 的场景</small></button></div></div><div className="manim-cache-row"><div><strong>禁用缓存</strong><small>每次渲染都重新生成全部内容，排查缓存问题时使用</small></div><button className={`plugin-toggle ${manimRenderConfig.disableCaching ? "enabled" : ""}`} role="switch" aria-checked={manimRenderConfig.disableCaching} aria-label="禁用 Manim 渲染缓存" onClick={() => updateManimRenderConfig({ disableCaching: !manimRenderConfig.disableCaching })}><span/></button></div></section>}
         {manimSettingsSection === "voice" && <section className="manim-settings-page manim-tts-section"><div className="manim-settings-page-header"><h3>视频配音</h3><p>配置文字转语音服务并试听当前旁白效果。</p></div>
           <div className="tts-fields">
@@ -4939,11 +6129,15 @@ export default function App() {
             <div className="tts-field-row"><label><span>模型</span><div className="tts-select-control"><select value={ttsConfig.model} onChange={(event) => updateTtsConfig({ model: event.target.value })} aria-label="百炼配音模型">{bailianTtsModels.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select><ChevronDown size={15}/></div></label><label><span>音色</span><div className="tts-select-control"><select value={ttsConfig.voice} onChange={(event) => updateTtsConfig({ voice: event.target.value })} aria-label="百炼配音音色">{getBailianVoiceOptions(ttsConfig.model).map((option) => <option key={option.id} value={option.id}>{option.label} · {option.id}</option>)}</select><ChevronDown size={15}/></div></label></div>
             <label className="tts-api-key"><span>API Key</span><div className={ttsHasApiKey ? "has-key" : ""}><input type="password" value={ttsApiKey} onChange={(event) => setTtsApiKey(event.target.value)} placeholder="输入 API Key" autoComplete="off" spellCheck={false}/>{ttsHasApiKey && <button onClick={() => void forgetTtsApiKey()} title="删除 API Key" aria-label="删除 API Key"><Trash2 size={15}/></button>}</div></label>
             <div className="tts-field-row tts-compact-row"><label><span>语速 <output>{ttsConfig.speed.toFixed(2)}x</output></span><input type="range" min={0.5} max={2} step={0.05} value={ttsConfig.speed} onChange={(event) => updateTtsConfig({ speed: Number(event.target.value) })}/></label><label><span>音频格式</span><div className="tts-format-options"><button className={ttsConfig.audioFormat === "wav" ? "selected" : ""} onClick={() => updateTtsConfig({ audioFormat: "wav" })}>WAV</button><button className={ttsConfig.audioFormat === "mp3" ? "selected" : ""} onClick={() => updateTtsConfig({ audioFormat: "mp3" })}>MP3</button></div></label></div>
+            <div className="tts-expression-section">
+              <div className="tts-expression-header"><div><SlidersHorizontal size={16}/><strong>表达方式</strong><span>{ttsExpressionSummary(ttsConfig)}</span></div><button type="button" onClick={() => updateTtsConfig(defaultTtsExpression)} disabled={ttsExpressionSummary(ttsConfig) === "自然表达"} title="恢复自然表达" aria-label="恢复自然表达"><Undo2 size={14}/></button></div>
+              <TtsExpressionControls value={ttsConfig} onChange={updateTtsConfig}/>
+            </div>
           </div>
-          <div className="tts-preview"><label><span>全局试听文本 <small>使用上方默认模型、音色和语速</small></span><textarea value={ttsPreviewText} onChange={(event) => setTtsPreviewText(event.target.value)} maxLength={2000} placeholder="输入一段文字，试听默认配音效果"/></label><div className="tts-preview-footer"><button className="tts-test-button" onClick={() => void testTts()} disabled={testingTts || !ttsPreviewText.trim() || !ttsConfig.baseUrl.trim()}>{testingTts ? <RefreshCw size={16} className="spin"/> : <Play size={16}/>} {testingTts ? "正在合成" : "生成试听"}</button>{ttsPreviewUrl && <audio key={ttsPreviewUrl} src={ttsPreviewUrl} controls autoPlay/>}</div>{ttsPreviewError && <p role="alert">{ttsPreviewError}</p>}</div>
+          <div className="tts-preview"><label><span>全局试听文本 <small>使用上方默认模型、音色和语速</small></span><textarea value={ttsPreviewText} onChange={(event) => setTtsPreviewText(event.target.value)} maxLength={2000} placeholder="输入一段文字，试听默认配音效果"/></label><div className="tts-preview-footer"><button className="tts-test-button" onClick={() => void testTts()} disabled={testingTts || !ttsPreviewText.trim() || !ttsConfig.baseUrl.trim()}>{testingTts ? <RefreshCw size={16} className="spin"/> : <Play size={16}/>} {testingTts ? "正在合成" : "生成试听"}</button>{ttsPreviewUrl && <audio ref={ttsPreviewAudio} key={ttsPreviewUrl} src={ttsPreviewUrl} controls autoPlay onPlay={() => stopCompetingVoicePreviews("default")}/>}</div>{ttsPreviewError && <p role="alert">{ttsPreviewError}</p>}</div>
           <div className="voiceover-section-divider" role="separator"/>
           <div className="voiceover-roles">
-            <div className="voiceover-roles-header"><div><strong>配音角色</strong><small>为不同人物保存独立的模型、音色和语速</small></div><div className="voiceover-role-file-actions"><button onClick={() => void importVoiceoverRoles()}><Upload size={15}/>导入</button><button onClick={() => void exportVoiceoverRoles()} disabled={!voiceoverRoles.length}><Download size={15}/>导出</button><button onClick={addVoiceoverRole} disabled={voiceoverRoles.length >= 20}><Plus size={15}/>添加角色</button></div></div>
+            <div className="voiceover-roles-header"><div><strong>配音角色</strong><small>为不同人物保存独立的音色与表达方式</small></div><div className="voiceover-role-file-actions"><button onClick={() => void importVoiceoverRoles()}><Upload size={15}/>导入</button><button onClick={() => void exportVoiceoverRoles()} disabled={!voiceoverRoles.length}><Download size={15}/>导出</button><button onClick={openVoiceCloneDialog} disabled={voiceoverRoles.length >= 20}><Mic2 size={15}/>复刻音色</button><button onClick={addVoiceoverRole} disabled={voiceoverRoles.length >= 20}><Plus size={15}/>添加角色</button></div></div>
             {voiceoverRoles.length === 0 ? <p className="voiceover-roles-empty">当前只有默认旁白。添加角色后，可在配音积木中直接选择。</p> : <div className="voiceover-role-list">{voiceoverRoles.map((role, roleIndex) =>
               <article className="voiceover-role-card" key={role.id}>
                 <div className="voiceover-role-name">
@@ -4954,7 +6148,11 @@ export default function App() {
                   <button onClick={() => duplicateVoiceoverRole(role)} disabled={voiceoverRoles.length >= 20} title="复制角色" aria-label={`复制角色 ${role.name}`}><Copy size={14}/></button>
                   <button onClick={() => removeVoiceoverRole(role.id)} title="删除角色" aria-label={`删除角色 ${role.name}`}><Trash2 size={14}/></button>
                 </div>
-                <div className="voiceover-role-fields"><label><span>模型</span><select value={role.model} onChange={(event) => updateVoiceoverRole(role.id, { model: event.target.value })}>{bailianTtsModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label><label><span>音色</span><select value={role.voice} onChange={(event) => updateVoiceoverRole(role.id, { voice: event.target.value })}>{getBailianVoiceOptions(role.model).map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</select></label><label><span>语速 <output>{role.speed.toFixed(2)}x</output></span><input type="range" min={0.5} max={2} step={0.05} value={role.speed} onChange={(event) => updateVoiceoverRole(role.id, { speed: Number(event.target.value) })}/></label></div>
+                {isBailianClonedVoice(role.model, role.voice) ? <div className="voiceover-role-fields cloned"><label><span>模型</span><div className="voiceover-clone-value">Qwen-Audio 3.0 Plus</div></label><label><span>音色 ID</span><code className="voiceover-clone-value" title={role.voice}>{role.voice}</code></label><label><span>语速 <output>{role.speed.toFixed(2)}x</output></span><input type="range" min={0.5} max={2} step={0.05} value={role.speed} onChange={(event) => updateVoiceoverRole(role.id, { speed: Number(event.target.value) })}/></label></div> : <div className="voiceover-role-fields"><label><span>模型</span><select value={role.model} onChange={(event) => updateVoiceoverRole(role.id, { model: event.target.value })}>{bailianTtsModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label><label><span>音色</span><select value={role.voice} onChange={(event) => updateVoiceoverRole(role.id, { voice: event.target.value })}>{getBailianVoiceOptions(role.model).map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</select></label><label><span>语速 <output>{role.speed.toFixed(2)}x</output></span><input type="range" min={0.5} max={2} step={0.05} value={role.speed} onChange={(event) => updateVoiceoverRole(role.id, { speed: Number(event.target.value) })}/></label></div>}
+                <details className="voiceover-role-expression">
+                  <summary><SlidersHorizontal size={14}/><span>表达方式</span><small>{ttsExpressionSummary(role)}</small><ChevronDown size={14}/></summary>
+                  <TtsExpressionControls value={role} onChange={(patch) => updateVoiceoverRole(role.id, patch)} compact/>
+                </details>
                 <label className="voiceover-role-preview-text"><span>角色试听台词</span><input value={role.previewText} onChange={(event) => setVoiceoverRoles((current) => current.map((item) => item.id === role.id ? { ...item, previewText: event.target.value } : item))} onBlur={() => persistVoiceoverRoles(voiceoverRoles)} maxLength={500} placeholder="留空时使用上方的全局试听文本"/></label>
               </article>)}</div>}
           </div>
@@ -4970,14 +6168,73 @@ export default function App() {
         </section>}
       </div></div>
     </section></div>}
-    {projectReplacementPromptOpen && <div className="settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingBeforeProjectReplacement) finishProjectReplacementPrompt(false); }}><section className="settings-dialog project-replacement-dialog" role="dialog" aria-modal="true" aria-label="未保存的修改">
-      <header><div><span className="settings-icon"><Save size={18}/></span><div><h2>保存当前工程？</h2><p>当前工程包含尚未保存的修改</p></div></div><button className="dialog-close" onClick={() => finishProjectReplacementPrompt(false)} disabled={savingBeforeProjectReplacement} title="取消"><X size={18}/></button></header>
-      <div className="project-replacement-content"><p>继续操作前，你希望如何处理当前修改？</p><div className="project-replacement-actions"><button className="save-current" onClick={() => void saveBeforeProjectReplacement()} disabled={savingBeforeProjectReplacement}><Save size={17}/><span><strong>{savingBeforeProjectReplacement ? "正在保存..." : "保存并继续"}</strong><small>保存当前工程后继续操作</small></span></button><button className="discard-current" onClick={() => finishProjectReplacementPrompt(true)} disabled={savingBeforeProjectReplacement}><Trash2 size={17}/><span><strong>放弃修改</strong><small>不保存当前修改并继续</small></span></button><button onClick={() => finishProjectReplacementPrompt(false)} disabled={savingBeforeProjectReplacement}><X size={17}/><span><strong>取消</strong><small>返回当前工程</small></span></button></div></div>
+    {voiceCloneDialogOpen && <div className="settings-backdrop voice-clone-backdrop"><section className="settings-dialog voice-clone-dialog" role="dialog" aria-modal="true" aria-labelledby="voice-clone-title" onKeyDown={(event) => { if (event.key === "Escape" && !creatingVoiceClone && !savingVoiceRecording && !trimmingVoiceSample) { event.preventDefault(); closeVoiceCloneDialog(); } }}>
+      <header><div><span className="settings-icon voice-clone-icon"><Mic2 size={18}/></span><div><h2 id="voice-clone-title">复刻音色</h2><p>使用阿里百炼 Qwen-Audio 3.0 Plus</p></div></div><button className="dialog-close" onClick={closeVoiceCloneDialog} disabled={creatingVoiceClone || savingVoiceRecording || trimmingVoiceSample} title="关闭"><X size={18}/></button></header>
+      <div className="voice-clone-tabs" role="tablist" aria-label="声音复刻视图"><button role="tab" aria-selected={voiceCloneDialogTab === "create"} className={voiceCloneDialogTab === "create" ? "selected" : ""} onClick={() => switchVoiceCloneDialogTab("create")}><Mic2 size={15}/>新建复刻</button><button role="tab" aria-selected={voiceCloneDialogTab === "remote"} className={voiceCloneDialogTab === "remote" ? "selected" : ""} onClick={() => switchVoiceCloneDialogTab("remote")}><Cloud size={15}/>云端音色</button></div>
+      <div className={`voice-clone-content ${voiceCloneDialogTab}`}>
+        {voiceCloneDialogTab === "create" ? <>
+          <label><span>音色名称</span><input value={voiceCloneName} onChange={(event) => setVoiceCloneName(event.currentTarget.value)} maxLength={24} placeholder="例如：课程旁白" autoFocus/></label>
+          <div className="voice-clone-field">
+            <span>声音样本</span>
+            <div className="voice-clone-source-actions">
+              <div className={`voice-clone-record-control ${voiceCloneSamplePath && !voiceCloneRecordedSample ? "has-sample" : ""}`}>
+                <button type="button" className={`voice-clone-file ${voiceCloneSamplePath && !voiceCloneRecordedSample && voiceSampleQuality ? `quality-${voiceSampleQuality.severity}` : ""} ${voiceSamplePlaybackTime !== null && !voiceCloneRecordedSample ? "has-playback-progress" : ""} ${previewingVoiceCloneSample && !voiceCloneRecordedSample ? "playing" : ""}`} style={{ "--playback-progress": `${voiceSamplePlaybackProgress}%`, "--playback-remaining": `${voiceSamplePlaybackRemaining}s` } as CSSProperties} onClick={() => void chooseVoiceCloneSample()} disabled={voiceRecording || savingVoiceRecording || trimmingVoiceSample} title={voiceCloneSamplePath && !voiceCloneRecordedSample ? (voiceSampleQuality?.issues.join("；") || "样本质量良好，点击重新选择") : "选择音频文件"}>{analyzingVoiceSample && !voiceCloneRecordedSample ? <RefreshCw size={15} className="spin"/> : voiceCloneSamplePath && !voiceCloneRecordedSample ? voiceSampleQuality?.severity === "good" ? <Check size={15}/> : <AlertCircle size={15}/> : <FolderOpen size={16}/>}<span>{voiceCloneSamplePath && !voiceCloneRecordedSample ? voiceCloneSampleLabel || "声音样本" : "选择音频文件"}</span></button>
+                {voiceCloneSamplePath && !voiceCloneRecordedSample && <button type="button" className="voice-clone-record-preview" onClick={() => void previewVoiceCloneSample()} disabled={trimmingVoiceSample || analyzingVoiceSample} title={previewingVoiceCloneSample ? "暂停试听" : voiceSamplePlaybackTime !== null ? "继续试听" : "试听声音样本"}>{previewingVoiceCloneSample ? <Pause size={13}/> : <Play size={13}/>}</button>}
+              </div>
+              <div className={`voice-clone-record-control ${voiceCloneRecordedSample ? "has-sample" : ""}`}>
+                <button type="button" className={`voice-clone-record ${voiceRecording ? "recording" : ""} ${voiceCloneRecordedSample && voiceSampleQuality ? `quality-${voiceSampleQuality.severity}` : ""} ${voiceSamplePlaybackTime !== null && voiceCloneRecordedSample ? "has-playback-progress" : ""} ${previewingVoiceCloneSample && voiceCloneRecordedSample ? "playing" : ""}`} style={{ "--recording-level": `${Math.round(voiceRecordingLevel * 100)}%`, "--playback-progress": `${voiceSamplePlaybackProgress}%`, "--playback-remaining": `${voiceSamplePlaybackRemaining}s` } as CSSProperties} onClick={() => voiceRecording ? void stopVoiceRecording() : void startVoiceRecording()} disabled={savingVoiceRecording || trimmingVoiceSample} title={voiceCloneRecordedSample ? (voiceSampleQuality?.issues.join("；") || "样本质量良好，点击重新录音") : "使用麦克风录制声音样本"}>{voiceRecording ? <Square size={14}/> : savingVoiceRecording ? <RefreshCw size={15} className="spin"/> : voiceCloneRecordedSample ? voiceSampleQuality?.severity === "good" ? <Check size={15}/> : <AlertCircle size={15}/> : <Mic2 size={15}/>}<span>{voiceRecording ? `停止录音 ${String(Math.floor(voiceRecordingSeconds / 60)).padStart(2, "0")}:${String(voiceRecordingSeconds % 60).padStart(2, "0")}` : savingVoiceRecording ? "正在保存" : voiceCloneRecordedSample ? `录音 ${voiceRecordingSeconds} 秒` : "麦克风录音"}</span></button>
+                {voiceCloneRecordedSample && <button type="button" className="voice-clone-record-preview" onClick={() => void previewVoiceCloneSample()} disabled={trimmingVoiceSample} title={previewingVoiceCloneSample ? "暂停试听录音" : voiceSamplePlaybackTime !== null ? "继续试听录音" : "试听录音"}>{previewingVoiceCloneSample ? <Pause size={13}/> : <Play size={13}/>}</button>}
+              </div>
+            </div>
+            {voiceSampleAudioData && <VoiceSampleTrimmer peaks={voiceSamplePeaks} duration={voiceSampleAudioData.samples.length / voiceSampleAudioData.sampleRate} range={voiceSampleTrimRange} onRangeChange={(range) => { stopVoiceCloneSamplePreview(); setVoiceSampleTrimRange(range); }} onApply={() => void applyVoiceSampleTrim()} applying={trimmingVoiceSample} playbackTime={voiceSamplePlaybackTime} playing={previewingVoiceCloneSample} disabled={voiceRecording || savingVoiceRecording || analyzingVoiceSample}/>}
+            <small>录制 12-20 秒，其中至少 10 秒持续清晰说话；开头不要长时间停顿。</small>
+          </div>
+          <div className="voice-clone-row"><label><span>样本语言</span><div className="tts-select-control"><select value={voiceCloneLanguage} onChange={(event) => setVoiceCloneLanguage(event.currentTarget.value)}>{voiceCloneLanguages.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><ChevronDown size={15}/></div></label></div>
+          <label className="voice-clone-consent"><input type="checkbox" checked={voiceCloneConsent} onChange={(event) => setVoiceCloneConsent(event.currentTarget.checked)}/><span>我已获得声音所有者授权，并同意将样本提交至阿里云百炼。</span></label>
+          {voiceCloneError && <p className="voice-clone-error" role="alert">{voiceCloneError}</p>}
+        </> : <div className="remote-voice-panel">
+          <div className="remote-voice-toolbar"><div><strong>百炼音色</strong><span>{remoteClonedVoicesLoaded ? `${remoteClonedVoices.length} 个 Qwen-Audio Plus 音色` : "读取当前账号中的复刻音色"}</span></div><button onClick={() => void loadRemoteClonedVoices()} disabled={loadingRemoteClonedVoices} title="刷新云端音色"><RefreshCw size={15} className={loadingRemoteClonedVoices ? "spin" : ""}/><span>刷新</span></button></div>
+          {remoteClonedVoiceError && <p className="voice-clone-error" role="alert">{remoteClonedVoiceError}</p>}
+          {loadingRemoteClonedVoices && !remoteClonedVoicesLoaded ? <div className="remote-voice-empty"><RefreshCw size={22} className="spin"/><span>正在读取云端音色</span></div> : remoteClonedVoices.length ? <div className="remote-voice-list">{remoteClonedVoices.map((remote) => {
+            const imported = voiceoverRoles.some((role) => role.model === remote.targetModel && role.voice === remote.voice);
+            const confirmingDelete = confirmingRemoteVoiceDelete === remote.voice;
+            const previewActive = remoteVoicePreviewId === remote.voice;
+            const previewLoading = remoteVoicePreviewLoadingId === remote.voice;
+            const previewProgress = previewActive && remoteVoicePreviewDuration > 0 ? Math.max(0, Math.min(100, remoteVoicePreviewTime / remoteVoicePreviewDuration * 100)) : 0;
+            const previewRemaining = previewActive ? Math.max(0, remoteVoicePreviewDuration - remoteVoicePreviewTime) : 0;
+            return <article className={`remote-voice-item ${previewActive ? "has-preview-progress" : ""} ${previewActive && remoteVoicePreviewPlaying ? "preview-playing" : ""}`} style={{ "--remote-preview-progress": `${previewProgress}%`, "--remote-preview-remaining": `${previewRemaining}s` } as CSSProperties} key={remote.voice}>
+              <span className="remote-voice-icon"><Volume2 size={17}/></span>
+              <div className="remote-voice-info"><code title={remote.voice}>{remote.voice}</code><span>{voiceCloneLanguageLabel(remote.language)} · {formatRemoteVoiceDate(remote.createdAt)}</span></div>
+              <div className="remote-voice-actions">
+                <button className="preview" onClick={() => void previewRemoteClonedVoice(remote)} disabled={remoteVoicePreviewLoadingId !== null} title={previewLoading ? "正在生成试听" : previewActive && remoteVoicePreviewPlaying ? "暂停试听" : previewActive ? "继续试听" : "试听云端音色"}>{previewLoading ? <RefreshCw size={14} className="spin"/> : previewActive && remoteVoicePreviewPlaying ? <Pause size={14}/> : <Play size={14}/>}</button>
+                <button onClick={() => importRemoteClonedVoice(remote)} disabled={imported || voiceoverRoles.length >= 20} title={imported ? "已添加到配音角色" : "添加到配音角色"}>{imported ? <Check size={15}/> : <Plus size={15}/>}</button>
+                <button className={confirmingDelete ? "confirm-delete" : "danger"} onClick={() => void deleteRemoteClonedVoice(remote)} disabled={loadingRemoteClonedVoices || remoteVoicePreviewLoadingId !== null} title={confirmingDelete ? "再次点击确认删除" : "删除云端音色"}>{confirmingDelete ? <><Trash2 size={14}/><span>确认</span></> : <Trash2 size={15}/>}</button>
+              </div>
+            </article>;
+          })}</div> : remoteClonedVoicesLoaded ? <div className="remote-voice-empty"><Cloud size={24}/><strong>没有云端复刻音色</strong></div> : null}
+        </div>}
+      </div>
+      <footer className="voice-clone-actions">{voiceCloneDialogTab === "create" ? <><small>创建音色可能产生百炼服务费用。</small><div><button type="button" onClick={closeVoiceCloneDialog} disabled={creatingVoiceClone || savingVoiceRecording || trimmingVoiceSample}>取消</button><button type="button" className="primary" onClick={() => void createVoiceClone()} disabled={creatingVoiceClone || savingVoiceRecording || trimmingVoiceSample || analyzingVoiceSample || voiceRecording || !voiceCloneName.trim() || !voiceCloneSamplePath || !voiceCloneConsent}>{creatingVoiceClone ? <RefreshCw size={15} className="spin"/> : <Mic2 size={15}/>} {creatingVoiceClone ? "正在复刻" : "开始复刻"}</button></div></> : <><small>云端删除会同时移除使用该音色的本地角色。</small><div><button type="button" onClick={closeVoiceCloneDialog}>完成</button></div></>}</footer>
     </section></div>}
-    {closePromptOpen && <div className="settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setClosePromptOpen(false); }}><section className="settings-dialog close-choice-dialog" role="dialog" aria-modal="true" aria-label="关闭 Visual Python">
-      <header><div><span className="settings-icon close-choice-icon"><Power size={18}/></span><div><h2>关闭 Visual Python</h2><p>选择关闭按钮的行为</p></div></div><button className="dialog-close" onClick={() => setClosePromptOpen(false)} title="取消"><X size={18}/></button></header>
-      <div className="close-choice-content"><p>你希望 Visual Python 接下来如何运行？</p><div className="close-choice-options"><button className="close-choice-option tray-choice" onClick={() => void minimizeToTray(rememberCloseChoice)}><span className="close-option-icon"><Minimize2 size={20}/></span><span><strong>最小化到托盘</strong><small>应用继续在后台运行，可从系统托盘重新打开</small></span><ChevronRight size={18}/></button><button className="close-choice-option exit-choice" onClick={() => void quitApplication(rememberCloseChoice)}><span className="close-option-icon"><Power size={20}/></span><span><strong>退出应用</strong><small>完全结束应用以及当前正在运行的后台任务</small></span><ChevronRight size={18}/></button></div><label><input type="checkbox" checked={rememberCloseChoice} onChange={(event) => setRememberCloseChoice(event.target.checked)}/>记住我的选择，下次不再询问</label></div>
-      <footer className="close-choice-actions"><button onClick={() => setClosePromptOpen(false)}>取消</button></footer>
+    {unsavedChangesPromptOpen && <div className="settings-backdrop"><section className="settings-dialog decision-dialog project-replacement-dialog" role="dialog" aria-modal="true" aria-labelledby="project-replacement-title" onKeyDown={(event) => { if (event.key === "Escape" && !savingUnsavedChanges) { event.preventDefault(); finishUnsavedChangesPrompt("cancelled"); } }}>
+      <header className="decision-dialog-header"><h2 id="project-replacement-title">保存对“{projectName}”的修改吗？</h2></header>
+      <div className="decision-dialog-content"><p>如果不保存，所做的修改将会丢失。</p></div>
+      <footer className="decision-dialog-actions"><button type="button" onClick={() => finishUnsavedChangesPrompt("cancelled")} disabled={savingUnsavedChanges}>取消</button><button type="button" className="danger" onClick={() => finishUnsavedChangesPrompt("discarded")} disabled={savingUnsavedChanges}>不保存</button><button type="button" className="primary" onClick={() => void saveBeforeContinuing()} disabled={savingUnsavedChanges} autoFocus>{savingUnsavedChanges ? "正在保存..." : "保存"}</button></footer>
+    </section></div>}
+    {closePromptOpen && <div className="settings-backdrop"><section className="settings-dialog decision-dialog close-choice-dialog" role="dialog" aria-modal="true" aria-labelledby="close-choice-title" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setClosePromptOpen(false); } }}>
+      <header className="decision-dialog-header"><h2 id="close-choice-title">关闭 Visual Python？</h2></header>
+      <div className="decision-dialog-content"><p>你可以让应用继续在后台运行，或者完全退出。</p>{(running || renderingManim) && <p className="decision-dialog-warning">退出应用将终止当前正在运行的任务。</p>}<label><input type="checkbox" checked={rememberCloseChoice} onChange={(event) => setRememberCloseChoice(event.target.checked)}/>记住我的选择</label></div>
+      <footer className="decision-dialog-actions"><button type="button" onClick={() => setClosePromptOpen(false)}>取消</button><button type="button" className="danger" onClick={() => void quitApplication(rememberCloseChoice)}>退出应用</button><button type="button" className="primary" onClick={() => void minimizeToTray(rememberCloseChoice)} autoFocus>最小化到托盘</button></footer>
+    </section></div>}
+    {confirmationRequest && <div className="settings-backdrop"><section className="settings-dialog decision-dialog confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmation-title" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); finishConfirmation(false); } }}>
+      <header className="decision-dialog-header"><h2 id="confirmation-title">{confirmationRequest.title}</h2></header>
+      <div className="decision-dialog-content"><p>{confirmationRequest.message}</p>{confirmationRequest.detail && <code className="confirmation-dialog-detail">{confirmationRequest.detail}</code>}</div>
+      <footer className="decision-dialog-actions"><button type="button" onClick={() => finishConfirmation(false)} autoFocus={confirmationRequest.tone !== "primary"}>取消</button><button type="button" className={confirmationRequest.tone ?? "danger"} onClick={() => finishConfirmation(true)} autoFocus={confirmationRequest.tone === "primary"}>{confirmationRequest.confirmLabel}</button></footer>
+    </section></div>}
+    {blockingAlert && <div className="settings-backdrop"><section className="settings-dialog decision-dialog blocking-alert-dialog" role="alertdialog" aria-modal="true" aria-labelledby="blocking-alert-title" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeBlockingAlert(); } }}>
+      <header className="decision-dialog-header"><h2 id="blocking-alert-title">{blockingAlert.title}</h2></header>
+      <div className="decision-dialog-content"><p>{blockingAlert.message}</p>{blockingAlert.detail && <code className="confirmation-dialog-detail">{blockingAlert.detail}</code>}</div>
+      <footer className="decision-dialog-actions"><button type="button" className="primary" onClick={closeBlockingAlert} autoFocus>知道了</button></footer>
     </section></div>}
     {settingsOpen && <div className="settings-backdrop management-center">{renderManagementNavigation()}<section className="settings-dialog app-settings-dialog management-page" role="region" aria-label="应用设置">
       <header><div><span className="settings-icon"><Settings size={18}/></span><div><h2>设置</h2><p>配置 Visual Python 的工作方式</p></div></div><button className="dialog-close" onClick={() => setSettingsOpen(false)} title="关闭"><X size={18}/></button></header>
@@ -5013,7 +6270,7 @@ export default function App() {
         const missing = projectResourceStatus[resource.path]?.exists === false;
         const actualSize = projectResourceStatus[resource.path]?.size ?? resource.size;
         return <article className={`resource-item ${missing ? "resource-missing" : ""}`} key={resource.id} draggable={isBlockWorkspaceMode(workspaceMode) && !missing} onDragStart={(event) => { event.dataTransfer.setData("application/x-visual-python-resource", resource.id); event.dataTransfer.effectAllowed = "copy"; setResourceDragging(true); }} onDragEnd={() => { setResourceDragging(false); setResourcesOpen(false); }} title={missing ? "资源文件缺失，请重新选择文件修复" : isBlockWorkspaceMode(workspaceMode) ? "拖到画布可创建播放音频积木" : undefined}><span className="resource-type-icon"><Volume2 size={18}/></span><div className="resource-info"><div><strong title={resource.originalName}>{resource.originalName}</strong>{missing ? <span className="resource-usage missing">文件缺失</span> : <span className={`resource-usage ${usageCount ? "used" : "unused"}`}>{usageCount ? `${usageCount} 处使用` : "未使用"}</span>}</div><span>{missing ? "无法找到磁盘文件" : `${formatResourceSize(actualSize)} · 音频`}</span><code title={resource.path}>{resource.path}</code></div><div className="resource-actions"><button onClick={() => void previewProjectResource(resource)} title={resourcePreviewId === resource.id ? "停止试听" : "试听"} disabled={missing}>{resourcePreviewId === resource.id ? <Square size={14}/> : <Play size={14}/>}</button><button className={missing ? "repair" : ""} onClick={() => void replaceProjectResource(resource)} title={missing ? "重新选择文件修复" : "替换文件"}><Replace size={14}/></button><button onClick={() => void revealProjectResource(resource)} title="打开所在文件夹" disabled={missing}><FolderOpen size={14}/></button><button className="danger" onClick={() => void deleteProjectResource(resource)} title={usageCount ? "资源正在使用，不能删除" : "删除资源"} disabled={usageCount > 0}><Trash2 size={14}/></button></div></article>;
-      })}</div> : <div className="empty-resources filtered"><Search size={28}/><strong>没有匹配的资源</strong><span>调整搜索内容或切换筛选条件。</span></div>}</> : <div className="empty-resources"><Box size={30}/><strong>还没有工程资源</strong><span>{projectPath ? "在本地音频积木上点击右键，选择音频文件后会自动加入这里。" : "请先保存工程，然后通过本地音频积木导入文件。"}</span></div>}</div>
+      })}</div> : <div className="empty-resources filtered"><Search size={28}/><strong>没有匹配的资源</strong><span>调整搜索内容或切换筛选条件。</span></div>}</> : <div className="empty-resources"><Box size={30}/><strong>还没有工程资源</strong><span>{projectPath ? "点击本地音频积木上的文件夹图标，选择的音频会自动加入这里。" : "请先保存工程，然后通过本地音频积木导入文件。"}</span></div>}</div>
     </section></div>}
     {pluginsOpen && <div className="settings-backdrop management-center">{renderManagementNavigation()}<section className="settings-dialog plugin-manager-dialog management-page" role="region" aria-label="插件管理">
       <header><div><span className="settings-icon"><Plug size={18}/></span><div><h2>插件</h2><p>管理 Visual Python 的功能扩展</p></div></div><button className="dialog-close" onClick={() => setPluginsOpen(false)} title="关闭"><X size={18}/></button></header>
@@ -5036,5 +6293,6 @@ export default function App() {
       })}</div></section>
       </div>
     </section></div>}
+    {appNotice && <div className={`app-notice ${appNotice.tone}`} role={appNotice.tone === "error" ? "alert" : "status"} aria-live={appNotice.tone === "error" ? "assertive" : "polite"}><AlertCircle size={17}/><span>{appNotice.message}</span><button type="button" onClick={dismissAppNotice} title="关闭通知" aria-label="关闭通知"><X size={14}/></button></div>}
   </main>;
 }

@@ -6,11 +6,11 @@ import { addManimImport, value } from "../helpers";
 export const registerHighlightAnimationBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_indicate_animation",
-    message0: "闪烁强调 Indicate 对象 %1 放大 %2 颜色 %3 时间 %4",
+    message0: "闪烁强调 对象 %1 放大 %2 颜色 %3 时间 %4",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "SCALE_FACTOR", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: [["YELLOW", "YELLOW"], ["WHITE", "WHITE"], ["RED", "RED"], ["GREEN", "GREEN"], ["BLUE", "BLUE"], ["PURPLE", "PURPLE"], ["ORANGE", "ORANGE"]] },
+      { type: "field_manim_color", name: "COLOR" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
     inputsInline: false,
@@ -27,12 +27,12 @@ export const registerHighlightAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_circumscribe_animation",
-    message0: "圈出 Circumscribe 对象 %1 形状 %2 间距 %3 颜色 %4 时间 %5",
+    message0: "圈出对象 %1 形状 %2 间距 %3 颜色 %4 时间 %5",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "field_dropdown", name: "SHAPE", options: [["Rectangle", "Rectangle"], ["Circle", "Circle"]] },
+      { type: "field_dropdown", name: "SHAPE", options: [["矩形", "Rectangle"], ["圆形", "Circle"]] },
       { type: "input_value", name: "BUFF", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: [["YELLOW", "YELLOW"], ["WHITE", "WHITE"], ["RED", "RED"], ["GREEN", "GREEN"], ["BLUE", "BLUE"], ["PURPLE", "PURPLE"], ["ORANGE", "ORANGE"]] },
+      { type: "field_manim_color", name: "COLOR" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
     inputsInline: false,

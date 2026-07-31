@@ -1,0 +1,4696 @@
+[
+  {
+    "type": "visual_python_manim_scene",
+    "title": "动画场景",
+    "description": "一个完整动画的入口。把创建对象、播放动画和等待等语句放入场景内部。",
+    "category": [
+      "场景与流程",
+      "场景定义"
+    ],
+    "inputs": [
+      {
+        "name": "BODY",
+        "label": "执行内容",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "NAME",
+        "value": "MainScene"
+      },
+      {
+        "name": "SCENE_TYPE",
+        "value": "普通场景"
+      }
+    ],
+    "connection": "语句/容器积木：接入场景执行区域，并在内部继续放置语句。",
+    "image": "assets/blocks/scene.png"
+  },
+  {
+    "type": "visual_python_manim_play",
+    "title": "播放动画",
+    "description": "执行一个动画效果。创建、淡入和变形等效果需要连接到这里才能播放。",
+    "category": [
+      "场景与流程",
+      "播放控制"
+    ],
+    "inputs": [
+      {
+        "name": "ANIMATION",
+        "label": "动画",
+        "accepts": [
+          "动画效果"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/play.png"
+  },
+  {
+    "type": "visual_python_manim_play_with_options",
+    "title": "播放动画（时间与延迟）",
+    "description": "播放一个动画，并统一设置播放时间和动画内部对象的延迟比例。",
+    "category": [
+      "场景与流程",
+      "播放控制"
+    ],
+    "inputs": [
+      {
+        "name": "ANIMATION",
+        "label": "动画",
+        "accepts": [
+          "动画效果"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "LAG_RATIO",
+        "label": "延迟比例",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/play_with_options.png"
+  },
+  {
+    "type": "visual_python_manim_play_two",
+    "title": "同时播放动画",
+    "description": "同时播放两个动画效果。延迟比例为零时同步开始。",
+    "category": [
+      "场景与流程",
+      "播放控制"
+    ],
+    "inputs": [
+      {
+        "name": "FIRST",
+        "label": "第一个对象/动画",
+        "accepts": [
+          "动画效果"
+        ]
+      },
+      {
+        "name": "SECOND",
+        "label": "第二个对象/动画",
+        "accepts": [
+          "动画效果"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "LAG_RATIO",
+        "label": "延迟比例",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/play_two.png"
+  },
+  {
+    "type": "visual_python_manim_wait",
+    "title": "等待",
+    "description": "用于控制 Manim 场景中的“等待”流程，按它在场景执行区域中的先后顺序运行。",
+    "category": [
+      "场景与流程",
+      "播放控制"
+    ],
+    "inputs": [
+      {
+        "name": "SECONDS",
+        "label": "等待秒数",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/wait.png"
+  },
+  {
+    "type": "visual_python_manim_voiceover",
+    "title": "播放配音",
+    "description": "用于控制 Manim 场景中的“播放配音”流程，按它在场景执行区域中的先后顺序运行。",
+    "category": [
+      "场景与流程",
+      "配音"
+    ],
+    "inputs": [
+      {
+        "name": "TEXT",
+        "label": "文本内容",
+        "accepts": [
+          "文本"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "VOICEOVER_PREVIEW",
+        "value": "试听或停止此段配音"
+      },
+      {
+        "name": "ROLE",
+        "value": "默认旁白"
+      }
+    ],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/voiceover.png"
+  },
+  {
+    "type": "visual_python_manim_voiceover_with_animation",
+    "title": "配音并执行动画",
+    "description": "用于控制 Manim 场景中的“配音并执行动画”流程，按它在场景执行区域中的先后顺序运行。",
+    "category": [
+      "场景与流程",
+      "配音"
+    ],
+    "inputs": [
+      {
+        "name": "TEXT",
+        "label": "文本内容",
+        "accepts": [
+          "文本"
+        ]
+      },
+      {
+        "name": "BODY",
+        "label": "执行内容",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "VOICEOVER_PREVIEW",
+        "value": "试听或停止此段配音"
+      },
+      {
+        "name": "ROLE",
+        "value": "默认旁白"
+      }
+    ],
+    "connection": "语句/容器积木：接入场景执行区域，并在内部继续放置语句。",
+    "image": "assets/blocks/voiceover_with_animation.png"
+  },
+  {
+    "type": "visual_python_manim_play_local_audio",
+    "title": "播放音频",
+    "description": "播放本地音乐、音效或录音。点击路径旁的文件夹图标可选择音频文件；路径也可以手动填写。需要等待音频结束时，请在后面连接等待积木。",
+    "category": [
+      "场景与流程",
+      "音频"
+    ],
+    "inputs": [
+      {
+        "name": "PATH",
+        "label": "音频文件",
+        "accepts": [
+          "文本"
+        ]
+      },
+      {
+        "name": "TIME_OFFSET",
+        "label": "开始偏移",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "GAIN",
+        "label": "音量增益",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "FILE_PICKER_PATH",
+        "value": "选择路径"
+      },
+      {
+        "name": "LOCAL_AUDIO_PREVIEW",
+        "value": "试听或停止音频"
+      }
+    ],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/play_local_audio.png"
+  },
+  {
+    "type": "visual_python_manim_play_local_audio_with_animation",
+    "title": "播放音频并执行动画",
+    "description": "播放本地音频并同时执行内部动画。动画较短时，渲染前会根据音频时长自动补足等待。",
+    "category": [
+      "场景与流程",
+      "音频"
+    ],
+    "inputs": [
+      {
+        "name": "PATH",
+        "label": "音频文件",
+        "accepts": [
+          "文本"
+        ]
+      },
+      {
+        "name": "TIME_OFFSET",
+        "label": "开始偏移",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "GAIN",
+        "label": "音量增益",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "BODY",
+        "label": "执行内容",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "FILE_PICKER_PATH",
+        "value": "选择路径"
+      },
+      {
+        "name": "LOCAL_AUDIO_PREVIEW",
+        "value": "试听或停止音频"
+      }
+    ],
+    "connection": "语句/容器积木：接入场景执行区域，并在内部继续放置语句。",
+    "image": "assets/blocks/play_local_audio_with_animation.png"
+  },
+  {
+    "type": "visual_python_manim_add",
+    "title": "添加对象",
+    "description": "创建或处理“添加对象”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "场景与流程",
+      "对象管理"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/add.png"
+  },
+  {
+    "type": "visual_python_manim_add_two",
+    "title": "同时添加两个对象",
+    "description": "创建或处理“同时添加两个对象”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "场景与流程",
+      "对象管理"
+    ],
+    "inputs": [
+      {
+        "name": "FIRST",
+        "label": "第一个对象/动画",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "SECOND",
+        "label": "第二个对象/动画",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/add_two.png"
+  },
+  {
+    "type": "visual_python_manim_remove",
+    "title": "移除对象",
+    "description": "创建或处理“移除对象”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "场景与流程",
+      "对象管理"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/remove.png"
+  },
+  {
+    "type": "visual_python_manim_remove_two",
+    "title": "同时移除两个对象",
+    "description": "创建或处理“同时移除两个对象”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "场景与流程",
+      "对象管理"
+    ],
+    "inputs": [
+      {
+        "name": "FIRST",
+        "label": "第一个对象/动画",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "SECOND",
+        "label": "第二个对象/动画",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/remove_two.png"
+  },
+  {
+    "type": "visual_python_manim_clear",
+    "title": "清空场景",
+    "description": "创建或处理“清空场景”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "场景与流程",
+      "对象管理"
+    ],
+    "inputs": [],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/clear.png"
+  },
+  {
+    "type": "visual_python_manim_camera_frame_animation",
+    "title": "相机画面 目标",
+    "description": "用于控制 Manim 场景中的“相机画面 目标”流程，按它在场景执行区域中的先后顺序运行。",
+    "category": [
+      "场景与流程",
+      "三维相机"
+    ],
+    "inputs": [
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "SCALE",
+        "label": "缩放",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/camera_frame_animation.png"
+  },
+  {
+    "type": "visual_python_manim_3d_camera_orientation",
+    "title": "三维视角 垂直角",
+    "description": "用于控制 Manim 场景中的“三维视角 垂直角”流程，按它在场景执行区域中的先后顺序运行。",
+    "category": [
+      "场景与流程",
+      "三维相机"
+    ],
+    "inputs": [
+      {
+        "name": "PHI",
+        "label": "三维视角 垂直角",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      },
+      {
+        "name": "THETA",
+        "label": "水平角",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      },
+      {
+        "name": "DISTANCE",
+        "label": "距离",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/3d_camera_orientation.png"
+  },
+  {
+    "type": "visual_python_manim_3d_move_camera",
+    "title": "三维移动相机 垂直角",
+    "description": "用于控制 Manim 场景中的“三维移动相机 垂直角”流程，按它在场景执行区域中的先后顺序运行。",
+    "category": [
+      "场景与流程",
+      "三维相机"
+    ],
+    "inputs": [
+      {
+        "name": "PHI",
+        "label": "三维移动相机 垂直角",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      },
+      {
+        "name": "THETA",
+        "label": "水平角",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      },
+      {
+        "name": "DISTANCE",
+        "label": "距离",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/3d_move_camera.png"
+  },
+  {
+    "type": "visual_python_manim_3d_ambient_rotation",
+    "title": "三维相机旋转",
+    "description": "用于控制 Manim 场景中的“三维相机旋转”流程，按它在场景执行区域中的先后顺序运行。",
+    "category": [
+      "场景与流程",
+      "三维相机"
+    ],
+    "inputs": [
+      {
+        "name": "RATE",
+        "label": "速度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "ACTION",
+        "value": "开始"
+      }
+    ],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/3d_ambient_rotation.png"
+  },
+  {
+    "type": "visual_python_manim_plain_text_object",
+    "title": "普通文本 内容",
+    "description": "创建或处理“普通文本 内容”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "文本与公式"
+    ],
+    "inputs": [
+      {
+        "name": "CONTENT",
+        "label": "内容",
+        "accepts": [
+          "文本"
+        ]
+      },
+      {
+        "name": "FONT_SIZE",
+        "label": "字号",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/plain_text_object.png"
+  },
+  {
+    "type": "visual_python_manim_tex_object",
+    "title": "公式文本 内容",
+    "description": "创建或处理“公式文本 内容”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "文本与公式"
+    ],
+    "inputs": [
+      {
+        "name": "CONTENT",
+        "label": "内容",
+        "accepts": [
+          "文本"
+        ]
+      },
+      {
+        "name": "FONT_SIZE",
+        "label": "字号",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/tex_object.png"
+  },
+  {
+    "type": "visual_python_manim_mathtex_object",
+    "title": "数学公式 内容",
+    "description": "创建或处理“数学公式 内容”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "文本与公式"
+    ],
+    "inputs": [
+      {
+        "name": "CONTENT",
+        "label": "内容",
+        "accepts": [
+          "文本"
+        ]
+      },
+      {
+        "name": "FONT_SIZE",
+        "label": "字号",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/mathtex_object.png"
+  },
+  {
+    "type": "visual_python_manim_formula_value",
+    "title": "数学公式",
+    "description": "创建或处理“数学公式”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "文本与公式"
+    ],
+    "inputs": [],
+    "fields": [
+      {
+        "name": "LATEX",
+        "value": "x^2 + y^2 = z^2"
+      }
+    ],
+    "connection": "值积木：输出文本，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/formula_value.png"
+  },
+  {
+    "type": "visual_python_manim_circle_object",
+    "title": "圆形 半径",
+    "description": "创建或处理“圆形 半径”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "RADIUS",
+        "label": "半径",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/circle_object.png"
+  },
+  {
+    "type": "visual_python_manim_square_object",
+    "title": "正方形 边长",
+    "description": "创建或处理“正方形 边长”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "SIDE_LENGTH",
+        "label": "正方形 边长",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/square_object.png"
+  },
+  {
+    "type": "visual_python_manim_rectangle_object",
+    "title": "矩形 宽",
+    "description": "创建或处理“矩形 宽”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "WIDTH",
+        "label": "宽度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "HEIGHT",
+        "label": "高度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/rectangle_object.png"
+  },
+  {
+    "type": "visual_python_manim_dot_object",
+    "title": "点 位置",
+    "description": "创建或处理“点 位置”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "POINT",
+        "label": "坐标点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "RADIUS",
+        "label": "半径",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/dot_object.png"
+  },
+  {
+    "type": "visual_python_manim_triangle_object",
+    "title": "三角形 颜色",
+    "description": "创建或处理“三角形 颜色”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/triangle_object.png"
+  },
+  {
+    "type": "visual_python_manim_regular_polygon_object",
+    "title": "正多边形 边数",
+    "description": "创建或处理“正多边形 边数”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "N",
+        "label": "正多边形 边数",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RADIUS",
+        "label": "半径",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/regular_polygon_object.png"
+  },
+  {
+    "type": "visual_python_manim_polygon_points_object",
+    "title": "多边形 顶点",
+    "description": "创建或处理“多边形 顶点”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "POINTS",
+        "label": "坐标点列表",
+        "accepts": [
+          "ManimPointArguments"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/polygon_points_object.png"
+  },
+  {
+    "type": "visual_python_manim_rounded_rectangle_object",
+    "title": "圆角矩形 宽",
+    "description": "创建或处理“圆角矩形 宽”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "WIDTH",
+        "label": "宽度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "HEIGHT",
+        "label": "高度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "CORNER_RADIUS",
+        "label": "圆角",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/rounded_rectangle_object.png"
+  },
+  {
+    "type": "visual_python_manim_ellipse_object",
+    "title": "椭圆 宽",
+    "description": "创建或处理“椭圆 宽”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "WIDTH",
+        "label": "宽度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "HEIGHT",
+        "label": "高度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/ellipse_object.png"
+  },
+  {
+    "type": "visual_python_manim_arc_object",
+    "title": "圆弧 半径",
+    "description": "创建或处理“圆弧 半径”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "RADIUS",
+        "label": "半径",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "ANGLE",
+        "label": "角度",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/arc_object.png"
+  },
+  {
+    "type": "visual_python_manim_sector_object",
+    "title": "扇形 外半径",
+    "description": "创建或处理“扇形 外半径”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "OUTER_RADIUS",
+        "label": "扇形 外半径",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "ANGLE",
+        "label": "角度",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/sector_object.png"
+  },
+  {
+    "type": "visual_python_manim_annulus_object",
+    "title": "圆环 内半径",
+    "description": "创建或处理“圆环 内半径”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "基础几何"
+    ],
+    "inputs": [
+      {
+        "name": "INNER_RADIUS",
+        "label": "圆环 内半径",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "OUTER_RADIUS",
+        "label": "外半径",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/annulus_object.png"
+  },
+  {
+    "type": "visual_python_manim_line_segment_object",
+    "title": "直线 起点",
+    "description": "创建或处理“直线 起点”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "线条与箭头"
+    ],
+    "inputs": [
+      {
+        "name": "START",
+        "label": "起点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "END",
+        "label": "终点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/line_segment_object.png"
+  },
+  {
+    "type": "visual_python_manim_dashed_line_object",
+    "title": "虚线 起点",
+    "description": "创建或处理“虚线 起点”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "线条与箭头"
+    ],
+    "inputs": [
+      {
+        "name": "START",
+        "label": "起点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "END",
+        "label": "终点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "DASH_LENGTH",
+        "label": "虚线长度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/dashed_line_object.png"
+  },
+  {
+    "type": "visual_python_manim_arrow_object",
+    "title": "箭头 起点",
+    "description": "创建或处理“箭头 起点”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "线条与箭头"
+    ],
+    "inputs": [
+      {
+        "name": "START",
+        "label": "起点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "END",
+        "label": "终点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "BUFF",
+        "label": "间距",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/arrow_object.png"
+  },
+  {
+    "type": "visual_python_manim_double_arrow_object",
+    "title": "双箭头 起点",
+    "description": "创建或处理“双箭头 起点”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "线条与箭头"
+    ],
+    "inputs": [
+      {
+        "name": "START",
+        "label": "起点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "END",
+        "label": "终点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "BUFF",
+        "label": "间距",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/double_arrow_object.png"
+  },
+  {
+    "type": "visual_python_manim_curved_arrow_object",
+    "title": "曲线箭头 起点",
+    "description": "创建或处理“曲线箭头 起点”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "线条与箭头"
+    ],
+    "inputs": [
+      {
+        "name": "START",
+        "label": "起点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "END",
+        "label": "终点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "ANGLE",
+        "label": "角度",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/curved_arrow_object.png"
+  },
+  {
+    "type": "visual_python_manim_vector_object",
+    "title": "向量 方向",
+    "description": "创建或处理“向量 方向”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "线条与箭头"
+    ],
+    "inputs": [
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/vector_object.png"
+  },
+  {
+    "type": "visual_python_manim_number_line_object",
+    "title": "数轴 数值范围",
+    "description": "创建或处理“数轴 数值范围”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "坐标对象"
+    ],
+    "inputs": [
+      {
+        "name": "X_RANGE",
+        "label": "横坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "LENGTH",
+        "label": "长度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "INCLUDE_NUMBERS",
+        "value": "true"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/number_line_object.png"
+  },
+  {
+    "type": "visual_python_manim_axes_object",
+    "title": "二维坐标系 横轴范围",
+    "description": "创建二维坐标系。范围控制刻度区间，长度控制画面中的显示尺寸。",
+    "category": [
+      "对象",
+      "坐标对象"
+    ],
+    "inputs": [
+      {
+        "name": "X_RANGE",
+        "label": "横坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "Y_RANGE",
+        "label": "纵坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "X_LENGTH",
+        "label": "横轴长度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "Y_LENGTH",
+        "label": "纵轴长度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/axes_object.png"
+  },
+  {
+    "type": "visual_python_manim_number_plane_object",
+    "title": "平面网格 横轴范围",
+    "description": "创建或处理“平面网格 横轴范围”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "坐标对象"
+    ],
+    "inputs": [
+      {
+        "name": "X_RANGE",
+        "label": "横坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "Y_RANGE",
+        "label": "纵坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "X_LENGTH",
+        "label": "横轴长度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "Y_LENGTH",
+        "label": "纵轴长度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/number_plane_object.png"
+  },
+  {
+    "type": "visual_python_manim_complex_plane_object",
+    "title": "复平面 横轴范围",
+    "description": "创建或处理“复平面 横轴范围”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "坐标对象"
+    ],
+    "inputs": [
+      {
+        "name": "X_RANGE",
+        "label": "横坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "Y_RANGE",
+        "label": "纵坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/complex_plane_object.png"
+  },
+  {
+    "type": "visual_python_manim_polar_plane_object",
+    "title": "极坐标平面 最大半径",
+    "description": "创建或处理“极坐标平面 最大半径”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "坐标对象"
+    ],
+    "inputs": [
+      {
+        "name": "RADIUS_MAX",
+        "label": "极坐标平面 最大半径",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RADIUS_STEP",
+        "label": "半径步长",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "SIZE",
+        "label": "尺寸",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/polar_plane_object.png"
+  },
+  {
+    "type": "visual_python_manim_three_d_axes_object",
+    "title": "三维坐标系 横轴范围",
+    "description": "创建三维坐标系，需要放在三维场景中使用。",
+    "category": [
+      "对象",
+      "坐标对象"
+    ],
+    "inputs": [
+      {
+        "name": "X_RANGE",
+        "label": "横坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "Y_RANGE",
+        "label": "纵坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "Z_RANGE",
+        "label": "竖坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/three_d_axes_object.png"
+  },
+  {
+    "type": "visual_python_manim_axes_plot",
+    "title": "绘制函数图像",
+    "description": "使用已创建的坐标系绘制函数曲线。请先创建并命名坐标系。",
+    "category": [
+      "对象",
+      "坐标方法"
+    ],
+    "inputs": [
+      {
+        "name": "AXES",
+        "label": "坐标系",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "FUNCTION",
+        "label": "函数",
+        "accepts": [
+          "ManimFunction"
+        ]
+      },
+      {
+        "name": "X_RANGE",
+        "label": "横坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/axes_plot.png"
+  },
+  {
+    "type": "visual_python_manim_axes_c2p",
+    "title": "坐标转画面点",
+    "description": "把数学坐标转换成画面中的位置点。",
+    "category": [
+      "对象",
+      "坐标方法"
+    ],
+    "inputs": [
+      {
+        "name": "AXES",
+        "label": "坐标系",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "X",
+        "label": "横坐标",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "Y",
+        "label": "纵坐标",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出值，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/axes_c2p.png"
+  },
+  {
+    "type": "visual_python_manim_axes_p2c",
+    "title": "画面点转坐标",
+    "description": "把画面中的位置点转换成该坐标系内的数学坐标。",
+    "category": [
+      "对象",
+      "坐标方法"
+    ],
+    "inputs": [
+      {
+        "name": "AXES",
+        "label": "坐标系",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "POINT",
+        "label": "坐标点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出值，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/axes_p2c.png"
+  },
+  {
+    "type": "visual_python_manim_axis_labels",
+    "title": "创建坐标轴标签",
+    "description": "为已创建的坐标系生成横轴和纵轴标签。",
+    "category": [
+      "对象",
+      "坐标方法"
+    ],
+    "inputs": [
+      {
+        "name": "AXES",
+        "label": "坐标系",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "X_LABEL",
+        "label": "横轴标签",
+        "accepts": [
+          "文本"
+        ]
+      },
+      {
+        "name": "Y_LABEL",
+        "label": "纵轴标签",
+        "accepts": [
+          "文本"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/axis_labels.png"
+  },
+  {
+    "type": "visual_python_manim_axes_area",
+    "title": "创建函数面积",
+    "description": "填充函数曲线与横轴之间的区域。坐标系和曲线必须引用同一套坐标系。",
+    "category": [
+      "对象",
+      "坐标方法"
+    ],
+    "inputs": [
+      {
+        "name": "AXES",
+        "label": "坐标系",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "GRAPH",
+        "label": "函数图像",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "X_RANGE",
+        "label": "横坐标范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/axes_area.png"
+  },
+  {
+    "type": "visual_python_manim_table_object",
+    "title": "表格对象",
+    "description": "创建或处理“表格对象”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "表格与矩阵"
+    ],
+    "inputs": [
+      {
+        "name": "DATA",
+        "label": "数据",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "OBJECT",
+        "value": "普通表格"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/table_object.png"
+  },
+  {
+    "type": "visual_python_manim_matrix_object",
+    "title": "矩阵对象",
+    "description": "创建或处理“矩阵对象”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "表格与矩阵"
+    ],
+    "inputs": [
+      {
+        "name": "DATA",
+        "label": "数据",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "OBJECT",
+        "value": "普通矩阵"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/matrix_object.png"
+  },
+  {
+    "type": "visual_python_manim_determinant_object",
+    "title": "行列式矩阵 数据",
+    "description": "创建或处理“行列式矩阵 数据”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "表格与矩阵"
+    ],
+    "inputs": [
+      {
+        "name": "DATA",
+        "label": "数据",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/determinant_object.png"
+  },
+  {
+    "type": "visual_python_manim_table_highlight_cell",
+    "title": "表格",
+    "description": "创建或处理“表格”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "表格与矩阵"
+    ],
+    "inputs": [
+      {
+        "name": "TABLE",
+        "label": "表格",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "ROW",
+        "label": "行",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "COLUMN",
+        "label": "列",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/table_highlight_cell.png"
+  },
+  {
+    "type": "visual_python_manim_brace",
+    "title": "大括号 目标",
+    "description": "创建或处理“大括号 目标”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "标注与装饰"
+    ],
+    "inputs": [
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/brace.png"
+  },
+  {
+    "type": "visual_python_manim_brace_label",
+    "title": "大括号标注 目标",
+    "description": "创建或处理“大括号标注 目标”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "标注与装饰"
+    ],
+    "inputs": [
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "LABEL",
+        "label": "标签",
+        "accepts": [
+          "文本"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/brace_label.png"
+  },
+  {
+    "type": "visual_python_manim_surrounding_rectangle",
+    "title": "环绕矩形 目标",
+    "description": "创建或处理“环绕矩形 目标”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "标注与装饰"
+    ],
+    "inputs": [
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "BUFF",
+        "label": "间距",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/surrounding_rectangle.png"
+  },
+  {
+    "type": "visual_python_manim_angle",
+    "title": "角度标注 直线一",
+    "description": "创建或处理“角度标注 直线一”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "标注与装饰"
+    ],
+    "inputs": [
+      {
+        "name": "LINE1",
+        "label": "角度标注 直线一",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "LINE2",
+        "label": "直线二",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RADIUS",
+        "label": "半径",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/angle.png"
+  },
+  {
+    "type": "visual_python_manim_right_angle",
+    "title": "直角标注 直线一",
+    "description": "创建或处理“直角标注 直线一”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "标注与装饰"
+    ],
+    "inputs": [
+      {
+        "name": "LINE1",
+        "label": "直角标注 直线一",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "LINE2",
+        "label": "直线二",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "LENGTH",
+        "label": "长度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/right_angle.png"
+  },
+  {
+    "type": "visual_python_manim_sphere_object",
+    "title": "球体 半径",
+    "description": "创建或处理“球体 半径”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "三维对象"
+    ],
+    "inputs": [
+      {
+        "name": "RADIUS",
+        "label": "半径",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "FILL_OPACITY",
+        "label": "不透明度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/sphere_object.png"
+  },
+  {
+    "type": "visual_python_manim_cube_object",
+    "title": "立方体 边长",
+    "description": "创建或处理“立方体 边长”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "三维对象"
+    ],
+    "inputs": [
+      {
+        "name": "SIDE_LENGTH",
+        "label": "立方体 边长",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "FILL_OPACITY",
+        "label": "不透明度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/cube_object.png"
+  },
+  {
+    "type": "visual_python_manim_cone_object",
+    "title": "圆锥 底半径",
+    "description": "创建或处理“圆锥 底半径”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "三维对象"
+    ],
+    "inputs": [
+      {
+        "name": "BASE_RADIUS",
+        "label": "圆锥 底半径",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "HEIGHT",
+        "label": "高度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "SHOW_BASE",
+        "value": "true"
+      },
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/cone_object.png"
+  },
+  {
+    "type": "visual_python_manim_cylinder_object",
+    "title": "圆柱 半径",
+    "description": "创建或处理“圆柱 半径”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "三维对象"
+    ],
+    "inputs": [
+      {
+        "name": "RADIUS",
+        "label": "半径",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "HEIGHT",
+        "label": "高度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "SHOW_ENDS",
+        "value": "true"
+      },
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/cylinder_object.png"
+  },
+  {
+    "type": "visual_python_manim_prism_object",
+    "title": "棱柱 尺寸",
+    "description": "创建或处理“棱柱 尺寸”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "三维对象"
+    ],
+    "inputs": [
+      {
+        "name": "DIMENSIONS",
+        "label": "棱柱 尺寸",
+        "accepts": [
+          "ManimDimensions"
+        ]
+      },
+      {
+        "name": "FILL_OPACITY",
+        "label": "不透明度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/prism_object.png"
+  },
+  {
+    "type": "visual_python_manim_torus_object",
+    "title": "圆环面 主半径",
+    "description": "创建或处理“圆环面 主半径”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "三维对象"
+    ],
+    "inputs": [
+      {
+        "name": "MAJOR_RADIUS",
+        "label": "圆环面 主半径",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "MINOR_RADIUS",
+        "label": "管半径",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "FILL_OPACITY",
+        "label": "不透明度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/torus_object.png"
+  },
+  {
+    "type": "visual_python_manim_parametric_surface",
+    "title": "参数曲面 函数",
+    "description": "根据两个参数生成三维曲面。精度越高越平滑，但渲染时间也越长。",
+    "category": [
+      "对象",
+      "三维对象"
+    ],
+    "inputs": [
+      {
+        "name": "FUNCTION",
+        "label": "函数",
+        "accepts": [
+          "ManimSurfaceFunction"
+        ]
+      },
+      {
+        "name": "U_RANGE",
+        "label": "横向参数范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "V_RANGE",
+        "label": "纵向参数范围",
+        "accepts": [
+          "ManimRange"
+        ]
+      },
+      {
+        "name": "RESOLUTION",
+        "label": "精度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/parametric_surface.png"
+  },
+  {
+    "type": "visual_python_manim_arrow3d_object",
+    "title": "三维箭头 起点",
+    "description": "创建或处理“三维箭头 起点”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "三维对象"
+    ],
+    "inputs": [
+      {
+        "name": "START",
+        "label": "起点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "END",
+        "label": "终点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "THICKNESS",
+        "label": "线宽",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "HEIGHT",
+        "label": "高度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "BASE_RADIUS",
+        "label": "底半径",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/arrow3d_object.png"
+  },
+  {
+    "type": "visual_python_manim_group_object",
+    "title": "组合对象",
+    "description": "创建或处理“组合对象”场景对象。创建后的对象通常先保存到变量，再通过对象引用参与动画和布局。",
+    "category": [
+      "对象",
+      "复用与组合"
+    ],
+    "inputs": [
+      {
+        "name": "FIRST",
+        "label": "第一个对象/动画",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "SECOND",
+        "label": "第二个对象/动画",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/group_object.png"
+  },
+  {
+    "type": "visual_python_manim_assign",
+    "title": "创建场景对象",
+    "description": "创建对象并保存名称，之后可通过“场景对象”积木重复使用。",
+    "category": [
+      "对象",
+      "复用与组合"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "VAR",
+        "value": "obj"
+      }
+    ],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/assign.png"
+  },
+  {
+    "type": "visual_python_manim_assign_add",
+    "title": "创建并添加场景对象",
+    "description": "创建并命名对象，同时立即把它添加到画面中。",
+    "category": [
+      "对象",
+      "复用与组合"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "VAR",
+        "value": "obj"
+      }
+    ],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/assign_add.png"
+  },
+  {
+    "type": "visual_python_manim_object_ref",
+    "title": "场景对象",
+    "description": "引用已经创建并命名的对象。下拉列表会根据当前位置筛选可用对象。",
+    "category": [
+      "对象",
+      "复用与组合"
+    ],
+    "inputs": [],
+    "fields": [
+      {
+        "name": "VAR",
+        "value": "请先创建对象"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/object_ref.png"
+  },
+  {
+    "type": "visual_python_manim_create_object_animation",
+    "title": "绘制目标",
+    "description": "生成“绘制目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "创建 / 消失"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/create_object_animation.png"
+  },
+  {
+    "type": "visual_python_manim_write_animation",
+    "title": "书写目标",
+    "description": "生成“书写目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "创建 / 消失"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/write_animation.png"
+  },
+  {
+    "type": "visual_python_manim_uncreate_animation",
+    "title": "反向绘制目标",
+    "description": "生成“反向绘制目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "创建 / 消失"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/uncreate_animation.png"
+  },
+  {
+    "type": "visual_python_manim_unwrite_animation",
+    "title": "反向书写目标",
+    "description": "生成“反向书写目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "创建 / 消失"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/unwrite_animation.png"
+  },
+  {
+    "type": "visual_python_manim_draw_border_then_fill_animation",
+    "title": "先描边再填充 目标",
+    "description": "生成“先描边再填充 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "创建 / 消失"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/draw_border_then_fill_animation.png"
+  },
+  {
+    "type": "visual_python_manim_fade_in_animation",
+    "title": "淡入 目标",
+    "description": "生成“淡入 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "淡入淡出"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "SHIFT",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "SCALE",
+        "label": "缩放",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/fade_in_animation.png"
+  },
+  {
+    "type": "visual_python_manim_fade_out_animation",
+    "title": "淡出 目标",
+    "description": "生成“淡出 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "淡入淡出"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "SHIFT",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "SCALE",
+        "label": "缩放",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/fade_out_animation.png"
+  },
+  {
+    "type": "visual_python_manim_transform_to_animation",
+    "title": "变形 从",
+    "description": "生成“变形 从”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "变换动画"
+    ],
+    "inputs": [
+      {
+        "name": "SOURCE",
+        "label": "源对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/transform_to_animation.png"
+  },
+  {
+    "type": "visual_python_manim_replacement_transform_animation",
+    "title": "替换变形 从",
+    "description": "生成“替换变形 从”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "变换动画"
+    ],
+    "inputs": [
+      {
+        "name": "SOURCE",
+        "label": "源对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/replacement_transform_animation.png"
+  },
+  {
+    "type": "visual_python_manim_transform_from_copy_animation",
+    "title": "复制后变形 从",
+    "description": "生成“复制后变形 从”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "变换动画"
+    ],
+    "inputs": [
+      {
+        "name": "SOURCE",
+        "label": "源对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/transform_from_copy_animation.png"
+  },
+  {
+    "type": "visual_python_manim_fade_transform_animation",
+    "title": "淡化变形 从",
+    "description": "生成“淡化变形 从”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "变换动画"
+    ],
+    "inputs": [
+      {
+        "name": "SOURCE",
+        "label": "源对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/fade_transform_animation.png"
+  },
+  {
+    "type": "visual_python_manim_animate_shift",
+    "title": "移动动画 对象",
+    "description": "生成“移动动画 对象”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "属性动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "VECTOR",
+        "label": "向量",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/animate_shift.png"
+  },
+  {
+    "type": "visual_python_manim_animate_scale",
+    "title": "缩放动画 对象",
+    "description": "生成“缩放动画 对象”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "属性动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "FACTOR",
+        "label": "缩放倍数",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/animate_scale.png"
+  },
+  {
+    "type": "visual_python_manim_animate_rotate",
+    "title": "旋转动画 对象",
+    "description": "生成“旋转动画 对象”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "属性动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "ANGLE",
+        "label": "角度",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/animate_rotate.png"
+  },
+  {
+    "type": "visual_python_manim_animate_move_to",
+    "title": "移动到指定点 对象",
+    "description": "生成“移动到指定点 对象”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "属性动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "POINT",
+        "label": "坐标点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/animate_move_to.png"
+  },
+  {
+    "type": "visual_python_manim_animate_set_color",
+    "title": "颜色动画 对象",
+    "description": "让对象平滑过渡到指定颜色。",
+    "category": [
+      "动画效果",
+      "属性动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "蓝色"
+      }
+    ],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/animate_set_color.png"
+  },
+  {
+    "type": "visual_python_manim_animate_set_color_gradient",
+    "title": "渐变颜色动画 对象",
+    "description": "让对象平滑过渡到由两种颜色组成的渐变。",
+    "category": [
+      "动画效果",
+      "属性动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "START_COLOR",
+        "value": "红色"
+      },
+      {
+        "name": "END_COLOR",
+        "value": "蓝色"
+      }
+    ],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/animate_set_color_gradient.png"
+  },
+  {
+    "type": "visual_python_manim_animate_set_color_blend",
+    "title": "混合颜色动画 对象",
+    "description": "让对象平滑过渡到两种颜色按指定比例混合后的颜色。",
+    "category": [
+      "动画效果",
+      "属性动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RATIO",
+        "label": "比例",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "START_COLOR",
+        "value": "红色"
+      },
+      {
+        "name": "END_COLOR",
+        "value": "蓝色"
+      }
+    ],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/animate_set_color_blend.png"
+  },
+  {
+    "type": "visual_python_manim_grow_from_center_animation",
+    "title": "从中心生长 目标",
+    "description": "生成“从中心生长 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "生长动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/grow_from_center_animation.png"
+  },
+  {
+    "type": "visual_python_manim_grow_from_point_animation",
+    "title": "从指定点生长 目标",
+    "description": "生成“从指定点生长 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "生长动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "POINT",
+        "label": "坐标点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/grow_from_point_animation.png"
+  },
+  {
+    "type": "visual_python_manim_grow_from_edge_animation",
+    "title": "从边缘生长 目标",
+    "description": "生成“从边缘生长 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "生长动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "EDGE",
+        "label": "边缘",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/grow_from_edge_animation.png"
+  },
+  {
+    "type": "visual_python_manim_grow_arrow_animation",
+    "title": "箭头生长 箭头",
+    "description": "生成“箭头生长 箭头”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "生长动画"
+    ],
+    "inputs": [
+      {
+        "name": "ARROW",
+        "label": "箭头生长 箭头",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/grow_arrow_animation.png"
+  },
+  {
+    "type": "visual_python_manim_spin_in_from_nothing_animation",
+    "title": "旋转出现 目标",
+    "description": "生成“旋转出现 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "生长动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "ANGLE",
+        "label": "角度",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/spin_in_from_nothing_animation.png"
+  },
+  {
+    "type": "visual_python_manim_shrink_to_center_animation",
+    "title": "缩小到中心 目标",
+    "description": "生成“缩小到中心 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "生长动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/shrink_to_center_animation.png"
+  },
+  {
+    "type": "visual_python_manim_indicate_animation",
+    "title": "闪烁强调 目标",
+    "description": "生成“闪烁强调 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "强调动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "SCALE_FACTOR",
+        "label": "放大",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/indicate_animation.png"
+  },
+  {
+    "type": "visual_python_manim_circumscribe_animation",
+    "title": "圈出 目标",
+    "description": "生成“圈出 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "强调动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "BUFF",
+        "label": "间距",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "SHAPE",
+        "value": "矩形"
+      },
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/circumscribe_animation.png"
+  },
+  {
+    "type": "visual_python_manim_wiggle_animation",
+    "title": "摆动 目标",
+    "description": "生成“摆动 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "强调动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "SCALE_VALUE",
+        "label": "缩放",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "ROTATION_ANGLE",
+        "label": "角度",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      },
+      {
+        "name": "N_WIGGLES",
+        "label": "次数",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/wiggle_animation.png"
+  },
+  {
+    "type": "visual_python_manim_apply_wave_animation",
+    "title": "波浪 目标",
+    "description": "生成“波浪 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "强调动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "AMPLITUDE",
+        "label": "振幅",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RIPPLES",
+        "label": "波纹",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/apply_wave_animation.png"
+  },
+  {
+    "type": "visual_python_manim_show_passing_flash_animation",
+    "title": "流光 目标",
+    "description": "生成“流光 目标”动画效果。它本身不会立即播放，需要连接到“播放动画”等播放控制积木。",
+    "category": [
+      "动画效果",
+      "强调动画"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "TIME_WIDTH",
+        "label": "光宽",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/show_passing_flash_animation.png"
+  },
+  {
+    "type": "visual_python_manim_function_preset",
+    "title": "函数",
+    "description": "选择常用函数，并通过缩放和平移参数调整曲线形状，无需手写函数代码。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "AMPLITUDE",
+        "label": "纵向缩放",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "FREQUENCY",
+        "label": "横向缩放",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "OFFSET",
+        "label": "上下平移",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "PRESET",
+        "value": "一次函数"
+      }
+    ],
+    "connection": "值积木：输出ManimFunction，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/function_preset.png"
+  },
+  {
+    "type": "visual_python_manim_surface_function_preset",
+    "title": "曲面函数",
+    "description": "选择常用三维曲面函数，并调整曲面的高度参数。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "HEIGHT",
+        "label": "高度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "PRESET",
+        "value": "平面"
+      }
+    ],
+    "connection": "值积木：输出ManimSurfaceFunction，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/surface_function_preset.png"
+  },
+  {
+    "type": "visual_python_manim_dimensions",
+    "title": "三维尺寸 宽",
+    "description": "设置三维对象在宽、高、深三个方向上的尺寸。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "WIDTH",
+        "label": "宽度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "HEIGHT",
+        "label": "高度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "DEPTH",
+        "label": "深",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出ManimDimensions，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/dimensions.png"
+  },
+  {
+    "type": "visual_python_manim_direction_constant",
+    "title": "方向常量",
+    "description": "提供“方向常量”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [],
+    "fields": [
+      {
+        "name": "VALUE",
+        "value": "中心"
+      }
+    ],
+    "connection": "值积木：输出方向、坐标或向量、数字，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/direction_constant.png"
+  },
+  {
+    "type": "visual_python_manim_scaled_direction",
+    "title": "方向",
+    "description": "提供“方向”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "SCALE",
+        "label": "缩放",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "DIRECTION",
+        "value": "中心"
+      }
+    ],
+    "connection": "值积木：输出方向、坐标或向量、数字，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/scaled_direction.png"
+  },
+  {
+    "type": "visual_python_manim_math_constant",
+    "title": "数学常量",
+    "description": "提供“数学常量”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [],
+    "fields": [
+      {
+        "name": "VALUE",
+        "value": "圆周率"
+      }
+    ],
+    "connection": "值积木：输出数字，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/math_constant.png"
+  },
+  {
+    "type": "visual_python_manim_degrees",
+    "title": "角度",
+    "description": "提供“角度”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [],
+    "fields": [
+      {
+        "name": "VALUE",
+        "value": "90"
+      }
+    ],
+    "connection": "值积木：输出角度，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/degrees.png"
+  },
+  {
+    "type": "visual_python_manim_range",
+    "title": "数值范围（起止与步长）",
+    "description": "生成包含起始值、结束值和步长的范围，可用于坐标轴和数轴。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "START",
+        "label": "起点",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "END",
+        "label": "终点",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "STEP",
+        "label": "步长",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出ManimRange，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/range.png"
+  },
+  {
+    "type": "visual_python_manim_range_min_max",
+    "title": "数值范围（起止）",
+    "description": "生成只包含起始值和结束值的范围，可用于函数曲线和面积区间。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "START",
+        "label": "起点",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "END",
+        "label": "终点",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出ManimRange，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/range_min_max.png"
+  },
+  {
+    "type": "visual_python_manim_point",
+    "title": "点坐标 横坐标",
+    "description": "创建画面中的位置点。二维场景通常把深度坐标设为零。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "X",
+        "label": "横坐标",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "Y",
+        "label": "纵坐标",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "Z",
+        "label": "竖坐标",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出方向、坐标或向量、数字，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/point.png"
+  },
+  {
+    "type": "visual_python_manim_point_list_3",
+    "title": "三个顶点",
+    "description": "提供“三个顶点”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "P1",
+        "label": "三个顶点",
+        "accepts": [
+          "任意兼容值"
+        ]
+      },
+      {
+        "name": "P2",
+        "label": "P2",
+        "accepts": [
+          "任意兼容值"
+        ]
+      },
+      {
+        "name": "P3",
+        "label": "P3",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出ManimPointArguments，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/point_list_3.png"
+  },
+  {
+    "type": "visual_python_manim_table_data_2x2",
+    "title": "二行二列表格数据",
+    "description": "提供“二行二列表格数据”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "A",
+        "label": "二行二列表格数据",
+        "accepts": [
+          "任意兼容值"
+        ]
+      },
+      {
+        "name": "B",
+        "label": "B",
+        "accepts": [
+          "任意兼容值"
+        ]
+      },
+      {
+        "name": "C",
+        "label": "C",
+        "accepts": [
+          "任意兼容值"
+        ]
+      },
+      {
+        "name": "D",
+        "label": "D",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出值，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/table_data_2x2.png"
+  },
+  {
+    "type": "visual_python_manim_matrix_data_2x2",
+    "title": "二行二列数字矩阵",
+    "description": "提供“二行二列数字矩阵”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [
+      {
+        "name": "A",
+        "label": "二行二列数字矩阵",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "B",
+        "label": "B",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "C",
+        "label": "C",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "D",
+        "label": "D",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出值，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/matrix_data_2x2.png"
+  },
+  {
+    "type": "visual_python_manim_color_constant",
+    "title": "颜色常量",
+    "description": "提供“颜色常量”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "坐标与数学工具"
+    ],
+    "inputs": [],
+    "fields": [
+      {
+        "name": "VALUE",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出值，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/color_constant.png"
+  },
+  {
+    "type": "visual_python_manim_play_list",
+    "title": "播放动画列表",
+    "description": "批量播放动画列表。适合同时处理三个或更多动画。",
+    "category": [
+      "列表与批量结构"
+    ],
+    "inputs": [
+      {
+        "name": "ANIMATIONS",
+        "label": "动画列表",
+        "accepts": [
+          "任意兼容值"
+        ]
+      },
+      {
+        "name": "RUN_TIME",
+        "label": "播放时间",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "LAG_RATIO",
+        "label": "延迟比例",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/play_list.png"
+  },
+  {
+    "type": "visual_python_manim_polygon_from_list_object",
+    "title": "多边形 顶点列表",
+    "description": "提供“多边形 顶点列表”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "列表与批量结构"
+    ],
+    "inputs": [
+      {
+        "name": "POINTS",
+        "label": "坐标点列表",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/polygon_from_list_object.png"
+  },
+  {
+    "type": "visual_python_manim_group_from_list_object",
+    "title": "组合对象列表",
+    "description": "提供“组合对象列表”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "列表与批量结构"
+    ],
+    "inputs": [
+      {
+        "name": "OBJECTS",
+        "label": "组合对象列表",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/group_from_list_object.png"
+  },
+  {
+    "type": "visual_python_manim_value_tracker",
+    "title": "数值追踪器 初始值",
+    "description": "提供“数值追踪器 初始值”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "VALUE",
+        "label": "数值",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/value_tracker.png"
+  },
+  {
+    "type": "visual_python_manim_decimal_number",
+    "title": "小数显示 值",
+    "description": "提供“小数显示 值”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "VALUE",
+        "label": "数值",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "PLACES",
+        "label": "小数位数",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/decimal_number.png"
+  },
+  {
+    "type": "visual_python_manim_variable",
+    "title": "带标签变量 值",
+    "description": "提供“带标签变量 值”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "VALUE",
+        "label": "数值",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "LABEL",
+        "label": "标签",
+        "accepts": [
+          "文本"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/variable.png"
+  },
+  {
+    "type": "visual_python_manim_tracker_get_value",
+    "title": "获取追踪器",
+    "description": "提供“获取追踪器”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "TRACKER",
+        "label": "数值追踪器",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出数字，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/tracker_get_value.png"
+  },
+  {
+    "type": "visual_python_manim_always_redraw",
+    "title": "实时重绘 对象",
+    "description": "提供“实时重绘 对象”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/always_redraw.png"
+  },
+  {
+    "type": "visual_python_manim_traced_path",
+    "title": "轨迹路径 目标",
+    "description": "提供“轨迹路径 目标”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "WIDTH",
+        "label": "宽度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/traced_path.png"
+  },
+  {
+    "type": "visual_python_manim_decimal_follow_tracker",
+    "title": "小数显示跟随追踪器",
+    "description": "提供“小数显示跟随追踪器”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "TRACKER",
+        "label": "数值追踪器",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "PLACES",
+        "label": "小数位数",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/decimal_follow_tracker.png"
+  },
+  {
+    "type": "visual_python_manim_follow_target_updater",
+    "title": "跟随目标更新器",
+    "description": "提供“跟随目标更新器”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/follow_target_updater.png"
+  },
+  {
+    "type": "visual_python_manim_clear_updaters",
+    "title": "清除对象",
+    "description": "提供“清除对象”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "语句积木：接入场景或其他容器的执行区域。",
+    "image": "assets/blocks/clear_updaters.png"
+  },
+  {
+    "type": "visual_python_manim_tracker_set_value_animation",
+    "title": "追踪器动画",
+    "description": "提供“追踪器动画”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "动态绑定"
+    ],
+    "inputs": [
+      {
+        "name": "TRACKER",
+        "label": "数值追踪器",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "VALUE",
+        "label": "数值",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出动画效果，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/tracker_set_value_animation.png"
+  },
+  {
+    "type": "visual_python_manim_set_color",
+    "title": "设置颜色",
+    "description": "提供“设置颜色”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "样式设置"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/set_color.png"
+  },
+  {
+    "type": "visual_python_manim_set_color_gradient",
+    "title": "设置双色渐变",
+    "description": "让对象的颜色从起始色平滑过渡到结束色。",
+    "category": [
+      "属性与样式",
+      "样式设置"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "START_COLOR",
+        "value": "白色"
+      },
+      {
+        "name": "END_COLOR",
+        "value": "蓝色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/set_color_gradient.png"
+  },
+  {
+    "type": "visual_python_manim_set_color_gradient_three",
+    "title": "设置三色渐变",
+    "description": "让对象依次经过三种颜色，形成更丰富的渐变。",
+    "category": [
+      "属性与样式",
+      "样式设置"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "START_COLOR",
+        "value": "红色"
+      },
+      {
+        "name": "MIDDLE_COLOR",
+        "value": "黄色"
+      },
+      {
+        "name": "END_COLOR",
+        "value": "蓝色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/set_color_gradient_three.png"
+  },
+  {
+    "type": "visual_python_manim_set_color_blend",
+    "title": "设置混合颜色",
+    "description": "按比例混合两种颜色。零表示起始色，一表示结束色。",
+    "category": [
+      "属性与样式",
+      "样式设置"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "RATIO",
+        "label": "比例",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "START_COLOR",
+        "value": "红色"
+      },
+      {
+        "name": "END_COLOR",
+        "value": "蓝色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/set_color_blend.png"
+  },
+  {
+    "type": "visual_python_manim_set_opacity",
+    "title": "设置透明度",
+    "description": "提供“设置透明度”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "样式设置"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "OPACITY",
+        "label": "透明度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/set_opacity.png"
+  },
+  {
+    "type": "visual_python_manim_set_fill",
+    "title": "设置填充",
+    "description": "提供“设置填充”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "样式设置"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "OPACITY",
+        "label": "透明度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/set_fill.png"
+  },
+  {
+    "type": "visual_python_manim_set_stroke",
+    "title": "设置描边",
+    "description": "提供“设置描边”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "样式设置"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "WIDTH",
+        "label": "宽度",
+        "accepts": [
+          "数字"
+        ]
+      },
+      {
+        "name": "OPACITY",
+        "label": "透明度",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "COLOR",
+        "value": "白色"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/set_stroke.png"
+  },
+  {
+    "type": "visual_python_manim_move_to",
+    "title": "移动到指定点",
+    "description": "提供“移动到指定点”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "位置变换"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "POINT",
+        "label": "坐标点",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/move_to.png"
+  },
+  {
+    "type": "visual_python_manim_shift",
+    "title": "相对移动",
+    "description": "提供“相对移动”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "位置变换"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "VECTOR",
+        "label": "向量",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/shift.png"
+  },
+  {
+    "type": "visual_python_manim_scale",
+    "title": "缩放对象",
+    "description": "提供“缩放对象”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "位置变换"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "FACTOR",
+        "label": "缩放倍数",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/scale.png"
+  },
+  {
+    "type": "visual_python_manim_rotate",
+    "title": "旋转对象",
+    "description": "提供“旋转对象”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "位置变换"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "ANGLE",
+        "label": "角度",
+        "accepts": [
+          "角度",
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/rotate.png"
+  },
+  {
+    "type": "visual_python_manim_to_edge",
+    "title": "移动到画面边缘",
+    "description": "提供“移动到画面边缘”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "位置变换"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "BUFF",
+        "label": "间距",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/to_edge.png"
+  },
+  {
+    "type": "visual_python_manim_to_corner",
+    "title": "移动到画面角落",
+    "description": "提供“移动到画面角落”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "位置变换"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "BUFF",
+        "label": "间距",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/to_corner.png"
+  },
+  {
+    "type": "visual_python_manim_next_to",
+    "title": "排列到目标旁边",
+    "description": "提供“排列到目标旁边”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "位置变换"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "TARGET",
+        "label": "目标对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "BUFF",
+        "label": "间距",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/next_to.png"
+  },
+  {
+    "type": "visual_python_manim_arrange",
+    "title": "群组",
+    "description": "提供“群组”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "位置变换"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "DIRECTION",
+        "label": "方向",
+        "accepts": [
+          "方向、坐标或向量",
+          "数字"
+        ]
+      },
+      {
+        "name": "BUFF",
+        "label": "间距",
+        "accepts": [
+          "数字"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "name": "CENTER",
+        "value": "true"
+      }
+    ],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/arrange.png"
+  },
+  {
+    "type": "visual_python_manim_apply_matrix",
+    "title": "应用矩阵变换",
+    "description": "提供“应用矩阵变换”所需的参数或辅助值，可连接到类型兼容的 Manim 积木输入槽。",
+    "category": [
+      "属性与样式",
+      "位置变换"
+    ],
+    "inputs": [
+      {
+        "name": "MOBJECT",
+        "label": "对象",
+        "accepts": [
+          "场景对象"
+        ]
+      },
+      {
+        "name": "MATRIX",
+        "label": "矩阵",
+        "accepts": [
+          "任意兼容值"
+        ]
+      }
+    ],
+    "fields": [],
+    "connection": "值积木：输出场景对象，连接到形状匹配的输入槽。",
+    "image": "assets/blocks/apply_matrix.png"
+  }
+]

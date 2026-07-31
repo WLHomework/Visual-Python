@@ -22,10 +22,10 @@ export const registerFadeAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_fade_in_animation",
-    message0: "淡入 FadeIn 对象 %1 方向 %2 缩放 %3 时间 %4",
+    message0: "淡入 对象 %1 方向 %2 缩放 %3 时间 %4",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "SHIFT" },
+      { type: "input_value", name: "SHIFT", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "SCALE", check: "Number" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
@@ -43,10 +43,10 @@ export const registerFadeAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_fade_out_animation",
-    message0: "淡出 FadeOut 对象 %1 方向 %2 缩放 %3 时间 %4",
+    message0: "淡出 对象 %1 方向 %2 缩放 %3 时间 %4",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "SHIFT" },
+      { type: "input_value", name: "SHIFT", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "SCALE", check: "Number" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],

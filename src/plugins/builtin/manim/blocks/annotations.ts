@@ -1,15 +1,15 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions } from "../constants";
+import { colour } from "../constants";
 import { addManimImport, value } from "../helpers";
 
 export const registerAnnotationBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_brace",
-    message0: "大括号 Brace 目标 %1 方向 %2",
+    message0: "大括号 目标 %1 方向 %2",
     args0: [
       { type: "input_value", name: "TARGET", check: "ManimObject" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -23,11 +23,11 @@ export const registerAnnotationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_brace_label",
-    message0: "大括号标注 BraceLabel 目标 %1 文本 %2 方向 %3",
+    message0: "大括号标注 目标 %1 文本 %2 方向 %3",
     args0: [
       { type: "input_value", name: "TARGET", check: "ManimObject" },
       { type: "input_value", name: "LABEL", check: "String" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -46,7 +46,7 @@ export const registerAnnotationBlocks = (context: PluginContext) => {
     args0: [
       { type: "input_value", name: "TARGET", check: "ManimObject" },
       { type: "input_value", name: "BUFF", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -61,12 +61,12 @@ export const registerAnnotationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_angle",
-    message0: "角度标注 Angle 线1 %1 线2 %2 半径 %3 颜色 %4",
+    message0: "角度标注 直线一 %1 直线二 %2 半径 %3 颜色 %4",
     args0: [
       { type: "input_value", name: "LINE1", check: "ManimObject" },
       { type: "input_value", name: "LINE2", check: "ManimObject" },
       { type: "input_value", name: "RADIUS", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -82,12 +82,12 @@ export const registerAnnotationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_right_angle",
-    message0: "直角标注 RightAngle 线1 %1 线2 %2 长度 %3 颜色 %4",
+    message0: "直角标注 直线一 %1 直线二 %2 长度 %3 颜色 %4",
     args0: [
       { type: "input_value", name: "LINE1", check: "ManimObject" },
       { type: "input_value", name: "LINE2", check: "ManimObject" },
       { type: "input_value", name: "LENGTH", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

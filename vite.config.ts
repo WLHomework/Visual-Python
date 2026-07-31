@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 1420,
+    port: 43127,
     strictPort: true,
     host: "127.0.0.1",
     watch: {

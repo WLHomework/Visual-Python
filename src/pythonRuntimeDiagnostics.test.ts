@@ -24,6 +24,15 @@ describe("Python inline runtime diagnostics", () => {
     expect(index?.message).toContain("边界");
   });
 
+  it("explains common file system errors", () => {
+    const diagnostic = parsePythonRuntimeDiagnostic(
+      `Traceback (most recent call last):\n  File "<string>", line 1, in <module>\nOSError: [Errno 39] Directory not empty: 'data'`,
+      "Path('data').rmdir()",
+    );
+    expect(diagnostic?.message).toContain("不是空目录");
+    expect(diagnostic?.suggestion).toContain("连同全部内容");
+  });
+
   it("ignores syntax errors and library-only tracebacks", () => {
     expect(parsePythonRuntimeDiagnostic(`  File "<visual-python>", line 1\nSyntaxError: invalid syntax`, "x =")).toBeNull();
     expect(parsePythonRuntimeDiagnostic(`ValueError: bad value`, "run()")).toBeNull();

@@ -53,6 +53,22 @@ const friendlyRuntimeMessage = (type: string, detail: string) => {
     message: "这个文件或目录暂时不允许访问。",
     suggestion: "检查文件是否被占用，并确认当前用户具有读取或写入权限。",
   };
+  if (type === "IsADirectoryError") return {
+    message: "当前路径指向目录，但这里需要一个文件。",
+    suggestion: "重新选择文件，或者改用对应的目录操作积木。",
+  };
+  if (type === "NotADirectoryError") return {
+    message: "当前路径指向文件，但这里需要一个目录。",
+    suggestion: "重新选择目录，或者改用对应的文件操作积木。",
+  };
+  if (type === "FileExistsError") return {
+    message: "目标文件或目录已经存在。",
+    suggestion: "更换名称，或者把“已存在时”设置为忽略或合并。",
+  };
+  if (type === "OSError" && /directory not empty/i.test(detail)) return {
+    message: "这个目录不是空目录，不能按当前方式删除。",
+    suggestion: "确认需要永久删除全部内容后，将删除方式改为“连同全部内容”。",
+  };
   if (type === "TypeError" && missingArguments) return {
     message: `函数调用漏带了参数 ${missingArguments}。`,
     suggestion: "按照函数定义补齐参数，并检查参数顺序和名称。",

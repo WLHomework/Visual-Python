@@ -1,18 +1,18 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions } from "../constants";
+import { colour } from "../constants";
 import { addManimImport, pythonCall, value } from "../helpers";
 
 export const registerRoundThreeDSolidBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_cone_object",
-    message0: "圆锥 Cone 底半径 %1 高度 %2 方向 %3 显示底面 %4 颜色 %5",
+    message0: "圆锥 底半径 %1 高度 %2 方向 %3 显示底面 %4 颜色 %5",
     args0: [
       { type: "input_value", name: "BASE_RADIUS", check: "Number" },
       { type: "input_value", name: "HEIGHT", check: "Number" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
       { type: "field_checkbox", name: "SHOW_BASE", checked: true },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: false,
     output: "ManimObject",
@@ -29,13 +29,13 @@ export const registerRoundThreeDSolidBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_cylinder_object",
-    message0: "圆柱 Cylinder 半径 %1 高度 %2 方向 %3 显示端面 %4 颜色 %5",
+    message0: "圆柱 半径 %1 高度 %2 方向 %3 显示端面 %4 颜色 %5",
     args0: [
       { type: "input_value", name: "RADIUS", check: "Number" },
       { type: "input_value", name: "HEIGHT", check: "Number" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
       { type: "field_checkbox", name: "SHOW_ENDS", checked: true },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: false,
     output: "ManimObject",

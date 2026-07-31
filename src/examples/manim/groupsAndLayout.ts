@@ -27,7 +27,7 @@ export const groupsAndLayoutExample: ExampleProject = {
                 inputs: {
                   ITEM0: input({ type: "visual_python_manim_circle_object", fields: { COLOR: "BLUE" }, inputs: { RADIUS: number(0.8) } }),
                   ITEM1: input({ type: "visual_python_manim_square_object", fields: { COLOR: "GREEN" }, inputs: { SIDE_LENGTH: number(1.6) } }),
-                  ITEM2: input({ type: "visual_python_manim_triangle_object", fields: { COLOR: "YELLOW" } }),
+                  ITEM2: input({ type: "visual_python_manim_triangle_object", fields: { COLOR: "YELLOW" }, inputs: { SIDE_LENGTH: number(2) } }),
                 },
               }) },
             }),

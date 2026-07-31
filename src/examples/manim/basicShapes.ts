@@ -36,7 +36,7 @@ export const basicShapesExample: ExampleProject = {
             inputs: { MOBJECT: input({ type: "visual_python_manim_square_object", fields: { COLOR: "GREEN" }, inputs: { SIDE_LENGTH: number(2) } }) },
             next: { block: {
               type: "visual_python_manim_assign", fields: { VAR: "triangle" },
-              inputs: { MOBJECT: input(shifted({ type: "visual_python_manim_triangle_object", fields: { COLOR: "YELLOW" } }, "RIGHT")) },
+              inputs: { MOBJECT: input(shifted({ type: "visual_python_manim_triangle_object", fields: { COLOR: "YELLOW" }, inputs: { SIDE_LENGTH: number(2) } }, "RIGHT")) },
               next: { block: {
                 type: "visual_python_manim_play_list",
                 inputs: {

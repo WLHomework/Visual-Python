@@ -1,6 +1,6 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions, shapeArgumentDefaults, shapeOptions } from "../constants";
+import { colour, shapeArgumentDefaults, shapeOptions } from "../constants";
 import { addManimImport, joinArguments, pythonCall, value } from "../helpers";
 
 export const registerShapeObjectBlocks = (context: PluginContext) => {
@@ -10,7 +10,7 @@ export const registerShapeObjectBlocks = (context: PluginContext) => {
     args0: [
       { type: "field_dropdown", name: "SHAPE", options: shapeOptions },
       { type: "input_value", name: "ARG" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -25,10 +25,10 @@ export const registerShapeObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_circle_object",
-    message0: "圆形 Circle 半径 %1 颜色 %2",
+    message0: "圆形 半径 %1 颜色 %2",
     args0: [
       { type: "input_value", name: "RADIUS", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -42,10 +42,10 @@ export const registerShapeObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_square_object",
-    message0: "正方形 Square 边长 %1 颜色 %2",
+    message0: "正方形 边长 %1 颜色 %2",
     args0: [
       { type: "input_value", name: "SIDE_LENGTH", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -59,11 +59,11 @@ export const registerShapeObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_rectangle_object",
-    message0: "矩形 Rectangle 宽 %1 高 %2 颜色 %3",
+    message0: "矩形 宽 %1 高 %2 颜色 %3",
     args0: [
       { type: "input_value", name: "WIDTH", check: "Number" },
       { type: "input_value", name: "HEIGHT", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -78,11 +78,11 @@ export const registerShapeObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_dot_object",
-    message0: "点 Dot 位置 %1 半径 %2 颜色 %3",
+    message0: "点 位置 %1 半径 %2 颜色 %3",
     args0: [
-      { type: "input_value", name: "POINT" },
+      { type: "input_value", name: "POINT", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "RADIUS", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

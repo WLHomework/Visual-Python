@@ -5,7 +5,7 @@
   "identifier": "com.visualpython.desktop",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:43127",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build:desktop"
   },
@@ -17,6 +17,7 @@
         "title": "Visual Python",
         "width": 1440,
         "height": 900,
+        "center": true,
         "minWidth": 1024,
         "minHeight": 680,
         "resizable": true,
@@ -55,7 +56,8 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis"
+      "nsis",
+      "msi"
     ],
     "publisher": "Visual Python",
     "copyright": "Copyright (c) 2026 Visual Python",
@@ -81,12 +83,19 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources/language-server/": "language-server/"
+      "resources/language-server/": "language-server/",
+      "../docs/manim-plugin/": "docs/manim-plugin/"
     },
     "windows": {
       "allowDowngrades": false,
+      "wix": {
+        "upgradeCode": "7bb65b3f-8540-58f4-b655-56b090b40cd4",
+        "language": "zh-CN"
+      },
       "nsis": {
         "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
         "languages": [
           "SimpChinese",
           "English"

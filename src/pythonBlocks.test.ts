@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
-import { buildDefinedFunctionCallToolbox, defaultVisualThemeId, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, starterState, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
-import { getManimVoiceoverContextWarning, getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
+import { buildDefinedClassConstructorToolbox, buildDefinedFunctionCallToolbox, defaultVisualThemeId, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, starterState, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
+import { getManimVoiceoverContextWarning, getPythonCollectionTypeWarning, getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 
 const variableFields: Record<string, string[]> = {
   variables_set: ["VAR"], variables_get: ["VAR"],
@@ -48,6 +48,13 @@ const state = (block: object) => {
 const text = (value: string) => ({ block: { type: "text", fields: { TEXT: value } } });
 const number = (value: number) => ({ block: { type: "math_number", fields: { NUM: value } } });
 const expression = (code: string) => ({ block: { type: "python_raw_expression", fields: { CODE: code } } });
+const withImport = (moduleName: string, code: string) => `import ${moduleName}\n\n\n${code}`;
+const configuredToolboxBlock = (categoryName: string, type: string, predicate: (entry: any) => boolean = () => true) => {
+  const category = (toolbox as any).contents.find((item: any) => item.name === categoryName);
+  const item = category.contents.find((entry: any) => entry.type === type && predicate(entry));
+  const { kind: _kind, ...blockState } = structuredClone(item);
+  return blockState;
+};
 
 describe("Python block generators", () => {
   it("uses the light workspace theme by default", () => {
@@ -92,7 +99,38 @@ describe("Python block generators", () => {
   });
 
   it("sanitizes invalid identifiers", () => {
-    expect(generatePython(state({ type: "python_call", fields: { NAME: "bad code!" } }))).toContain("function()");
+    expect(generatePython(state({ type: "python_call", fields: { NAME: "bad code!" } }))).toContain("自定义函数()");
+  });
+
+  it("preserves Chinese Python identifiers in generated code", () => {
+    const functionBlock = {
+      type: "python_function_structured",
+      fields: { NAME: "计算面积", PARAM_NAME0: "半径" },
+      extraState: { parameters: [{ kind: "positional", name: "半径" }] },
+      inputs: { BODY: { block: { type: "python_return", inputs: { VALUE: expression("半径 * 半径") } } } },
+    };
+    expect(generatePython(state(functionBlock))).toContain("def 计算面积(半径):\n  return 半径 * 半径");
+
+    const variableState = state({
+      type: "variables_set",
+      fields: { VAR: { name: "计算结果" } },
+      inputs: { VALUE: number(4) },
+    });
+    expect(generatePython(variableState)).toContain("计算结果 = 4");
+  });
+
+  it("uses Chinese defaults for beginner-created identifiers", () => {
+    const workspace = new Blockly.Workspace();
+    const fieldText = (type: string, field: string) => workspace.newBlock(type).getField(field)?.getText();
+
+    expect(fieldText("python_input_assign", "VAR")).toBe("回答");
+    expect(fieldText("python_for_in", "VAR")).toBe("项目");
+    expect(fieldText("python_function_structured", "NAME")).toBe("自定义函数");
+    expect(fieldText("python_function_structured", "PARAM_NAME0")).toBe("数值");
+    expect(fieldText("python_class_def", "NAME")).toBe("自定义类");
+    expect(fieldText("python_lambda", "PARAMS")).toBe("数值");
+
+    workspace.dispose();
   });
 
   it("generates dynamic collections including empty and single item forms", () => {
@@ -183,54 +221,104 @@ describe("Python block generators", () => {
     expect(generatePython(state({ type: "python_builtin_divmod", inputs: { A: number(7), B: number(3) } }))).toBe("divmod(7, 3)\n");
   });
 
+  it("provides runnable defaults for math and built-in toolbox blocks", () => {
+    expect(generatePython(state(configuredToolboxBlock("数学", "math_arithmetic")))).toBe("1 + 1\n");
+    expect(generatePython(state(configuredToolboxBlock("数学", "math_on_list")))).toBe("sum([1, 2, 3])\n");
+    expect(generatePython(state(configuredToolboxBlock("内置函数", "python_builtin_sum")))).toBe("sum([1, 2, 3])\n");
+    expect(generatePython(state(configuredToolboxBlock("内置函数", "python_builtin_sorted")))).toBe("sorted([3, 1, 2])\n");
+    expect(generatePython(state(configuredToolboxBlock("内置函数", "python_builtin_map_filter")))).toBe("map(lambda 数值: 数值 * 2, [1, 2, 3])\n");
+    expect(generatePython(state(configuredToolboxBlock("内置函数", "python_builtin_next")))).toBe("next(iter([1, 2, 3]))\n");
+  });
+
+  it("provides complete modern syntax, file resource and async templates", () => {
+    const matchCode = generatePython(state(configuredToolboxBlock("现代语法", "python_match")));
+    expect(matchCode).toBe("match '开始':\n  case '开始':\n    print('开始处理')\n  case _:\n    pass\n");
+
+    const withCode = generatePython(state(configuredToolboxBlock("文件", "python_with", (entry) => entry.inputs?.CONTEXT?.shadow?.fields?.MODE === "w")));
+    expect(withCode).toContain("with open('output.txt', \"w\", encoding=\"utf-8\") as 文件:");
+    expect(withCode).toContain("文件.write('示例内容')");
+
+    const readWithCode = generatePython(state(configuredToolboxBlock("文件", "python_with", (entry) => entry.inputs?.CONTEXT?.shadow?.fields?.MODE === "r")));
+    expect(readWithCode).toContain("with open('data.txt', \"r\", encoding=\"utf-8\") as 文件:");
+    expect(readWithCode).toContain("文件内容 = 文件.read()");
+
+    const asyncCode = generatePython(state(configuredToolboxBlock("异步", "python_async_function_structured")));
+    expect(asyncCode).toContain("import asyncio");
+    expect(asyncCode).toContain("async def 主函数():");
+    expect(asyncCode).toContain("await asyncio.sleep(1)");
+    expect(asyncCode).toContain("asyncio.run(主函数())");
+  });
+
+  it("provides complete comprehension, generator and decorator templates", () => {
+    expect(generatePython(state(configuredToolboxBlock("集合", "python_list_comprehension")))).toBe("[项目 * 2 for 项目 in [1, 2, 3]]\n");
+    expect(generatePython(state(configuredToolboxBlock("集合", "python_set_comprehension")))).toBe("{项目 for 项目 in [1, 2, 2, 3]}\n");
+    expect(generatePython(state(configuredToolboxBlock("集合", "python_dict_comprehension")))).toBe("{项目: 项目 * 2 for 项目 in [1, 2, 3]}\n");
+    expect(generatePython(state(configuredToolboxBlock("函数", "python_generator_expression")))).toBe("(项目 * 2 for 项目 in [1, 2, 3])\n");
+
+    const decoratorCode = generatePython(state(configuredToolboxBlock("函数", "python_decorated_definition")));
+    expect(decoratorCode).toContain("import functools");
+    expect(decoratorCode).toContain("@functools.cache");
+    expect(decoratorCode).toContain("def 计算(数值):");
+    expect(decoratorCode).toContain("return 数值");
+
+    const inputOutput = (toolbox as any).contents.find((item: any) => item.name === "输入输出");
+    const textCategory = (toolbox as any).contents.find((item: any) => item.name === "文本");
+    expect(inputOutput.contents.some((item: any) => item.type === "text")).toBe(false);
+    expect(textCategory.contents.some((item: any) => item.type === "text")).toBe(true);
+  });
+
   it("generates core math, random and JSON standard library blocks", () => {
     expect(generatePython(state({ type: "python_standard_library_import", fields: { MODULE: "math" } }))).toBe("import math\n");
-    expect(generatePython(state({ type: "python_math_constant", fields: { CONSTANT: "pi" } }))).toBe("math.pi\n");
-    expect(generatePython(state({ type: "python_math_unary", fields: { FUNCTION: "sqrt" }, inputs: { VALUE: number(9) } }))).toBe("math.sqrt(9)\n");
-    expect(generatePython(state({ type: "python_random_randint", inputs: { A: number(1), B: number(6) } }))).toBe("random.randint(1, 6)\n");
-    expect(generatePython(state({ type: "python_random_uniform", inputs: { A: number(0), B: number(1) } }))).toBe("random.uniform(0, 1)\n");
-    expect(generatePython(state({ type: "python_random_choice", inputs: { SEQUENCE: expression("items") } }))).toBe("random.choice(items)\n");
-    expect(generatePython(state({ type: "python_random_sample", inputs: { POPULATION: expression("items"), K: number(3) } }))).toBe("random.sample(items, 3)\n");
-    expect(generatePython(state({ type: "python_random_shuffle", inputs: { SEQUENCE: expression("items") } }))).toBe("random.shuffle(items)\n");
-    expect(generatePython(state({ type: "python_json_dumps", inputs: { VALUE: expression("data"), INDENT: number(2) } }))).toBe("json.dumps(data, indent=2)\n");
-    expect(generatePython(state({ type: "python_json_loads", inputs: { TEXT: expression("payload") } }))).toBe("json.loads(payload)\n");
+    expect(generatePython(state({ type: "python_math_constant", fields: { CONSTANT: "pi" } }))).toBe(withImport("math", "math.pi\n"));
+    expect(generatePython(state({ type: "python_math_unary", fields: { FUNCTION: "sqrt" }, inputs: { VALUE: number(9) } }))).toBe(withImport("math", "math.sqrt(9)\n"));
+    expect(generatePython(state({ type: "python_random_randint", inputs: { A: number(1), B: number(6) } }))).toBe(withImport("random", "random.randint(1, 6)\n"));
+    expect(generatePython(state({ type: "python_random_uniform", inputs: { A: number(0), B: number(1) } }))).toBe(withImport("random", "random.uniform(0, 1)\n"));
+    expect(generatePython(state({ type: "python_random_choice", inputs: { SEQUENCE: expression("items") } }))).toBe(withImport("random", "random.choice(items)\n"));
+    expect(generatePython(state({ type: "python_random_sample", inputs: { POPULATION: expression("items"), K: number(3) } }))).toBe(withImport("random", "random.sample(items, 3)\n"));
+    expect(generatePython(state({ type: "python_random_shuffle", inputs: { SEQUENCE: expression("items") } }))).toBe(withImport("random", "random.shuffle(items)\n"));
+    expect(generatePython(state({ type: "python_json_dumps", inputs: { VALUE: expression("data"), INDENT: number(2) } }))).toBe(withImport("json", "json.dumps(data, indent=2)\n"));
+    expect(generatePython(state({ type: "python_json_loads", inputs: { TEXT: expression("payload") } }))).toBe(withImport("json", "json.loads(payload)\n"));
   });
 
   it("generates datetime, pathlib and os standard library blocks", () => {
     expect(generatePython(state({ type: "python_standard_library_import", fields: { MODULE: "datetime" } }))).toBe("import datetime\n");
-    expect(generatePython(state({ type: "python_datetime_now", fields: { MODE: "now" } }))).toBe("datetime.datetime.now()\n");
-    expect(generatePython(state({ type: "python_datetime_now", fields: { MODE: "utc" } }))).toBe("datetime.datetime.now(datetime.timezone.utc)\n");
-    expect(generatePython(state({ type: "python_datetime_parse", inputs: { TEXT: text("2026-07-16"), FORMAT: text("%Y-%m-%d") } }))).toBe("datetime.datetime.strptime('2026-07-16', '%Y-%m-%d')\n");
+    expect(generatePython(state({ type: "python_datetime_now", fields: { MODE: "now" } }))).toBe(withImport("datetime", "datetime.datetime.now()\n"));
+    expect(generatePython(state({ type: "python_datetime_now", fields: { MODE: "utc" } }))).toBe(withImport("datetime", "datetime.datetime.now(datetime.timezone.utc)\n"));
+    expect(generatePython(state({ type: "python_datetime_parse", inputs: { TEXT: text("2026-07-16"), FORMAT: text("%Y-%m-%d") } }))).toBe(withImport("datetime", "datetime.datetime.strptime('2026-07-16', '%Y-%m-%d')\n"));
     expect(generatePython(state({ type: "python_datetime_format", inputs: { VALUE: expression("created_at"), FORMAT: text("%H:%M") } }))).toBe("created_at.strftime('%H:%M')\n");
-    expect(generatePython(state({ type: "python_datetime_timedelta", inputs: { DAYS: number(2), HOURS: number(3) } }))).toBe("datetime.timedelta(days=2, hours=3)\n");
-    expect(generatePython(state({ type: "python_path_create", inputs: { VALUE: text("output") } }))).toBe("pathlib.Path('output')\n");
+    expect(generatePython(state({ type: "python_datetime_timedelta", inputs: { DAYS: number(2), HOURS: number(3) } }))).toBe(withImport("datetime", "datetime.timedelta(days=2, hours=3)\n"));
+    expect(generatePython(state({ type: "python_path_create", inputs: { VALUE: text("output") } }))).toBe(withImport("pathlib", "pathlib.Path('output')\n"));
     expect(generatePython(state({ type: "python_path_join", inputs: { BASE: expression("base_path"), CHILD: text("scene.py") } }))).toBe("base_path / 'scene.py'\n");
     expect(generatePython(state({ type: "python_path_check", fields: { METHOD: "is_file" }, inputs: { PATH: expression("path") } }))).toBe("path.is_file()\n");
     expect(generatePython(state({ type: "python_path_read_text", inputs: { PATH: expression("path"), ENCODING: text("utf-8") } }))).toBe("path.read_text(encoding='utf-8')\n");
     expect(generatePython(state({ type: "python_path_write_text", inputs: { PATH: expression("path"), TEXT: text("hello") } }))).toBe("path.write_text('hello')\n");
-    expect(generatePython(state({ type: "python_os_getcwd" }))).toBe("os.getcwd()\n");
-    expect(generatePython(state({ type: "python_os_listdir" }))).toBe("os.listdir()\n");
-    expect(generatePython(state({ type: "python_os_makedirs", fields: { EXIST_OK: "True" }, inputs: { PATH: text("output") } }))).toBe("os.makedirs('output', exist_ok=True)\n");
-    expect(generatePython(state({ type: "python_os_getenv", inputs: { NAME: text("HOME"), DEFAULT: text("") } }))).toBe("os.getenv('HOME', '')\n");
+    expect(generatePython(state({ type: "python_os_getcwd" }))).toBe(withImport("os", "os.getcwd()\n"));
+    expect(generatePython(state({ type: "python_os_listdir" }))).toBe(withImport("os", "os.listdir()\n"));
+    expect(generatePython(state({ type: "python_os_listdir", fields: { FILTER: "files" }, inputs: { PATH: text("data") } })))
+      .toBe(withImport("os", "[名称 for 名称 in os.listdir('data') if os.path.isfile(os.path.join('data', 名称))]\n"));
+    expect(generatePython(state({ type: "python_os_makedirs", fields: { EXIST_OK: "True" }, inputs: { PATH: text("output") } }))).toBe(withImport("os", "os.makedirs('output', exist_ok=True)\n"));
+    expect(generatePython(state({ type: "python_os_makedirs", fields: { DIRECTORY_NAME: "图片", EXIST_OK: "True" }, inputs: { PATH: text("output") } })))
+      .toBe(withImport("os", "os.makedirs(os.path.join('output', \"图片\"), exist_ok=True)\n"));
+    expect(generatePython(state({ type: "python_os_getenv", inputs: { NAME: text("HOME"), DEFAULT: text("") } }))).toBe(withImport("os", "os.getenv('HOME', '')\n"));
   });
 
   it("generates regular expression and collections standard library blocks", () => {
     expect(generatePython(state({ type: "python_standard_library_import", fields: { MODULE: "re" } }))).toBe("import re\n");
-    expect(generatePython(state({ type: "python_re_search", fields: { FUNCTION: "search" }, inputs: { PATTERN: text("[a-z]+"), TEXT: expression("content"), FLAGS: { block: { type: "python_re_flag", fields: { FLAG: "IGNORECASE" } } } } }))).toBe("re.search('[a-z]+', content, flags=re.IGNORECASE)\n");
-    expect(generatePython(state({ type: "python_re_sub", inputs: { PATTERN: text("\\s+"), REPLACEMENT: text(" "), TEXT: expression("content"), COUNT: number(2) } }))).toBe("re.sub('\\\\s+', ' ', content, count=2)\n");
-    expect(generatePython(state({ type: "python_re_split", inputs: { PATTERN: text(","), TEXT: expression("content") } }))).toBe("re.split(',', content)\n");
-    expect(generatePython(state({ type: "python_re_compile", inputs: { PATTERN: text("^item") } }))).toBe("re.compile('^item')\n");
+    expect(generatePython(state({ type: "python_re_search", fields: { FUNCTION: "search" }, inputs: { PATTERN: text("[a-z]+"), TEXT: expression("content"), FLAGS: { block: { type: "python_re_flag", fields: { FLAG: "IGNORECASE" } } } } }))).toBe(withImport("re", "re.search('[a-z]+', content, flags=re.IGNORECASE)\n"));
+    expect(generatePython(state({ type: "python_re_sub", inputs: { PATTERN: text("\\s+"), REPLACEMENT: text(" "), TEXT: expression("content"), COUNT: number(2) } }))).toBe(withImport("re", "re.sub('\\\\s+', ' ', content, count=2)\n"));
+    expect(generatePython(state({ type: "python_re_split", inputs: { PATTERN: text(","), TEXT: expression("content") } }))).toBe(withImport("re", "re.split(',', content)\n"));
+    expect(generatePython(state({ type: "python_re_compile", inputs: { PATTERN: text("^item") } }))).toBe(withImport("re", "re.compile('^item')\n"));
     expect(generatePython(state({ type: "python_re_group", inputs: { MATCH: expression("match"), GROUP: number(1) } }))).toBe("match.group(1)\n");
-    expect(generatePython(state({ type: "python_collections_counter" }))).toBe("collections.Counter()\n");
-    expect(generatePython(state({ type: "python_collections_defaultdict", inputs: { FACTORY: expression("list") } }))).toBe("collections.defaultdict(list)\n");
-    expect(generatePython(state({ type: "python_collections_deque", inputs: { MAXLEN: number(5) } }))).toBe("collections.deque([], maxlen=5)\n");
-    expect(generatePython(state({ type: "python_collections_namedtuple", inputs: { NAME: text("Point"), FIELDS: expression("['x', 'y']") } }))).toBe("collections.namedtuple('Point', ['x', 'y'])\n");
+    expect(generatePython(state({ type: "python_collections_counter" }))).toBe(withImport("collections", "collections.Counter()\n"));
+    expect(generatePython(state({ type: "python_collections_defaultdict", inputs: { FACTORY: expression("list") } }))).toBe(withImport("collections", "collections.defaultdict(list)\n"));
+    expect(generatePython(state({ type: "python_collections_deque", inputs: { MAXLEN: number(5) } }))).toBe(withImport("collections", "collections.deque([], maxlen=5)\n"));
+    expect(generatePython(state({ type: "python_collections_namedtuple", inputs: { NAME: text("Point"), FIELDS: expression("['x', 'y']") } }))).toBe(withImport("collections", "collections.namedtuple('Point', ['x', 'y'])\n"));
     expect(generatePython(state({ type: "python_deque_add", fields: { METHOD: "appendleft" }, inputs: { DEQUE: expression("queue"), VALUE: number(1) } }))).toBe("queue.appendleft(1)\n");
     expect(generatePython(state({ type: "python_deque_pop", fields: { METHOD: "popleft" }, inputs: { DEQUE: expression("queue") } }))).toBe("queue.popleft()\n");
     expect(generatePython(state({ type: "python_counter_most_common", inputs: { COUNTER: expression("counts") } }))).toBe("counts.most_common()\n");
   });
 
-  it("diagnoses missing standard library imports and respects import aliases", () => {
+  it("auto-imports standard libraries and respects explicit aliases", () => {
     const workspace = new Blockly.Workspace();
     const mathCall = workspace.newBlock("python_math_unary");
     mathCall.setFieldValue("sqrt", "FUNCTION");
@@ -238,64 +326,49 @@ describe("Python block generators", () => {
     argument.setFieldValue(9, "NUM");
     mathCall.getInput("VALUE")!.connection!.connect(argument.outputConnection!);
 
-    expect(getPythonImportWarning(mathCall)).toBe("缺少标准库导入：请添加“导入标准库 math”积木。");
-    expect(validatePythonBlockContexts(workspace)).toContainEqual({
-      blockId: mathCall.id,
-      message: "缺少标准库导入：请添加“导入标准库 math”积木。",
-    });
+    expect(getPythonImportWarning(mathCall)).toBeNull();
+    expect(validatePythonBlockContexts(workspace)).toEqual([]);
+    expect(generateWorkspacePython(workspace)).toContain("import math\n\n\nmath.sqrt(9)");
+    workspace.dispose();
 
-    const aliasedImport = workspace.newBlock("python_import_as");
+    const aliasedWorkspace = new Blockly.Workspace();
+    const aliasedImport = aliasedWorkspace.newBlock("python_import_as");
     aliasedImport.setFieldValue("math", "MODULE");
     aliasedImport.setFieldValue("m", "ALIAS");
-    expect(getPythonImportWarning(mathCall)).toBeNull();
-    expect(generateWorkspacePython(workspace)).toContain("m.sqrt(9)");
+    const aliasedCall = aliasedWorkspace.newBlock("python_math_unary");
+    aliasedCall.setFieldValue("sqrt", "FUNCTION");
+    const aliasedArgument = aliasedWorkspace.newBlock("math_number");
+    aliasedArgument.setFieldValue(16, "NUM");
+    aliasedCall.getInput("VALUE")!.connection!.connect(aliasedArgument.outputConnection!);
+    const aliasedCode = generateWorkspacePython(aliasedWorkspace);
+    expect(aliasedCode).toContain("import math as m");
+    expect(aliasedCode).toContain("m.sqrt(16)");
+    expect(aliasedCode.match(/import math/g)).toHaveLength(1);
+    aliasedWorkspace.dispose();
 
-    const randomCall = workspace.newBlock("python_random_choice");
-    const standardImport = workspace.newBlock("python_standard_library_import");
-    standardImport.setFieldValue("random", "MODULE");
-    expect(getPythonImportWarning(randomCall)).toBeNull();
-
-    const jsonCall = workspace.newBlock("python_json_loads");
-    const multipleImport = workspace.newBlock("python_import_multiple");
-    multipleImport.setFieldValue("json", "MODULE1");
-    multipleImport.setFieldValue("os", "MODULE2");
-    expect(getPythonImportWarning(jsonCall)).toBeNull();
-
-    const pathCall = workspace.newBlock("python_path_create");
-    expect(getPythonImportWarning(pathCall)).toBe("缺少标准库导入：请添加“导入标准库 pathlib”积木。");
-    const pathlibImport = workspace.newBlock("python_import_as");
-    pathlibImport.setFieldValue("pathlib", "MODULE");
-    pathlibImport.setFieldValue("p", "ALIAS");
-    expect(getPythonImportWarning(pathCall)).toBeNull();
-    expect(generateWorkspacePython(workspace)).toContain("p.Path(");
-
-    const osCall = workspace.newBlock("python_os_getcwd");
-    expect(getPythonImportWarning(osCall)).toBeNull();
-
-    const regexCall = workspace.newBlock("python_re_compile");
-    expect(getPythonImportWarning(regexCall)).toBe("缺少标准库导入：请添加“导入标准库 re”积木。");
-    const regexImport = workspace.newBlock("python_import_as");
-    regexImport.setFieldValue("re", "MODULE");
-    regexImport.setFieldValue("regex", "ALIAS");
-    expect(getPythonImportWarning(regexCall)).toBeNull();
-    expect(generateWorkspacePython(workspace)).toContain("regex.compile(");
-
-    const counterCall = workspace.newBlock("python_collections_counter");
-    expect(getPythonImportWarning(counterCall)).toBe("缺少标准库导入：请添加“导入标准库 collections”积木。");
-    const collectionsImport = workspace.newBlock("python_standard_library_import");
-    collectionsImport.setFieldValue("collections", "MODULE");
-    expect(getPythonImportWarning(counterCall)).toBeNull();
-    workspace.dispose();
+    const asyncWorkspace = new Blockly.Workspace();
+    const asyncImport = asyncWorkspace.newBlock("python_import_as");
+    asyncImport.setFieldValue("asyncio", "MODULE");
+    asyncImport.setFieldValue("aio", "ALIAS");
+    const asyncRun = asyncWorkspace.newBlock("python_asyncio_run");
+    const coroutine = asyncWorkspace.newBlock("python_raw_expression");
+    coroutine.setFieldValue("main()", "CODE");
+    asyncRun.getInput("COROUTINE")!.connection!.connect(coroutine.outputConnection!);
+    const asyncCode = generateWorkspacePython(asyncWorkspace);
+    expect(asyncCode).toContain("import asyncio as aio");
+    expect(asyncCode).toContain("aio.run(main())");
+    expect(asyncCode.match(/import asyncio/g)).toHaveLength(1);
+    asyncWorkspace.dispose();
   });
 
   it("keeps function parameters inside the signature and removes empty separators", () => {
     const workspace = new Blockly.Workspace();
     const block = workspace.newBlock("python_function_structured") as Blockly.Block & { loadExtraState(state: object): void };
     const signatureText = () => block.inputList.filter((input) => input.name !== "BODY").flatMap((input) => input.fieldRow.map((field) => field.getText())).join(" ").replace(/\s+/g, " ");
-    expect(signatureText()).toContain("my_function ( value )");
+    expect(signatureText()).toContain("自定义函数 ( 数值 )");
     block.loadExtraState({ parameters: [] });
     const emptySignature = signatureText();
-    expect(emptySignature).toContain("my_function ( )");
+    expect(emptySignature).toContain("自定义函数 ( )");
     expect(emptySignature).not.toContain(",");
     workspace.dispose();
   });
@@ -324,7 +397,7 @@ describe("Python block generators", () => {
     expect(block.inputList.map((input) => input.name)).toEqual(["HEAD", "BODY"]);
     const signature = block.getInput("HEAD")!.fieldRow.map((field) => field.getText()).join(" ").replace(/\s+/g, " ");
     expect(signature).toContain("定义带类型函数");
-    expect(signature).toContain("my_function ( value : object ) -> None");
+    expect(signature).toContain("自定义函数 ( 数值 : object ) -> None");
     workspace.dispose();
   });
 
@@ -342,8 +415,8 @@ describe("Python block generators", () => {
     expect(toolbox.find((item) => item.fields?.TARGET === "collect")).toMatchObject({
       kind: "block",
       type: "python_call_structured",
-      fields: { TARGET: "collect", ARG_NAME1: "count" },
-      extraState: { arguments: [{ kind: "positional", name: "" }, { kind: "keyword", name: "count" }] },
+      fields: { TARGET: "collect" },
+      extraState: { arguments: [{ kind: "positional", name: "" }] },
     });
     workspace.dispose();
   });
@@ -394,7 +467,7 @@ describe("Python block generators", () => {
     const workspace = new Blockly.Workspace();
     const call = workspace.newBlock("python_call_structured") as Blockly.Block & { loadExtraState(state: object): void };
     const signatureText = () => call.inputList.flatMap((input) => input.fieldRow.map((field) => field.getText())).join(" ").replace(/\s+/g, " ");
-    expect(signatureText()).toContain("function ( )");
+    expect(signatureText()).toContain("自定义函数 ( )");
     expect(call.inputList.map((input) => input.name)).toEqual(["HEAD", "TAIL"]);
     call.loadExtraState({ arguments: [{ kind: "positional", name: "" }] });
     expect(call.getInput("ARG0")?.fieldRow.map((field) => field.getText()).join(" ")).not.toContain(")");
@@ -418,6 +491,11 @@ describe("Python block generators", () => {
     expect(generatePython(state(loop))).toBe("for item in items:\n  print(item)\n");
     const explicitNone = { type: "variables_set", fields: { VAR: "result" }, inputs: { VALUE: { block: { type: "python_none" } } } };
     expect(generatePython(state(explicitNone))).toBe("result = None\n");
+    const randomValue = { type: "variables_set", fields: { VAR: "result" }, inputs: { VALUE: { block: { type: "python_random_randint", inputs: { A: number(1), B: number(10) } } } } };
+    const randomCode = generatePython(state(randomValue));
+    expect(randomCode).toContain("import random");
+    expect(randomCode).toContain("result = random.randint(1, 10)");
+    expect(randomCode).not.toContain("result = None");
   });
 
   it("generates common Python utility, collection, and file operations", () => {
@@ -425,12 +503,171 @@ describe("Python block generators", () => {
     expect(generatePython(state({ type: "python_length", inputs: { VALUE: expression("items") } }))).toBe("len(items)\n");
     expect(generatePython(state({ type: "python_convert", fields: { TYPE: "int" }, inputs: { VALUE: text("42") } }))).toBe("int('42')\n");
     expect(generatePython(state({ type: "python_string_method", fields: { METHOD: "upper" }, inputs: { TEXT: text("python") } }))).toBe("'python'.upper()\n");
+    expect(generatePython(state({ type: "python_text_replace", inputs: { TEXT: text("你好，世界"), OLD: text("世界"), NEW: text("Python") } }))).toBe("'你好，世界'.replace('世界', 'Python')\n");
     expect(generatePython(state({ type: "python_list_method", fields: { METHOD: "append" }, inputs: { LIST: expression("items"), ARG: number(3) } }))).toBe("items.append(3)\n");
+    expect(generatePython(state({ type: "python_list_insert", inputs: { LIST: expression("items"), INDEX: number(1), VALUE: text("new") } }))).toBe("items.insert(1, 'new')\n");
+    expect(generatePython(state({ type: "python_list_set", inputs: { LIST: expression("items"), INDEX: number(0), VALUE: number(10) } }))).toBe("items[0] = 10\n");
+    expect(generatePython(state({ type: "python_list_slice_set", inputs: { LIST: expression("items"), START: number(1), STOP: number(3), VALUES: expression("replacement") } }))).toBe("items[1:3:] = replacement\n");
+    expect(generatePython(state({ type: "python_list_slice_delete", inputs: { LIST: expression("items"), START: number(1), STOP: number(3) } }))).toBe("del items[1:3:]\n");
+    expect(generatePython(state({ type: "python_sequence_query", fields: { METHOD: "count" }, inputs: { SEQUENCE: expression("items"), VALUE: number(2) } }))).toBe("items.count(2)\n");
+    expect(generatePython(state({ type: "python_sequence_query", fields: { METHOD: "index" }, inputs: { SEQUENCE: expression("items"), VALUE: number(2) } }))).toBe("items.index(2)\n");
+    expect(generatePython(state({ type: "python_sequence_combine", fields: { OPERATION: "concat" }, inputs: { SEQUENCE: expression("items"), OTHER: expression("more") } }))).toBe("items + more\n");
+    expect(generatePython(state({ type: "python_sequence_combine", fields: { OPERATION: "repeat" }, inputs: { SEQUENCE: expression("items"), OTHER: number(3) } }))).toBe("items * 3\n");
+    expect(generatePython(state({ type: "python_list_copy", inputs: { LIST: expression("items") } }))).toBe("items.copy()\n");
+    expect(generatePython(state({ type: "python_set_operation", fields: { OPERATION: "intersection" }, inputs: { LEFT: expression("left"), RIGHT: expression("right") } }))).toBe("left.intersection(right)\n");
+    expect(generatePython(state({ type: "python_set_relation", fields: { RELATION: "proper_subset" }, inputs: { LEFT: expression("left"), RIGHT: expression("right") } }))).toBe("left < right\n");
+    expect(generatePython(state({ type: "python_set_method", fields: { METHOD: "discard" }, inputs: { SET: expression("items"), ARG: number(2) } }))).toBe("items.discard(2)\n");
+    expect(generatePython(state({ type: "python_set_method", fields: { METHOD: "clear" }, inputs: { SET: expression("items") } }))).toBe("items.clear()\n");
+    expect(generatePython(state({ type: "python_set_copy", inputs: { SET: expression("items") } }))).toBe("items.copy()\n");
     expect(generatePython(state({ type: "python_dict_get", inputs: { DICT: expression("data"), KEY: text("name") } }))).toBe("data.get('name')\n");
+    expect(generatePython(state({ type: "python_dict_set", inputs: { DICT: expression("data"), KEY: text("name"), VALUE: text("Ada") } }))).toBe("data['name'] = 'Ada'\n");
+    expect(generatePython(state({ type: "python_dict_remove", inputs: { DICT: expression("data"), KEY: text("name") } }))).toBe("data.pop('name', None)\n");
     expect(generatePython(state({ type: "python_dict_view", fields: { METHOD: "keys" }, inputs: { DICT: expression("data") } }))).toBe("data.keys()\n");
+    expect(generatePython(state({ type: "python_dict_method", fields: { METHOD: "update" }, inputs: { DICT: expression("data"), OTHER: expression("defaults") } }))).toBe("data.update(defaults)\n");
+    expect(generatePython(state({ type: "python_dict_method", fields: { METHOD: "clear" }, inputs: { DICT: expression("data") } }))).toBe("data.clear()\n");
+    expect(generatePython(state({ type: "python_dict_query", fields: { METHOD: "setdefault" }, inputs: { DICT: expression("data"), KEY: text("name"), DEFAULT: text("Ada") } }))).toBe("data.setdefault('name', 'Ada')\n");
+    expect(generatePython(state({ type: "python_dict_query", fields: { METHOD: "popitem" }, inputs: { DICT: expression("data") } }))).toBe("data.popitem()\n");
+    expect(generatePython(state({ type: "python_dict_fromkeys", inputs: { KEYS: expression("names"), VALUE: text("未填写") } }))).toBe("dict.fromkeys(names, '未填写')\n");
     expect(generatePython(state({ type: "python_open_file", fields: { MODE: "w", ENCODING: "utf-8" }, inputs: { PATH: text("out.txt") } }))).toBe("open('out.txt', \"w\", encoding=\"utf-8\")\n");
     expect(generatePython(state({ type: "python_file_read", inputs: { FILE: expression("handle") } }))).toBe("handle.read()\n");
     expect(generatePython(state({ type: "python_file_write", inputs: { FILE: expression("handle"), VALUE: text("done") } }))).toBe("handle.write('done')\n");
+  });
+
+  it("generates complete beginner-friendly file operations", () => {
+    expect(generatePython(state({ type: "python_file_read_text", fields: { ENCODING: "utf-8" }, inputs: { PATH: text("data.txt") } })))
+      .toBe(withImport("pathlib", "pathlib.Path('data.txt').read_text(encoding=\"utf-8\")\n"));
+    expect(generatePython(state({ type: "python_file_write_text", fields: { MODE: "a", ENCODING: "utf-8" }, inputs: { PATH: text("out.txt"), VALUE: text("追加") } })))
+      .toBe("with open('out.txt', \"a\", encoding=\"utf-8\") as 文件:\n  文件.write('追加')\n");
+    expect(generatePython(state({ type: "python_file_read", fields: { METHOD: "readline" }, inputs: { FILE: expression("文件"), SIZE: number(20) } }))).toBe("文件.readline(20)\n");
+    expect(generatePython(state({ type: "python_file_write", fields: { METHOD: "writelines" }, inputs: { FILE: expression("文件"), VALUE: expression("文本行") } }))).toBe("文件.writelines(文本行)\n");
+    expect(generatePython(state({ type: "python_file_tell", inputs: { FILE: expression("文件") } }))).toBe("文件.tell()\n");
+    expect(generatePython(state({ type: "python_file_seek", fields: { WHENCE: "2" }, inputs: { FILE: expression("文件"), OFFSET: number(0) } }))).toBe("文件.seek(0, 2)\n");
+    expect(generatePython(state({ type: "python_file_control", fields: { ACTION: "close" }, inputs: { FILE: expression("文件") } }))).toBe("文件.close()\n");
+    expect(generatePython(state({ type: "python_file_exists", inputs: { PATH: text("data.txt") } }))).toBe(withImport("pathlib", "pathlib.Path('data.txt').is_file()\n"));
+    expect(generatePython(state({ type: "python_directory_exists", inputs: { PATH: text("data") } }))).toBe(withImport("pathlib", "pathlib.Path('data').is_dir()\n"));
+    expect(generatePython(state({ type: "python_path_info", fields: { PATH_KIND: "file", INFO: "suffix" }, inputs: { PATH: text("data.txt") } }))).toBe(withImport("pathlib", "pathlib.Path('data.txt').suffix\n"));
+    expect(generatePython(state({ type: "python_file_copy", inputs: { SOURCE: text("a.txt"), TARGET: text("b.txt") } }))).toBe(withImport("shutil", "shutil.copy2('a.txt', 'b.txt')\n"));
+    expect(generatePython(state({ type: "python_file_move", fields: { PATH_KIND: "file" }, inputs: { SOURCE: text("a.txt"), TARGET: text("b.txt") } }))).toBe(withImport("shutil", "shutil.move('a.txt', 'b.txt')\n"));
+    expect(generatePython(state({ type: "python_file_delete", fields: { MISSING_OK: "True" }, inputs: { PATH: text("data.txt") } }))).toBe(withImport("pathlib", "pathlib.Path('data.txt').unlink(missing_ok=True)\n"));
+    expect(generatePython(state({ type: "python_directory_find", fields: { SCOPE: "recursive" }, inputs: { PATH: text("data"), PATTERN: text("*.txt") } }))).toBe(withImport("pathlib", "[str(匹配路径) for 匹配路径 in pathlib.Path('data').rglob('*.txt')]\n"));
+    expect(generatePython(state({ type: "python_directory_copy", fields: { EXIST_OK: "True" }, inputs: { SOURCE: text("源目录"), TARGET: text("目标目录") } }))).toBe(withImport("shutil", "shutil.copytree('源目录', '目标目录', dirs_exist_ok=True)\n"));
+    expect(generatePython(state({ type: "python_directory_copy", fields: { DIRECTORY_NAME: "副本", EXIST_OK: "True" }, inputs: { SOURCE: text("源目录"), TARGET: text("目标父目录") } }))).toBe("import os\nimport shutil\n\n\nshutil.copytree('源目录', os.path.join('目标父目录', \"副本\"), dirs_exist_ok=True)\n");
+    expect(generatePython(state({ type: "python_directory_move", fields: { DIRECTORY_NAME: "新名称" }, inputs: { SOURCE: text("源目录"), TARGET: text("目标父目录") } }))).toBe("import os\nimport shutil\n\n\nshutil.move('源目录', os.path.join('目标父目录', \"新名称\"))\n");
+    expect(generatePython(state({ type: "python_directory_remove", inputs: { PATH: text("空目录") } }))).toBe(withImport("pathlib", "pathlib.Path('空目录').rmdir()\n"));
+    expect(generatePython(state({ type: "python_directory_remove", fields: { REMOVE_MODE: "tree" }, inputs: { PATH: text("目录") } }))).toBe(withImport("shutil", "shutil.rmtree('目录')\n"));
+  });
+
+  it("shows method parameters only when the selected operation needs them", () => {
+    const workspace = new Blockly.Workspace();
+    const textMethod = workspace.newBlock("python_string_method");
+    expect(textMethod.getInput("ARG")!.isVisible()).toBe(false);
+    textMethod.setFieldValue("split", "METHOD");
+    expect(textMethod.getInput("ARG")!.isVisible()).toBe(true);
+
+    const listMethod = workspace.newBlock("python_list_method");
+    expect(listMethod.getInput("ARG")!.isVisible()).toBe(true);
+    listMethod.setFieldValue("sort", "METHOD");
+    expect(listMethod.getInput("ARG")!.isVisible()).toBe(false);
+
+    const setMethod = workspace.newBlock("python_set_method");
+    expect(setMethod.getInput("ARG")!.isVisible()).toBe(true);
+    setMethod.setFieldValue("clear", "METHOD");
+    expect(setMethod.getInput("ARG")!.isVisible()).toBe(false);
+
+    const dictMethod = workspace.newBlock("python_dict_method");
+    expect(dictMethod.getInput("OTHER")!.isVisible()).toBe(true);
+    dictMethod.setFieldValue("clear", "METHOD");
+    expect(dictMethod.getInput("OTHER")!.isVisible()).toBe(false);
+
+    const dictQuery = workspace.newBlock("python_dict_query");
+    expect(dictQuery.getInput("KEY")!.isVisible()).toBe(false);
+    dictQuery.setFieldValue("pop", "METHOD");
+    expect(dictQuery.getInput("KEY")!.isVisible()).toBe(true);
+    workspace.dispose();
+  });
+
+  it("uses compatible connection types for container-specific operations", () => {
+    const workspace = new Blockly.Workspace();
+    expect(workspace.newBlock("python_list_collection").outputConnection?.getCheck()).toEqual(["Array", "ManimPointArguments"]);
+    expect(workspace.newBlock("python_tuple").outputConnection?.getCheck()).toEqual(["PythonTuple"]);
+    expect(workspace.newBlock("python_set").outputConnection?.getCheck()).toEqual(["PythonSet"]);
+    expect(workspace.newBlock("python_dynamic_dict").outputConnection?.getCheck()).toEqual(["PythonDict"]);
+    expect(workspace.newBlock("python_list_method").getInput("LIST")?.connection?.getCheck()).toEqual(["Array"]);
+    expect(workspace.newBlock("python_set_method").getInput("SET")?.connection?.getCheck()).toEqual(["PythonSet"]);
+    expect(workspace.newBlock("python_dict_get").getInput("DICT")?.connection?.getCheck()).toEqual(["PythonDict"]);
+    expect(workspace.newBlock("python_list_comprehension").outputConnection?.getCheck()).toEqual(["Array"]);
+    expect(workspace.newBlock("python_set_comprehension").outputConnection?.getCheck()).toEqual(["PythonSet"]);
+    expect(workspace.newBlock("python_dict_comprehension").outputConnection?.getCheck()).toEqual(["PythonDict"]);
+    expect(workspace.newBlock("python_sequence_combine").outputConnection?.getCheck()).toEqual(["Array", "PythonTuple"]);
+    expect(workspace.newBlock("python_builtin_sorted").outputConnection?.getCheck()).toEqual(["Array"]);
+    expect(workspace.newBlock("python_random_sample").outputConnection?.getCheck()).toEqual(["Array"]);
+    expect(workspace.newBlock("python_os_listdir").outputConnection?.getCheck()).toEqual(["Array"]);
+    const stringMethod = workspace.newBlock("python_string_method");
+    expect(stringMethod.outputConnection?.getCheck()).toEqual(["String"]);
+    stringMethod.setFieldValue("split", "METHOD");
+    expect(stringMethod.outputConnection?.getCheck()).toEqual(["Array"]);
+    workspace.dispose();
+  });
+
+  it("warns when a dynamic container has the wrong semantic type", () => {
+    const workspace = new Blockly.Workspace();
+    const listMethod = workspace.newBlock("python_list_method");
+    listMethod.setFieldValue("clear", "METHOD");
+    const dynamicSet = workspace.newBlock("python_sequence_collection");
+    dynamicSet.setFieldValue("set", "KIND");
+    listMethod.getInput("LIST")!.connection!.connect(dynamicSet.outputConnection!);
+    expect(getPythonCollectionTypeWarning(listMethod)).toBe("列表操作需要列表，当前连接的是集合。");
+    expect(validatePythonBlockContexts(workspace)).toEqual(expect.arrayContaining([{ blockId: listMethod.id, message: "列表操作需要列表，当前连接的是集合。" }]));
+
+    dynamicSet.setFieldValue("list", "KIND");
+    expect(getPythonCollectionTypeWarning(listMethod)).toBeNull();
+
+    const combine = workspace.newBlock("python_sequence_combine");
+    const list = workspace.newBlock("python_sequence_collection");
+    const tuple = workspace.newBlock("python_sequence_collection");
+    tuple.setFieldValue("tuple", "KIND");
+    combine.getInput("SEQUENCE")!.connection!.connect(list.outputConnection!);
+    combine.getInput("OTHER")!.connection!.connect(tuple.outputConnection!);
+    expect(getPythonCollectionTypeWarning(combine)).toBe("拼接两侧必须是同一种序列，当前是列表和元组。");
+
+    combine.setFieldValue("repeat", "OPERATION");
+    expect(getPythonCollectionTypeWarning(combine)).toBe("重复次数需要数字，当前连接的是元组。");
+    workspace.dispose();
+  });
+
+  it("infers list results through variables and assignment expressions", () => {
+    const workspace = new Blockly.Workspace();
+    Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [
+      {
+        type: "variables_set",
+        fields: { VAR: { id: "parts-variable", name: "parts" } },
+        inputs: { VALUE: { block: { type: "python_string_method", fields: { METHOD: "split" }, inputs: { TEXT: text("a,b"), ARG: text(",") } } } },
+      },
+      {
+        id: "parts-list-use",
+        type: "python_list_method",
+        fields: { METHOD: "clear" },
+        inputs: { LIST: { block: { type: "variables_get", fields: { VAR: { id: "parts-variable", name: "parts" } } } } },
+      },
+      {
+        type: "python_walrus",
+        fields: { VAR: { id: "sample-variable", name: "sample" } },
+        inputs: { VALUE: { block: { type: "python_random_sample", inputs: { POPULATION: { block: { type: "python_list_collection", extraState: { itemCount: 0 } } }, K: number(0) } } } },
+      },
+      {
+        id: "sample-set-use",
+        type: "python_set_method",
+        fields: { METHOD: "clear" },
+        inputs: { SET: { block: { type: "variables_get", fields: { VAR: { id: "sample-variable", name: "sample" } } } } },
+      },
+    ] } }, workspace);
+
+    const listUse = workspace.getBlockById("parts-list-use")!;
+    const setUse = workspace.getBlockById("sample-set-use")!;
+    expect(getPythonCollectionTypeWarning(listUse)).toBeNull();
+    expect(getPythonCollectionTypeWarning(setUse)).not.toBeNull();
+    expect(validatePythonBlockContexts(workspace)).toEqual(expect.arrayContaining([expect.objectContaining({ blockId: setUse.id })]));
+    workspace.dispose();
   });
 
   it("generates scope declarations and multiple exception branches", () => {
@@ -502,6 +739,19 @@ describe("Python block generators", () => {
       },
     };
     expect(generatePython(state({ type: "python_assign_target", inputs: { TARGET: { block: unpack }, VALUE: expression("items") } }))).toBe("(head, *tail) = items\n");
+    const manyUnpack = {
+      type: "python_unpack_many_target", extraState: { itemCount: 4 },
+      inputs: {
+        TARGET0: { block: { type: "python_variable_target", fields: { VAR: "first" } } },
+        TARGET1: { block: { type: "python_variable_target", fields: { VAR: "second" } } },
+        TARGET2: { block: { type: "python_starred_target", inputs: { TARGET: { block: { type: "python_variable_target", fields: { VAR: "middle" } } } } } },
+        TARGET3: { block: { type: "python_variable_target", fields: { VAR: "last" } } },
+      },
+    };
+    expect(generatePython(state({ type: "python_assign_target", inputs: { TARGET: { block: manyUnpack }, VALUE: expression("items") } }))).toBe("(first, second, *middle, last) = items\n");
+    const sliceTarget = { type: "python_slice_target", inputs: { OBJECT: expression("items"), START: number(1), STOP: number(4), STEP: number(2) } };
+    expect(generatePython(state({ type: "python_assign_target", inputs: { TARGET: { block: sliceTarget }, VALUE: expression("replacement") } }))).toBe("items[1:4:2] = replacement\n");
+    expect(generatePython(state({ type: "python_delete", inputs: { TARGET: { block: sliceTarget } } }))).toBe("del items[1:4:2]\n");
     expect(generatePython(state({ type: "python_annotated_assign", fields: { VAR: "name", TYPE: "str" } }))).toBe("name: str\n");
     expect(generatePython(state({ type: "python_delete", inputs: { TARGET: { block: { type: "python_attribute_target", fields: { ATTRIBUTE: "cache" }, inputs: { OBJECT: expression("service") } } } } }))).toBe("del service.cache\n");
     expect(generatePython(state({ type: "python_walrus", fields: { VAR: "size" }, inputs: { VALUE: number(3) } }))).toBe("(size := 3)\n");
@@ -579,8 +829,47 @@ describe("Python block generators", () => {
     const workspace = new Blockly.Workspace();
     Blockly.serialization.workspaces.load(state(typedFunction), workspace);
     expect((buildDefinedFunctionCallToolbox(workspace) as Array<Record<string, any>>).find((item) => item.fields?.TARGET === "convert")).toMatchObject({
-      fields: { TARGET: "convert", ARG_NAME1: "limit", ARG_NAME2: "flag" },
+      fields: { TARGET: "convert", ARG_NAME1: "limit" },
+      extraState: { arguments: [{ kind: "positional", name: "" }, { kind: "keyword", name: "limit" }] },
     });
+    workspace.dispose();
+  });
+
+  it("creates constructor blocks from classes defined in the workspace", () => {
+    const workspace = new Blockly.Workspace();
+    Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [
+      {
+        type: "python_class_def", fields: { NAME: "Person", BASES: "object" }, inputs: { BODY: { block: {
+          type: "python_method_structured", fields: { NAME: "__init__", PARAM_NAME0: "self", PARAM_NAME1: "name", PARAM_NAME2: "count" },
+          extraState: { parameters: [{ kind: "positional", name: "self" }, { kind: "positional", name: "name" }, { kind: "default", name: "count" }] },
+          inputs: { PARAM2: number(1), BODY: { block: { type: "python_pass" } } },
+        } } },
+      },
+      {
+        type: "python_class_def", fields: { NAME: "LegacyItem", BASES: "object" }, inputs: { BODY: { block: {
+          type: "python_method_def", fields: { NAME: "__init__", PARAMS: "self, title, count=1" }, inputs: { BODY: { block: { type: "python_pass" } } },
+        } } },
+      },
+    ] } }, workspace);
+
+    const objectToolbox = buildDefinedClassConstructorToolbox(workspace) as Array<Record<string, any>>;
+    expect(objectToolbox.find((item) => item.fields?.TARGET === "Person")).toMatchObject({
+      type: "python_new_object_structured",
+      fields: { TARGET: "Person" },
+      extraState: { arguments: [{ kind: "positional", name: "" }] },
+    });
+    expect(objectToolbox.find((item) => item.fields?.TARGET === "LegacyItem")).toMatchObject({
+      type: "python_new_object_structured",
+      fields: { TARGET: "LegacyItem" },
+      extraState: { arguments: [{ kind: "positional", name: "" }] },
+    });
+    expect(objectToolbox.some((item) => item.type === "python_class_def")).toBe(true);
+    for (const item of objectToolbox.filter((entry) => entry.kind === "block")) {
+      const validationWorkspace = new Blockly.Workspace();
+      const { kind: _kind, ...blockState } = structuredClone(item);
+      expect(() => Blockly.serialization.blocks.append(blockState as any, validationWorkspace), `failed to load dynamic object toolbox state for ${item.type}`).not.toThrow();
+      validationWorkspace.dispose();
+    }
     workspace.dispose();
   });
 
@@ -598,17 +887,86 @@ describe("Python block generators", () => {
     workspace.dispose();
   });
 
+  it("loads every configured toolbox block including its default shadows", () => {
+    const blockStates: any[] = [];
+    const visit = (items: any[]) => items.forEach((item) => {
+      if (item.kind === "block") blockStates.push(item);
+      if (Array.isArray(item.contents)) visit(item.contents);
+    });
+    visit((toolbox as any).contents);
+    for (const item of blockStates) {
+      const workspace = new Blockly.Workspace();
+      const { kind: _kind, ...state } = structuredClone(item);
+      expect(() => Blockly.serialization.blocks.append(state, workspace), `failed to load toolbox state for ${item.type}`).not.toThrow();
+      workspace.dispose();
+    }
+  });
+
+  it("provides every static toolbox entry with its required root inputs", () => {
+    const blockStates: any[] = [];
+    const visit = (items: any[]) => items.forEach((item) => {
+      if (item.kind === "block") blockStates.push(item);
+      if (Array.isArray(item.contents)) visit(item.contents);
+    });
+    visit((toolbox as any).contents);
+    for (const item of blockStates) {
+      const workspace = new Blockly.Workspace();
+      const { kind: _kind, ...blockState } = structuredClone(item);
+      Blockly.serialization.blocks.append(blockState, workspace);
+      const root = workspace.getTopBlocks(false)[0];
+      expect(getPythonRequiredInputWarning(root), `toolbox entry ${item.type} is missing a required input`).toBeNull();
+      workspace.dispose();
+    }
+  });
+
   it("groups standard library blocks with labels inside one toolbox category", () => {
     const standardLibrary = (toolbox as any).contents.find((item: any) => item.name === "标准库");
     expect(standardLibrary).toBeTruthy();
     expect(standardLibrary.contents.some((item: any) => item.kind === "category")).toBe(false);
     expect(standardLibrary.contents.filter((item: any) => item.kind === "label").map((item: any) => item.text)).toEqual([
-      "导入", "数学", "随机", "JSON", "日期与时间", "文件路径", "系统", "正则表达式", "集合工具",
+      "数学", "随机", "JSON", "日期与时间", "系统", "正则表达式", "集合工具",
     ]);
+    expect(standardLibrary.contents.some((item: any) => item.type === "python_standard_library_import")).toBe(false);
     expect(JSON.stringify(toolbox)).toContain("你好，世界");
+    expect(JSON.stringify(toolbox)).toContain('"shadow"');
+    expect(JSON.stringify(toolbox)).toContain("python_text_replace");
+    expect(JSON.stringify(toolbox)).toContain("python_dict_set");
     expect(JSON.stringify(toolbox)).not.toContain("hello python");
     expect(JSON.stringify(starterState)).toContain("你好，Python！");
     expect(JSON.stringify(starterState)).toContain("图形化编程");
+  });
+
+  it("keeps file operations in their own toolbox category", () => {
+    const categories = (toolbox as any).contents;
+    const file = categories.find((item: any) => item.name === "文件");
+    const exception = categories.find((item: any) => item.name === "异常");
+    const module = categories.find((item: any) => item.name === "模块");
+    const fileTypes = file.contents.filter((item: any) => item.kind === "block").map((item: any) => item.type);
+    const categoryNames = categories.map((item: any) => item.name);
+
+    expect(categoryNames.indexOf("文件")).toBe(categoryNames.indexOf("调用") + 1);
+    expect(fileTypes).toEqual(expect.arrayContaining([
+      "python_file_read_text", "python_file_write_text", "python_with", "python_open_file",
+      "python_file_read", "python_file_write", "python_file_tell", "python_file_seek",
+      "python_file_control", "python_file_exists", "python_directory_exists", "python_path_info", "python_file_copy", "python_file_move", "python_file_delete",
+      "python_path_create", "python_path_join", "python_path_check", "python_path_read_text", "python_path_write_text",
+      "python_os_getcwd", "python_os_listdir", "python_os_makedirs", "python_directory_find", "python_directory_copy", "python_directory_move", "python_directory_remove",
+    ]));
+    expect(JSON.stringify(exception)).not.toContain("python_file");
+    expect(JSON.stringify(exception)).not.toContain("python_open_file");
+    expect(JSON.stringify(module)).not.toContain("python_file");
+    expect(JSON.stringify(module)).not.toContain("python_open_file");
+    expect(JSON.stringify(module)).not.toContain("python_path_");
+    expect(JSON.stringify(categories.find((item: any) => item.name === "标准库"))).not.toContain("python_path_");
+    expect(JSON.stringify(categories.find((item: any) => item.name === "标准库"))).not.toMatch(/python_os_(getcwd|listdir|makedirs)/);
+  });
+
+  it("uses one colour for every block in the file toolbox", () => {
+    const file = (toolbox as any).contents.find((item: any) => item.name === "文件");
+    const types = [...new Set<string>(file.contents.filter((item: any) => item.kind === "block").map((item: any) => item.type))];
+    const workspace = new Blockly.Workspace();
+    expect(new Set(types.map((type) => workspace.newBlock(type).getColour()))).toEqual(new Set(["#4f7f8e"]));
+    workspace.dispose();
   });
 
   it("uses one colour for every block in the async toolbox", () => {
@@ -616,6 +974,9 @@ describe("Python block generators", () => {
     const asyncTypes = [
       "python_async_function_structured",
       "python_async_typed_function_structured",
+      "python_asyncio_sleep",
+      "python_asyncio_run",
+      "python_await_statement",
       "python_await",
       "python_async_for",
       "python_async_with",
@@ -656,6 +1017,18 @@ describe("Python block generators", () => {
     expect(result.warning).toBeNull();
     result.workspace.dispose();
 
+    result = load({ type: "python_await_statement", id: "await-statement", inputs: { VALUE: expression("work()") } }, "await-statement");
+    expect(result.warning).toContain("异步函数");
+    result.workspace.dispose();
+
+    result = load({ type: "python_async_function_structured", extraState: { parameters: [] }, inputs: { BODY: { block: { type: "python_await_statement", id: "await-statement", inputs: { VALUE: expression("work()") } } } } }, "await-statement");
+    expect(result.warning).toBeNull();
+    result.workspace.dispose();
+
+    result = load({ type: "python_async_function_structured", extraState: { parameters: [] }, inputs: { BODY: { block: { type: "python_asyncio_run", id: "async-run", inputs: { COROUTINE: expression("work()") } } } } }, "async-run");
+    expect(result.warning).toContain("等待完成");
+    result.workspace.dispose();
+
     result = load({ type: "python_async_function_structured", extraState: { parameters: [] }, inputs: { BODY: { block: { type: "python_yield_from", id: "yield-from", inputs: { VALUE: expression("items") } } } } }, "yield-from");
     expect(result.warning).toContain("不能使用 yield from");
     result.workspace.dispose();
@@ -678,6 +1051,23 @@ describe("Python block generators", () => {
 
     result = load({ type: "python_function_structured", extraState: { parameters: [] }, inputs: { BODY: { block: { type: "python_function_structured", extraState: { parameters: [] }, inputs: { BODY: { block: { type: "python_scope_declaration", id: "nonlocal", fields: { SCOPE: "nonlocal", NAMES: "value" } } } } } } } }, "nonlocal");
     expect(result.warning).toBeNull();
+    result.workspace.dispose();
+
+    result = load({ type: "python_method_structured", id: "method", extraState: { parameters: [{ kind: "positional", name: "self" }] } }, "method");
+    expect(result.warning).toBe("方法定义只能放在类的内部。");
+    result.workspace.dispose();
+
+    result = load({ type: "python_class_def", inputs: { BODY: { block: { type: "python_method_structured", id: "method", extraState: { parameters: [{ kind: "positional", name: "self" }] }, inputs: { BODY: { block: { type: "python_super_call", id: "super" } } } } } } }, "method");
+    expect(result.warning).toBeNull();
+    expect(getPythonContextWarning(result.workspace.getBlockById("super")!)).toBeNull();
+    result.workspace.dispose();
+
+    result = load({ type: "python_super_call", id: "super" }, "super");
+    expect(result.warning).toBe("super() 只能放在类的方法内部。");
+    result.workspace.dispose();
+
+    result = load({ type: "python_decorated_definition", id: "decorator", inputs: { DECORATOR: expression("staticmethod"), DEFINITION: { block: { type: "python_print", inputs: { VALUE: text("invalid") } } } } }, "decorator");
+    expect(result.warning).toContain("函数、方法或类定义");
     result.workspace.dispose();
 
     const workspace = new Blockly.Workspace();
@@ -800,11 +1190,40 @@ describe("Python block generators", () => {
     validCall.setFieldValue("asyncio.run", "TARGET");
     expect(getPythonIdentifierWarning(validCall)).toBeNull();
 
+    const chineseFunction = workspace.newBlock("python_typed_function_structured") as Blockly.Block & { loadExtraState(state: object): void };
+    chineseFunction.loadExtraState({ parameters: [{ kind: "positional", name: "数值", annotation: "数字类型" }] });
+    chineseFunction.setFieldValue("计算结果", "NAME");
+    chineseFunction.setFieldValue("数值", "PARAM_NAME0");
+    chineseFunction.setFieldValue("数字类型", "PARAM_TYPE0");
+    chineseFunction.setFieldValue("数字类型", "RETURN_TYPE");
+    expect(getPythonIdentifierWarning(chineseFunction)).toBeNull();
+
     const invalidImport = workspace.newBlock("python_import_as");
     invalidImport.setFieldValue("bad module", "MODULE");
     invalidImport.setFieldValue("for", "ALIAS");
     expect(getPythonIdentifierWarning(invalidImport)).toContain("模块别名“for”");
     expect(getPythonIdentifierWarning(invalidImport)).toContain("模块名称“bad module”无效");
+    workspace.dispose();
+  });
+
+  it("does not redraw unchanged block warnings during field edits", () => {
+    const workspace = new Blockly.Workspace();
+    const functionBlock = workspace.newBlock("python_function_structured");
+    let warningUpdates = 0;
+    functionBlock.setWarningText = () => { warningUpdates += 1; };
+
+    validatePythonBlockContexts(workspace);
+    validatePythonBlockContexts(workspace);
+    expect(warningUpdates).toBe(0);
+
+    functionBlock.setFieldValue("bad name", "NAME");
+    validatePythonBlockContexts(workspace);
+    validatePythonBlockContexts(workspace);
+    expect(warningUpdates).toBe(1);
+
+    functionBlock.setFieldValue("自定义函数", "NAME");
+    validatePythonBlockContexts(workspace);
+    expect(warningUpdates).toBe(2);
     workspace.dispose();
   });
 

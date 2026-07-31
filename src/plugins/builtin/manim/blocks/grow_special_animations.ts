@@ -6,10 +6,10 @@ import { addManimImport, value } from "../helpers";
 export const registerSpecialGrowAnimationBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_spin_in_from_nothing_animation",
-    message0: "自旋出现 SpinInFromNothing 对象 %1 角度 %2 时间 %3",
+    message0: "旋转出现 对象 %1 角度 %2 时间 %3",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "ANGLE" },
+      { type: "input_value", name: "ANGLE", check: ["ManimAngle", "Number"] },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
     inputsInline: true,
@@ -25,7 +25,7 @@ export const registerSpecialGrowAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_shrink_to_center_animation",
-    message0: "缩到中心 ShrinkToCenter 对象 %1 时间 %2",
+    message0: "缩小到中心 对象 %1 时间 %2",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },

@@ -1,19 +1,19 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions } from "../constants";
+import { colour } from "../constants";
 import { addManimImport, pythonCall, value } from "../helpers";
 
 export const registerThreeDArrowBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_arrow3d_object",
-    message0: "3D 箭头 Arrow3D 起点 %1 终点 %2 厚度 %3 箭头高度 %4 底部半径 %5 颜色 %6",
+    message0: "三维箭头 起点 %1 终点 %2 厚度 %3 箭头高度 %4 底部半径 %5 颜色 %6",
     args0: [
-      { type: "input_value", name: "START" },
-      { type: "input_value", name: "END" },
+      { type: "input_value", name: "START", check: ["ManimVector", "Number"] },
+      { type: "input_value", name: "END", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "THICKNESS", check: "Number" },
       { type: "input_value", name: "HEIGHT", check: "Number" },
       { type: "input_value", name: "BASE_RADIUS", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: false,
     output: "ManimObject",

@@ -6,11 +6,11 @@ import { addManimImport, value } from "../helpers";
 export const registerWaveFlashAnimationBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_wiggle_animation",
-    message0: "摆动 Wiggle 对象 %1 缩放 %2 旋转角度 %3 摆动次数 %4 时间 %5",
+    message0: "摆动 对象 %1 缩放 %2 旋转角度 %3 摆动次数 %4 时间 %5",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "SCALE_VALUE", check: "Number" },
-      { type: "input_value", name: "ROTATION_ANGLE" },
+      { type: "input_value", name: "ROTATION_ANGLE", check: ["ManimAngle", "Number"] },
       { type: "input_value", name: "N_WIGGLES", check: "Number" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
@@ -29,10 +29,10 @@ export const registerWaveFlashAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_apply_wave_animation",
-    message0: "波浪 ApplyWave 对象 %1 方向 %2 振幅 %3 波纹数 %4 时间 %5",
+    message0: "波浪 对象 %1 方向 %2 振幅 %3 波纹数 %4 时间 %5",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "AMPLITUDE", check: "Number" },
       { type: "input_value", name: "RIPPLES", check: "Number" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
@@ -52,7 +52,7 @@ export const registerWaveFlashAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_show_passing_flash_animation",
-    message0: "流光 ShowPassingFlash 对象 %1 光宽 %2 时间 %3",
+    message0: "流光 对象 %1 光宽 %2 时间 %3",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "TIME_WIDTH", check: "Number" },

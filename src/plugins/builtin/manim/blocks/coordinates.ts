@@ -1,21 +1,22 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions } from "../constants";
+import { colour } from "../constants";
 import { addManimImport, value } from "../helpers";
 
 export const registerCoordinateExtraBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_axes_plot",
-    message0: "坐标系 %1 绘制函数 %2 x范围 %3 颜色 %4",
+    message0: "坐标系 %1 绘制函数 %2 横轴范围 %3 颜色 %4",
     args0: [
       { type: "input_value", name: "AXES", check: "ManimObject" },
-      { type: "input_value", name: "FUNCTION" },
-      { type: "input_value", name: "X_RANGE" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "input_value", name: "FUNCTION", check: "ManimFunction" },
+      { type: "input_value", name: "X_RANGE", check: "ManimRange" },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
     colour,
+    tooltip: "使用已创建的坐标系绘制函数曲线。请先创建并命名坐标系。",
   }, (block, generator) => {
     addManimImport(generator);
     const axes = value(generator, block, "AXES", "Axes()", Order.MEMBER);
@@ -27,15 +28,16 @@ export const registerCoordinateExtraBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_axes_c2p",
-    message0: "坐标系 %1 坐标转点 x %2 y %3",
+    message0: "坐标系 %1 坐标转点 横坐标 %2 纵坐标 %3",
     args0: [
       { type: "input_value", name: "AXES", check: "ManimObject" },
-      { type: "input_value", name: "X" },
-      { type: "input_value", name: "Y" },
+      { type: "input_value", name: "X", check: "Number" },
+      { type: "input_value", name: "Y", check: "Number" },
     ],
     inputsInline: true,
     output: null,
     colour,
+    tooltip: "把数学坐标转换成画面中的位置点。",
   }, (block, generator) => {
     addManimImport(generator);
     const axes = value(generator, block, "AXES", "Axes()", Order.MEMBER);
@@ -47,11 +49,12 @@ export const registerCoordinateExtraBlocks = (context: PluginContext) => {
     message0: "坐标系 %1 点转坐标 %2",
     args0: [
       { type: "input_value", name: "AXES", check: "ManimObject" },
-      { type: "input_value", name: "POINT" },
+      { type: "input_value", name: "POINT", check: ["ManimVector", "Number"] },
     ],
     inputsInline: true,
     output: null,
     colour,
+    tooltip: "把画面中的位置点转换成该坐标系内的数学坐标。",
   }, (block, generator) => {
     addManimImport(generator);
     const axes = value(generator, block, "AXES", "Axes()", Order.MEMBER);
@@ -60,7 +63,7 @@ export const registerCoordinateExtraBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_axis_labels",
-    message0: "坐标系 %1 轴标签 x %2 y %3",
+    message0: "坐标系 %1 轴标签 横轴 %2 纵轴 %3",
     args0: [
       { type: "input_value", name: "AXES", check: "ManimObject" },
       { type: "input_value", name: "X_LABEL", check: "String" },
@@ -69,6 +72,7 @@ export const registerCoordinateExtraBlocks = (context: PluginContext) => {
     inputsInline: true,
     output: "ManimObject",
     colour,
+    tooltip: "为已创建的坐标系生成横轴和纵轴标签。",
   }, (block, generator) => {
     addManimImport(generator);
     const axes = value(generator, block, "AXES", "Axes()", Order.MEMBER);
@@ -83,12 +87,13 @@ export const registerCoordinateExtraBlocks = (context: PluginContext) => {
     args0: [
       { type: "input_value", name: "AXES", check: "ManimObject" },
       { type: "input_value", name: "GRAPH", check: "ManimObject" },
-      { type: "input_value", name: "X_RANGE" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "input_value", name: "X_RANGE", check: "ManimRange" },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
     colour,
+    tooltip: "填充函数曲线与横轴之间的区域。坐标系和曲线必须引用同一套坐标系。",
   }, (block, generator) => {
     addManimImport(generator);
     const axes = value(generator, block, "AXES", "Axes()", Order.MEMBER);

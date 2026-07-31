@@ -1,6 +1,6 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions, textObjectOptions } from "../constants";
+import { colour, textObjectOptions } from "../constants";
 import { addManimImport, pythonCall, value } from "../helpers";
 
 export const registerTextObjectBlocks = (context: PluginContext) => {
@@ -22,11 +22,11 @@ export const registerTextObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_plain_text_object",
-    message0: "文本 Text 内容 %1 字号 %2 颜色 %3",
+    message0: "普通文本 内容 %1 字号 %2 颜色 %3",
     args0: [
       { type: "input_value", name: "CONTENT", check: "String" },
       { type: "input_value", name: "FONT_SIZE", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -41,11 +41,11 @@ export const registerTextObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_tex_object",
-    message0: "LaTeX 文本 Tex 内容 %1 字号 %2 颜色 %3",
+    message0: "公式文本 内容 %1 字号 %2 颜色 %3",
     args0: [
       { type: "input_value", name: "CONTENT", check: "String" },
       { type: "input_value", name: "FONT_SIZE", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -60,11 +60,11 @@ export const registerTextObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_mathtex_object",
-    message0: "数学公式 MathTex 内容 %1 字号 %2 颜色 %3",
+    message0: "数学公式 内容 %1 字号 %2 颜色 %3",
     args0: [
       { type: "input_value", name: "CONTENT", check: "String" },
       { type: "input_value", name: "FONT_SIZE", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

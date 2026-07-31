@@ -1,16 +1,16 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions } from "../constants";
+import { colour } from "../constants";
 import { addManimImport, pythonCall, value } from "../helpers";
 
 export const registerLineSegmentBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_line_segment_object",
-    message0: "直线 Line 起点 %1 终点 %2 颜色 %3",
+    message0: "直线 起点 %1 终点 %2 颜色 %3",
     args0: [
-      { type: "input_value", name: "START" },
-      { type: "input_value", name: "END" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "input_value", name: "START", check: ["ManimVector", "Number"] },
+      { type: "input_value", name: "END", check: ["ManimVector", "Number"] },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -25,12 +25,12 @@ export const registerLineSegmentBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_dashed_line_object",
-    message0: "虚线 DashedLine 起点 %1 终点 %2 虚线长度 %3 颜色 %4",
+    message0: "虚线 起点 %1 终点 %2 虚线长度 %3 颜色 %4",
     args0: [
-      { type: "input_value", name: "START" },
-      { type: "input_value", name: "END" },
+      { type: "input_value", name: "START", check: ["ManimVector", "Number"] },
+      { type: "input_value", name: "END", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "DASH_LENGTH", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -46,10 +46,10 @@ export const registerLineSegmentBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_vector_object",
-    message0: "向量 Vector 方向 %1 颜色 %2",
+    message0: "向量 方向 %1 颜色 %2",
     args0: [
-      { type: "input_value", name: "DIRECTION" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

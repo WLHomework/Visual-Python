@@ -10,7 +10,7 @@ describe("Manim render configuration", () => {
     expect(getManimRenderConfig()).toEqual(defaultManimRenderConfig);
     expect(isDefaultManimRenderConfig()).toBe(true);
     setManimRenderConfig({ quality: "high", fps: 60, renderer: "opengl", disableCaching: true });
-    expect(getManimRenderConfig()).toEqual({ quality: "high", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "", outputFileName: "" });
+    expect(getManimRenderConfig()).toEqual({ outputType: "video", transparentBackground: false, imageSizeMode: "preset", imageWidth: 1920, imageHeight: 1080, lockImageAspectRatio: true, imageCaptureMode: "final", imageAnimationStep: 1, quality: "high", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "", outputFileName: "" });
     expect(isDefaultManimRenderConfig()).toBe(false);
   });
 
@@ -34,11 +34,11 @@ describe("Manim render configuration", () => {
       registerCommand: () => undefined,
       reportProblem: () => undefined,
     });
-    setManimRenderConfig({ quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });
+    setManimRenderConfig({ outputType: "image", transparentBackground: true, imageSizeMode: "custom", imageWidth: 1600, imageHeight: 1200, lockImageAspectRatio: false, imageCaptureMode: "animation", imageAnimationStep: 3, quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });
     const saved = serializer?.save();
     serializer?.clear?.();
     expect(getManimRenderConfig()).toEqual(defaultManimRenderConfig);
     serializer?.load(saved);
-    expect(getManimRenderConfig()).toEqual({ quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });
+    expect(getManimRenderConfig()).toEqual({ outputType: "image", transparentBackground: true, imageSizeMode: "custom", imageWidth: 1600, imageHeight: 1200, lockImageAspectRatio: false, imageCaptureMode: "animation", imageAnimationStep: 3, quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });
   });
 });

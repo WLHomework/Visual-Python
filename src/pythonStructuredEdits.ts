@@ -1,3 +1,5 @@
+import { isDottedPythonIdentifier, isPythonIdentifier } from "./pythonIdentifiers";
+
 export type PythonStatementStructure = {
   kind: string;
   startLine: number;
@@ -83,8 +85,8 @@ export function replacePythonFunctionBody(
 }
 
 export function addPythonImport(source: string, structure: PythonStructure, moduleName: string, names: string[] = []): string {
-  if (!/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(moduleName)) throw new Error("module 必须是有效的 Python 模块名");
-  if (names.some((name) => !/^[A-Za-z_]\w*$/.test(name))) throw new Error("names 包含无效的 Python 标识符");
+  if (!isDottedPythonIdentifier(moduleName)) throw new Error("module 必须是有效的 Python 模块名");
+  if (names.some((name) => !isPythonIdentifier(name))) throw new Error("names 包含无效的 Python 标识符");
   const statement = names.length ? `from ${moduleName} import ${[...new Set(names)].join(", ")}` : `import ${moduleName}`;
   if (source.split("\n").some((line) => line.trim() === statement)) return source;
   const lines = source.split("\n");

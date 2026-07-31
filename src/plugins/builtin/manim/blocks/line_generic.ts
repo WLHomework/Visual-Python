@@ -1,6 +1,6 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions, lineOptions } from "../constants";
+import { colour, lineOptions } from "../constants";
 import { addManimImport, value } from "../helpers";
 
 export const registerGenericLineBlocks = (context: PluginContext) => {
@@ -11,7 +11,7 @@ export const registerGenericLineBlocks = (context: PluginContext) => {
       { type: "field_dropdown", name: "OBJECT", options: lineOptions },
       { type: "input_value", name: "START" },
       { type: "input_value", name: "END" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

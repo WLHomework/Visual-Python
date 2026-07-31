@@ -17,6 +17,10 @@ class Helper(object): pass
     expect(extractManimSceneNames("class Demo(Scene): pass\nclass Demo(Scene): pass")).toEqual(["Demo"]);
   });
 
+  it("finds Chinese scene class names", () => {
+    expect(extractManimSceneNames("class 圆形动画(Scene): pass")).toEqual(["圆形动画"]);
+  });
+
   it("adds the next available numeric suffix to copied scenes", () => {
     expect(nextUniqueManimSceneName("MainScene", ["MainScene"])).toBe("MainScene2");
     expect(nextUniqueManimSceneName("MainScene", ["MainScene", "MainScene2", "MainScene3"])).toBe("MainScene4");

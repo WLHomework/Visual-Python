@@ -6,7 +6,7 @@ import { addManimImport, value } from "../helpers";
 export const registerGroupObjectBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_group_object",
-    message0: "组合对象 VGroup %1 和 %2",
+    message0: "组合对象 %1 和 %2",
     args0: [
       { type: "input_value", name: "FIRST", check: "ManimObject" },
       { type: "input_value", name: "SECOND", check: "ManimObject" },
@@ -23,7 +23,7 @@ export const registerGroupObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_group_from_list_object",
-    message0: "组合对象 VGroup 对象列表 %1",
+    message0: "组合对象列表 %1",
     args0: [
       { type: "input_value", name: "OBJECTS" },
     ],

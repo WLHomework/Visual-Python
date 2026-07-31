@@ -46,6 +46,16 @@ export function diagnosePythonError(traceback: string, block?: Blockly.Block): P
     suggestion = "模块存在，但无法导入指定名称。请检查“从模块导入”积木中的名称和当前库版本。";
   } else if (type === "FileNotFoundError") {
     suggestion = `找不到文件${missingFile ? `“${missingFile[1]}”` : ""}。请检查路径、工作目录和文件是否已被移动或删除。`;
+  } else if (type === "PermissionError") {
+    suggestion = "当前用户没有访问权限，或文件正被其他程序占用。请关闭占用程序，并检查文件或目录权限。";
+  } else if (type === "IsADirectoryError") {
+    suggestion = "这里需要文件路径，但当前路径指向目录。请重新选择文件，或改用对应的目录操作积木。";
+  } else if (type === "NotADirectoryError") {
+    suggestion = "这里需要目录路径，但当前路径指向文件。请重新选择目录，或改用对应的文件操作积木。";
+  } else if (type === "FileExistsError") {
+    suggestion = "目标文件或目录已经存在。请更换名称，或把“已存在时”选项设置为忽略或合并。";
+  } else if (type === "OSError" && /directory not empty/i.test(detail)) {
+    suggestion = "目录中仍有文件或子目录。确认确实需要全部删除后，将删除方式改为“连同全部内容”。";
   } else if (type === "AttributeError") {
     suggestion = `当前对象没有属性或方法“${attribute?.[1] || "该名称"}”。请检查对象类型和属性/方法名称。`;
   } else if (type === "TypeError" && missingArgument) {

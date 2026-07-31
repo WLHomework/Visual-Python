@@ -6,7 +6,7 @@ import { addManimImport, value } from "../helpers";
 export const registerTrackerValueBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_value_tracker",
-    message0: "数值追踪器 ValueTracker 初始值 %1",
+    message0: "数值追踪器 初始值 %1",
     args0: [{ type: "input_value", name: "VALUE", check: "Number" }],
     inputsInline: true,
     output: "ManimObject",
@@ -18,7 +18,7 @@ export const registerTrackerValueBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_decimal_number",
-    message0: "小数 DecimalNumber 值 %1 小数位 %2",
+    message0: "小数显示 值 %1 小数位 %2",
     args0: [
       { type: "input_value", name: "VALUE", check: "Number" },
       { type: "input_value", name: "PLACES", check: "Number" },
@@ -35,7 +35,7 @@ export const registerTrackerValueBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_variable",
-    message0: "变量 Variable 值 %1 标签 %2",
+    message0: "带标签变量 值 %1 标签 %2",
     args0: [
       { type: "input_value", name: "VALUE", check: "Number" },
       { type: "input_value", name: "LABEL", check: "String" },

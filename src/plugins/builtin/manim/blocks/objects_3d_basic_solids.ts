@@ -1,16 +1,16 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions } from "../constants";
+import { colour } from "../constants";
 import { addManimImport, pythonCall, value } from "../helpers";
 
 export const registerBasicThreeDSolidBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_sphere_object",
-    message0: "球体 Sphere 半径 %1 不透明度 %2 颜色 %3",
+    message0: "球体 半径 %1 不透明度 %2 颜色 %3",
     args0: [
       { type: "input_value", name: "RADIUS", check: "Number" },
       { type: "input_value", name: "FILL_OPACITY", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -25,11 +25,11 @@ export const registerBasicThreeDSolidBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_cube_object",
-    message0: "立方体 Cube 边长 %1 不透明度 %2 颜色 %3",
+    message0: "立方体 边长 %1 不透明度 %2 颜色 %3",
     args0: [
       { type: "input_value", name: "SIDE_LENGTH", check: "Number" },
       { type: "input_value", name: "FILL_OPACITY", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

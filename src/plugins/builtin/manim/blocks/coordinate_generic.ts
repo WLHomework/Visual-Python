@@ -6,7 +6,7 @@ import { addManimImport, value } from "../helpers";
 export const registerGenericCoordinateObjectBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_coordinate_object",
-    message0: "坐标系统 %1 x范围 %2 y范围 %3",
+    message0: "坐标系统 %1 横轴范围 %2 纵轴范围 %3",
     args0: [
       { type: "field_dropdown", name: "SYSTEM", options: coordinateOptions },
       { type: "input_value", name: "X_RANGE" },

@@ -157,7 +157,7 @@ describe("block display localization", () => {
 
   it("translates blocks that were entirely English", () => {
     expect(localizeBlockMessage("visual_python_manim_parametric_surface", "Surface function %1 u range %2 v range %3 resolution %4 color %5"))
-      .toBe("参数曲面 函数 %1 横向范围 %2 纵向范围 %3 分辨率 %4 颜色 %5");
+      .toBe("参数曲面 函数 %1 横向参数范围 %2 纵向参数范围 %3 精度 %4 颜色 %5");
   });
 
   it("keeps API names out of all static block titles", () => {

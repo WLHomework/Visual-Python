@@ -6,9 +6,9 @@ import { addManimImport, pythonCall, value } from "../helpers";
 export const registerPlaneObjectBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_number_line_object",
-    message0: "数轴 NumberLine x范围 %1 长度 %2 显示数字 %3",
+    message0: "数轴 数值范围 %1 长度 %2 显示数字 %3",
     args0: [
-      { type: "input_value", name: "X_RANGE" },
+      { type: "input_value", name: "X_RANGE", check: "ManimRange" },
       { type: "input_value", name: "LENGTH", check: "Number" },
       { type: "field_checkbox", name: "INCLUDE_NUMBERS", checked: true },
     ],
@@ -25,10 +25,10 @@ export const registerPlaneObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_number_plane_object",
-    message0: "平面网格 NumberPlane x范围 %1 y范围 %2 x长度 %3 y长度 %4",
+    message0: "平面网格 横轴范围 %1 纵轴范围 %2 横轴长度 %3 纵轴长度 %4",
     args0: [
-      { type: "input_value", name: "X_RANGE" },
-      { type: "input_value", name: "Y_RANGE" },
+      { type: "input_value", name: "X_RANGE", check: "ManimRange" },
+      { type: "input_value", name: "Y_RANGE", check: "ManimRange" },
       { type: "input_value", name: "X_LENGTH", check: "Number" },
       { type: "input_value", name: "Y_LENGTH", check: "Number" },
     ],
@@ -46,10 +46,10 @@ export const registerPlaneObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_complex_plane_object",
-    message0: "复平面 ComplexPlane x范围 %1 y范围 %2",
+    message0: "复平面 横轴范围 %1 纵轴范围 %2",
     args0: [
-      { type: "input_value", name: "X_RANGE" },
-      { type: "input_value", name: "Y_RANGE" },
+      { type: "input_value", name: "X_RANGE", check: "ManimRange" },
+      { type: "input_value", name: "Y_RANGE", check: "ManimRange" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -63,7 +63,7 @@ export const registerPlaneObjectBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_polar_plane_object",
-    message0: "极坐标 PolarPlane 最大半径 %1 半径步长 %2 尺寸 %3",
+    message0: "极坐标平面 最大半径 %1 半径步长 %2 尺寸 %3",
     args0: [
       { type: "input_value", name: "RADIUS_MAX", check: "Number" },
       { type: "input_value", name: "RADIUS_STEP", check: "Number" },

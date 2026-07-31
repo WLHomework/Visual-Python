@@ -9,7 +9,7 @@ export const registerGenericMethodBlocks = (context: PluginContext) => {
     message0: "对象 %1 调用 %2 参数 %3",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "field_dropdown", name: "METHOD", options: [["scale", "scale"], ["shift", "shift"], ["move_to", "move_to"], ["to_edge", "to_edge"]] },
+      { type: "field_dropdown", name: "METHOD", options: [["缩放", "scale"], ["相对移动", "shift"], ["移动到", "move_to"], ["移动到边缘", "to_edge"]] },
       { type: "input_value", name: "ARG" },
     ],
     inputsInline: true,

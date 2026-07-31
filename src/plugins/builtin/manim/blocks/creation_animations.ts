@@ -22,7 +22,7 @@ export const registerCreationAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_create_object_animation",
-    message0: "绘制 Create 对象 %1 时间 %2",
+    message0: "绘制对象 %1 时间 %2",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
@@ -39,7 +39,7 @@ export const registerCreationAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_write_animation",
-    message0: "书写 Write 对象 %1 时间 %2",
+    message0: "书写对象 %1 时间 %2",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
@@ -56,7 +56,7 @@ export const registerCreationAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_uncreate_animation",
-    message0: "反向绘制 Uncreate 对象 %1 时间 %2",
+    message0: "反向绘制对象 %1 时间 %2",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
@@ -73,7 +73,7 @@ export const registerCreationAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_unwrite_animation",
-    message0: "反向书写 Unwrite 对象 %1 时间 %2",
+    message0: "反向书写对象 %1 时间 %2",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
@@ -90,7 +90,7 @@ export const registerCreationAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_draw_border_then_fill_animation",
-    message0: "先描边再填充 DrawBorderThenFill 对象 %1 时间 %2",
+    message0: "先描边再填充 对象 %1 时间 %2",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },

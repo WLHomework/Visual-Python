@@ -51,4 +51,10 @@ describe("Python structured edits", () => {
     };
     expect(addPythonImport(moduleSource, moduleStructure, "math")).toBe('"""Animation module."""\nimport math\n\nclass Demo:\n    pass\n');
   });
+
+  it("accepts valid Chinese module and imported names", () => {
+    const emptyStructure: PythonStructure = { classes: [], functions: [], imports: [], statements: [] };
+    expect(addPythonImport("", emptyStructure, "教学工具", ["计算面积"]))
+      .toBe("from 教学工具 import 计算面积\n");
+  });
 });

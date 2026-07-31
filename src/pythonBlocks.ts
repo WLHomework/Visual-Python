@@ -4,7 +4,9 @@ import * as ZhHans from "blockly/msg/zh-hans";
 import { pythonGenerator } from "blockly/python";
 import { Order } from "blockly/python";
 import { localizeBlockDefinitions } from "./blockDisplayLocalization";
-import { pythonSyntaxToolbox, registerPythonSyntaxBlocks } from "./pythonSyntaxBlocks";
+import { installFileBlockPickerFields } from "./fileBlockPicker";
+import { isPythonAnnotation, isPythonIdentifier, normalizePythonIdentifier, pythonIdentifierOrFallback, sanitizePythonIdentifier } from "./pythonIdentifiers";
+import { pythonSyntaxToolbox, registerPythonSyntaxBlocks, standardLibraryCall } from "./pythonSyntaxBlocks";
 
 const locale = Object.fromEntries(
   Object.entries(ZhHans).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
@@ -12,6 +14,11 @@ const locale = Object.fromEntries(
 locale.LOGIC_BOOLEAN_TRUE = "真";
 locale.LOGIC_BOOLEAN_FALSE = "假";
 Blockly.setLocale(locale);
+
+// Blockly's default name database percent-encodes every non-ASCII character.
+// Python 3 accepts Unicode identifiers, so preserve them for generated variables.
+(Blockly.Names.prototype as unknown as { safeName(name: string): string }).safeName = (name: string) =>
+  sanitizePythonIdentifier(name, "unnamed", "variable_");
 
 const blockStyles = {
   logic_blocks: { colourPrimary: "#5968b0", colourSecondary: "#4d5b9d", colourTertiary: "#3f4c89" },
@@ -63,6 +70,7 @@ const colours = {
   object: "#a64ca6",
   exception: "#b95050",
   module: "#c58b32",
+  file: "#4f7f8e",
 } as const;
 const expressionColour = colours.call;
 const collectionColour = colours.collection;
@@ -79,6 +87,7 @@ registerPythonSyntaxBlocks({
   module: colours.module,
   call: colours.call,
   collection: colours.collection,
+  file: colours.file,
 });
 
 class ThemedMutatorIcon extends Blockly.icons.MutatorIcon {
@@ -119,9 +128,9 @@ class ThemedMutatorIcon extends Blockly.icons.MutatorIcon {
 const createMutatorIcon = (blockTypes: string[], block: Blockly.BlockSvg) => new ThemedMutatorIcon(blockTypes, block);
 
 Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
-  { type: "python_print", message0: "打印 %1", args0: [{ type: "input_value", name: "VALUE" }], previousStatement: null, nextStatement: null, colour: colours.inputOutput },
-  { type: "python_input", message0: "输入，提示 %1", args0: [{ type: "input_value", name: "PROMPT", check: "String" }], output: null, colour: colours.inputOutput },
-  { type: "python_input_assign", message0: "输入并保存到 %1 提示 %2", args0: [{ type: "field_variable", name: "VAR", variable: "answer" }, { type: "input_value", name: "PROMPT", check: "String" }], previousStatement: null, nextStatement: null, colour: colours.inputOutput },
+  { type: "python_print", message0: "打印 %1", args0: [{ type: "input_value", name: "VALUE" }], previousStatement: null, nextStatement: null, colour: colours.inputOutput, tooltip: "在输出面板显示文本、数字或其他值。" },
+  { type: "python_input", message0: "询问 %1 并等待输入", args0: [{ type: "input_value", name: "PROMPT", check: "String" }], output: null, colour: colours.inputOutput, tooltip: "显示提示文字并返回用户输入的文本。" },
+  { type: "python_input_assign", message0: "询问 %2 并保存到 %1", args0: [{ type: "field_variable", name: "VAR", variable: "回答" }, { type: "input_value", name: "PROMPT", check: "String" }], previousStatement: null, nextStatement: null, colour: colours.inputOutput, tooltip: "显示提示文字，并把用户输入保存到所选变量。" },
   { type: "python_import", message0: "导入模块 %1", args0: [{ type: "field_input", name: "MODULE", text: "math" }], previousStatement: null, nextStatement: null, colour: colours.module },
   { type: "python_from_import", message0: "从 %1 导入 %2", args0: [{ type: "field_input", name: "MODULE", text: "math" }, { type: "field_input", name: "NAME", text: "sqrt" }], previousStatement: null, nextStatement: null, colour: colours.module },
   { type: "python_raw_expression", message0: "Python 表达式 %1", args0: [{ type: "field_input", name: "CODE", text: "len(items)" }], output: null, colour: colours.module },
@@ -134,64 +143,239 @@ Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
   { type: "python_conditional", message0: "如果 %1 则 %2 否则 %3", args0: [{ type: "input_value", name: "CONDITION", check: "Boolean" }, { type: "input_value", name: "TRUE_VALUE" }, { type: "input_value", name: "FALSE_VALUE" }], inputsInline: true, output: null, colour: "#5968b0" },
   { type: "python_call", message0: "调用函数 %1 参数 %2", args0: [{ type: "field_input", name: "NAME", text: "len" }, { type: "input_value", name: "ARG" }], output: null, colour: expressionColour },
   { type: "python_call_statement", message0: "调用函数 %1 参数 %2", args0: [{ type: "field_input", name: "NAME", text: "print" }, { type: "input_value", name: "ARG" }], previousStatement: null, nextStatement: null, colour: expressionColour },
-  { type: "python_keyword_argument", message0: "关键字参数 %1 = %2", args0: [{ type: "field_input", name: "NAME", text: "name" }, { type: "input_value", name: "VALUE" }], output: "PythonArgument", colour: expressionColour },
-  { type: "python_tuple", message0: "元组 ( %1 , %2 )", args0: [{ type: "input_value", name: "A" }, { type: "input_value", name: "B" }], inputsInline: true, output: null, colour: collectionColour },
-  { type: "python_set", message0: "集合 { %1 , %2 }", args0: [{ type: "input_value", name: "A" }, { type: "input_value", name: "B" }], inputsInline: true, output: null, colour: collectionColour },
-  { type: "python_dict", message0: "字典 { %1 : %2 , %3 : %4 }", args0: [{ type: "input_value", name: "K1" }, { type: "input_value", name: "V1" }, { type: "input_value", name: "K2" }, { type: "input_value", name: "V2" }], inputsInline: true, output: null, colour: collectionColour },
+  { type: "python_keyword_argument", message0: "关键字参数 %1 = %2", args0: [{ type: "field_input", name: "NAME", text: "名称" }, { type: "input_value", name: "VALUE" }], output: "PythonArgument", colour: expressionColour },
+  { type: "python_tuple", message0: "元组 ( %1 , %2 )", args0: [{ type: "input_value", name: "A" }, { type: "input_value", name: "B" }], inputsInline: true, output: "PythonTuple", colour: collectionColour },
+  { type: "python_set", message0: "集合 { %1 , %2 }", args0: [{ type: "input_value", name: "A" }, { type: "input_value", name: "B" }], inputsInline: true, output: "PythonSet", colour: collectionColour },
+  { type: "python_dict", message0: "字典 { %1 : %2 , %3 : %4 }", args0: [{ type: "input_value", name: "K1" }, { type: "input_value", name: "V1" }, { type: "input_value", name: "K2" }, { type: "input_value", name: "V2" }], inputsInline: true, output: "PythonDict", colour: collectionColour },
   { type: "python_index", message0: "%1 的索引 %2", args0: [{ type: "input_value", name: "OBJECT" }, { type: "input_value", name: "INDEX" }], output: null, colour: collectionColour },
   { type: "python_slice", message0: "%1 切片 从 %2 到 %3 步长 %4", args0: [{ type: "input_value", name: "OBJECT" }, { type: "input_value", name: "START" }, { type: "input_value", name: "STOP" }, { type: "input_value", name: "STEP" }], output: null, colour: collectionColour },
-  { type: "python_attribute", message0: "%1 的属性 %2", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "ATTRIBUTE", text: "name" }], output: null, colour: objectColour },
+  { type: "python_attribute", message0: "%1 的属性 %2", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "ATTRIBUTE", text: "名称" }], output: null, colour: objectColour },
   { type: "python_method_call", message0: "%1 调用方法 %2 参数 %3", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "METHOD", text: "append" }, { type: "input_value", name: "ARG" }], output: null, colour: objectColour },
   { type: "python_method_statement", message0: "%1 调用方法 %2 参数 %3", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "METHOD", text: "append" }, { type: "input_value", name: "ARG" }], previousStatement: null, nextStatement: null, colour: objectColour },
-  { type: "python_new_object", message0: "创建 %1 参数 %2", args0: [{ type: "field_input", name: "CLASS", text: "Person" }, { type: "input_value", name: "ARG" }], output: null, colour: objectColour },
+  { type: "python_new_object", message0: "创建 %1 参数 %2", args0: [{ type: "field_input", name: "CLASS", text: "自定义类" }, { type: "input_value", name: "ARG" }], output: null, colour: objectColour },
   { type: "python_return", message0: "返回 %1", args0: [{ type: "input_value", name: "VALUE" }], previousStatement: null, colour: colours.function },
   { type: "python_raise", message0: "抛出异常 %1", args0: [{ type: "input_value", name: "ERROR" }], previousStatement: null, nextStatement: null, colour: statementColour },
-  { type: "python_try_except", message0: "尝试 %1 捕获 %2 命名为 %3 %4", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR", text: "Exception" }, { type: "field_variable", name: "ALIAS", variable: "error" }, { type: "input_statement", name: "EXCEPT" }], previousStatement: null, nextStatement: null, colour: statementColour },
-  { type: "python_try_two_except", message0: "尝试 %1 捕获 %2 命名为 %3 %4 再捕获 %5 命名为 %6 %7 最终 %8", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR1", text: "ValueError" }, { type: "field_input", name: "ALIAS1", text: "error" }, { type: "input_statement", name: "EXCEPT1" }, { type: "field_input", name: "ERROR2", text: "TypeError" }, { type: "field_input", name: "ALIAS2", text: "error" }, { type: "input_statement", name: "EXCEPT2" }, { type: "input_statement", name: "FINALLY" }], previousStatement: null, nextStatement: null, colour: statementColour },
-  { type: "python_for_in", message0: "对于 %1 在 %2 中 %3", args0: [{ type: "field_variable", name: "VAR", variable: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null, colour: colours.loop },
-  { type: "python_for_enumerate", message0: "枚举 %1 为 %2 , %3 %4", args0: [{ type: "input_value", name: "ITERABLE" }, { type: "field_variable", name: "INDEX", variable: "index" }, { type: "field_variable", name: "VALUE", variable: "item" }, { type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null, colour: colours.loop },
+  { type: "python_try_except", message0: "尝试 %1 捕获 %2 命名为 %3 %4", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR", text: "Exception" }, { type: "field_variable", name: "ALIAS", variable: "错误" }, { type: "input_statement", name: "EXCEPT" }], previousStatement: null, nextStatement: null, colour: statementColour },
+  { type: "python_try_two_except", message0: "尝试 %1 捕获 %2 命名为 %3 %4 再捕获 %5 命名为 %6 %7 最终 %8", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR1", text: "ValueError" }, { type: "field_input", name: "ALIAS1", text: "数值错误" }, { type: "input_statement", name: "EXCEPT1" }, { type: "field_input", name: "ERROR2", text: "TypeError" }, { type: "field_input", name: "ALIAS2", text: "类型错误" }, { type: "input_statement", name: "EXCEPT2" }, { type: "input_statement", name: "FINALLY" }], previousStatement: null, nextStatement: null, colour: statementColour },
+  { type: "python_for_in", message0: "对于 %1 在 %2 中 %3", args0: [{ type: "field_variable", name: "VAR", variable: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null, colour: colours.loop },
+  { type: "python_for_enumerate", message0: "枚举 %1 为 %2 , %3 %4", args0: [{ type: "input_value", name: "ITERABLE" }, { type: "field_variable", name: "INDEX", variable: "序号" }, { type: "field_variable", name: "VALUE", variable: "项目" }, { type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null, colour: colours.loop },
   { type: "python_while_else", message0: "当 %1 时 %2 否则 %3", args0: [{ type: "input_value", name: "CONDITION" }, { type: "input_statement", name: "DO" }, { type: "input_statement", name: "ELSE" }], previousStatement: null, nextStatement: null, colour: colours.loop },
-  { type: "python_for_else", message0: "对于 %1 在 %2 中 %3 否则 %4", args0: [{ type: "field_variable", name: "VAR", variable: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_statement", name: "DO" }, { type: "input_statement", name: "ELSE" }], previousStatement: null, nextStatement: null, colour: colours.loop },
+  { type: "python_for_else", message0: "对于 %1 在 %2 中 %3 否则 %4", args0: [{ type: "field_variable", name: "VAR", variable: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_statement", name: "DO" }, { type: "input_statement", name: "ELSE" }], previousStatement: null, nextStatement: null, colour: colours.loop },
   { type: "python_pass", message0: "跳过 pass", previousStatement: null, nextStatement: null, colour: colours.loop },
   { type: "python_assert", message0: "断言 %1 消息 %2", args0: [{ type: "input_value", name: "CONDITION" }, { type: "input_value", name: "MESSAGE" }], previousStatement: null, nextStatement: null, colour: statementColour },
-  { type: "python_scope_declaration", message0: "%1 变量 %2", args0: [{ type: "field_dropdown", name: "SCOPE", options: [["全局 global", "global"], ["外层 nonlocal", "nonlocal"]] }, { type: "field_input", name: "NAMES", text: "counter" }], previousStatement: null, nextStatement: null, colour: colours.function },
-  { type: "python_function_def", message0: "定义函数 %1 ( %2 ) %3", args0: [{ type: "field_input", name: "NAME", text: "my_function" }, { type: "field_input", name: "PARAMS", text: "value, count=1, *args, **kwargs" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: colours.function },
-  { type: "python_class_def", message0: "定义类 %1 继承 %2 %3", args0: [{ type: "field_input", name: "NAME", text: "MyClass" }, { type: "field_input", name: "BASES", text: "object" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: objectColour },
-  { type: "python_method_def", message0: "定义方法 %1 ( %2 ) %3", args0: [{ type: "field_input", name: "NAME", text: "method" }, { type: "field_input", name: "PARAMS", text: "self" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: objectColour },
-  { type: "python_set_attribute", message0: "设置 %1 的属性 %2 为 %3", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "ATTRIBUTE", text: "name" }, { type: "input_value", name: "VALUE" }], previousStatement: null, nextStatement: null, colour: objectColour },
+  { type: "python_scope_declaration", message0: "%1 变量 %2", args0: [{ type: "field_dropdown", name: "SCOPE", options: [["全局 global", "global"], ["外层 nonlocal", "nonlocal"]] }, { type: "field_input", name: "NAMES", text: "计数器" }], previousStatement: null, nextStatement: null, colour: colours.function },
+  { type: "python_function_def", message0: "定义函数 %1 ( %2 ) %3", args0: [{ type: "field_input", name: "NAME", text: "自定义函数" }, { type: "field_input", name: "PARAMS", text: "数值, 次数=1, *参数, **关键字参数" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: colours.function },
+  { type: "python_class_def", message0: "定义类 %1 继承 %2 %3", args0: [{ type: "field_input", name: "NAME", text: "自定义类" }, { type: "field_input", name: "BASES", text: "object" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: objectColour },
+  { type: "python_method_def", message0: "定义方法 %1 ( %2 ) %3", args0: [{ type: "field_input", name: "NAME", text: "自定义方法" }, { type: "field_input", name: "PARAMS", text: "self" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: objectColour },
+  { type: "python_set_attribute", message0: "设置 %1 的属性 %2 为 %3", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "ATTRIBUTE", text: "名称" }, { type: "input_value", name: "VALUE" }], previousStatement: null, nextStatement: null, colour: objectColour },
   { type: "python_super_call", message0: "调用父类方法 %1 参数 %2", args0: [{ type: "field_input", name: "METHOD", text: "__init__" }, { type: "input_value", name: "ARG" }], previousStatement: null, nextStatement: null, colour: objectColour },
-  { type: "python_try_full", message0: "尝试 %1 捕获 %2 命名为 %3 %4 否则 %5 最终 %6", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR", text: "Exception" }, { type: "field_variable", name: "ALIAS", variable: "error" }, { type: "input_statement", name: "EXCEPT" }, { type: "input_statement", name: "ELSE" }, { type: "input_statement", name: "FINALLY" }], previousStatement: null, nextStatement: null, colour: statementColour },
-  { type: "python_with", message0: "使用 with %1 命名为 %2 %3", args0: [{ type: "input_value", name: "CONTEXT" }, { type: "field_variable", name: "ALIAS", variable: "resource" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: statementColour },
-  { type: "python_list_comprehension", message0: "列表 [ %1 对于 %2 在 %3 中 如果 %4 ]", args0: [{ type: "input_value", name: "EXPRESSION" }, { type: "field_input", name: "VAR", text: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour },
-  { type: "python_set_comprehension", message0: "集合 { %1 对于 %2 在 %3 中 如果 %4 }", args0: [{ type: "input_value", name: "EXPRESSION" }, { type: "field_input", name: "VAR", text: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour },
-  { type: "python_dict_comprehension", message0: "字典 { %1 : %2 对于 %3 在 %4 中 如果 %5 }", args0: [{ type: "input_value", name: "KEY" }, { type: "input_value", name: "VALUE" }, { type: "field_input", name: "VAR", text: "item" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour },
-  { type: "python_lambda", message0: "lambda 参数 %1 返回 %2", args0: [{ type: "field_input", name: "PARAMS", text: "value" }, { type: "input_value", name: "EXPRESSION" }], inputsInline: true, output: null, colour: colours.function },
+  { type: "python_try_full", message0: "尝试 %1 捕获 %2 命名为 %3 %4 否则 %5 最终 %6", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR", text: "Exception" }, { type: "field_variable", name: "ALIAS", variable: "错误" }, { type: "input_statement", name: "EXCEPT" }, { type: "input_statement", name: "ELSE" }, { type: "input_statement", name: "FINALLY" }], previousStatement: null, nextStatement: null, colour: statementColour },
+  { type: "python_with", message0: "安全使用 %1 命名为 %2 %3", args0: [{ type: "input_value", name: "CONTEXT" }, { type: "field_variable", name: "ALIAS", variable: "资源" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: colours.file },
+  { type: "python_list_comprehension", message0: "列表 [ %1 对于 %2 在 %3 中 如果 %4 ]", args0: [{ type: "input_value", name: "EXPRESSION" }, { type: "field_input", name: "VAR", text: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "根据一个集合快速生成新列表，条件可以留空。" },
+  { type: "python_set_comprehension", message0: "集合 { %1 对于 %2 在 %3 中 如果 %4 }", args0: [{ type: "input_value", name: "EXPRESSION" }, { type: "field_input", name: "VAR", text: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "根据一个集合快速生成不重复值的集合，条件可以留空。" },
+  { type: "python_dict_comprehension", message0: "字典 { %1 : %2 对于 %3 在 %4 中 如果 %5 }", args0: [{ type: "input_value", name: "KEY" }, { type: "input_value", name: "VALUE" }, { type: "field_input", name: "VAR", text: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "根据一个集合快速生成键值对，条件可以留空。" },
+  { type: "python_lambda", message0: "lambda 参数 %1 返回 %2", args0: [{ type: "field_input", name: "PARAMS", text: "数值" }, { type: "input_value", name: "EXPRESSION" }], inputsInline: true, output: null, colour: colours.function },
   { type: "python_decorated_definition", message0: "装饰器 @ %1 %2", args0: [{ type: "input_value", name: "DECORATOR" }, { type: "input_statement", name: "DEFINITION" }], previousStatement: null, nextStatement: null, colour: colours.function },
-  { type: "python_range", message0: "range 从 %1 到 %2 步长 %3", args0: [{ type: "input_value", name: "START" }, { type: "input_value", name: "STOP" }, { type: "input_value", name: "STEP" }], inputsInline: true, output: null, colour: colours.loop },
-  { type: "python_length", message0: "%1 的长度", args0: [{ type: "input_value", name: "VALUE" }], output: "Number", colour: colours.inputOutput },
-  { type: "python_convert", message0: "转换 %1 为 %2", args0: [{ type: "input_value", name: "VALUE" }, { type: "field_dropdown", name: "TYPE", options: [["整数 int", "int"], ["浮点数 float", "float"], ["文本 str", "str"], ["布尔值 bool", "bool"], ["列表 list", "list"], ["元组 tuple", "tuple"], ["集合 set", "set"], ["字典 dict", "dict"]] }], inputsInline: true, output: null, colour: colours.inputOutput },
-  { type: "python_string_method", message0: "文本 %1 方法 %2 参数 %3", args0: [{ type: "input_value", name: "TEXT", check: "String" }, { type: "field_dropdown", name: "METHOD", options: [["转大写 upper", "upper"], ["转小写 lower", "lower"], ["去空白 strip", "strip"], ["分割 split", "split"], ["连接 join", "join"]] }, { type: "input_value", name: "ARG" }], inputsInline: true, output: null, colour: colours.inputOutput },
-  { type: "python_list_method", message0: "列表 %1 方法 %2 参数 %3", args0: [{ type: "input_value", name: "LIST" }, { type: "field_dropdown", name: "METHOD", options: [["追加 append", "append"], ["扩展 extend", "extend"], ["移除 remove", "remove"], ["弹出 pop", "pop"], ["排序 sort", "sort"], ["反转 reverse", "reverse"], ["清空 clear", "clear"]] }, { type: "input_value", name: "ARG" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour },
-  { type: "python_dict_get", message0: "字典 %1 获取键 %2 默认值 %3", args0: [{ type: "input_value", name: "DICT" }, { type: "input_value", name: "KEY" }, { type: "input_value", name: "DEFAULT" }], inputsInline: true, output: null, colour: collectionColour },
-  { type: "python_dict_view", message0: "字典 %1 的 %2", args0: [{ type: "input_value", name: "DICT" }, { type: "field_dropdown", name: "METHOD", options: [["键 keys", "keys"], ["值 values", "values"], ["键值对 items", "items"]] }], inputsInline: true, output: null, colour: collectionColour },
-  { type: "python_open_file", message0: "打开文件 %1 模式 %2 编码 %3", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_dropdown", name: "MODE", options: [["读取 r", "r"], ["写入 w", "w"], ["追加 a", "a"], ["二进制读取 rb", "rb"], ["二进制写入 wb", "wb"]] }, { type: "field_input", name: "ENCODING", text: "utf-8" }], inputsInline: true, output: null, colour: colours.module },
-  { type: "python_file_read", message0: "文件 %1 读取 %2", args0: [{ type: "input_value", name: "FILE" }, { type: "input_value", name: "SIZE" }], inputsInline: true, output: null, colour: colours.module },
-  { type: "python_file_write", message0: "文件 %1 写入 %2", args0: [{ type: "input_value", name: "FILE" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.module },
+  { type: "python_range", message0: "数值范围 从 %1 到 %2 步长 %3", args0: [{ type: "input_value", name: "START", check: "Number" }, { type: "input_value", name: "STOP", check: "Number" }, { type: "input_value", name: "STEP", check: "Number" }], inputsInline: true, output: null, colour: colours.loop, tooltip: "生成从起始值到结束值之前的一组整数。" },
+  { type: "python_length", message0: "%1 的长度", args0: [{ type: "input_value", name: "VALUE" }], output: "Number", colour: colours.inputOutput, tooltip: "获取文本或集合中项目的数量。" },
+  { type: "python_convert", message0: "将 %1 转换为 %2", args0: [{ type: "input_value", name: "VALUE" }, { type: "field_dropdown", name: "TYPE", options: [["整数", "int"], ["小数", "float"], ["文本", "str"], ["真假值", "bool"], ["列表", "list"], ["元组", "tuple"], ["集合", "set"], ["字典", "dict"]] }], inputsInline: true, output: null, colour: colours.inputOutput, tooltip: "把一个值转换成所选的数据类型。" },
+  { type: "python_text_replace", message0: "将文本 %1 中的 %2 替换为 %3", args0: [{ type: "input_value", name: "TEXT", check: "String" }, { type: "input_value", name: "OLD", check: "String" }, { type: "input_value", name: "NEW", check: "String" }], inputsInline: true, output: "String", colour: colours.inputOutput, tooltip: "返回替换后的新文本，不改变原文本。" },
+  { type: "python_list_insert", message0: "在列表 %1 的索引 %2 插入 %3", args0: [{ type: "input_value", name: "LIST", check: "Array" }, { type: "input_value", name: "INDEX", check: "Number" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour, tooltip: "在列表的指定位置插入一个值。" },
+  { type: "python_list_set", message0: "将列表 %1 的索引 %2 设置为 %3", args0: [{ type: "input_value", name: "LIST", check: "Array" }, { type: "input_value", name: "INDEX", check: "Number" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour, tooltip: "修改列表指定位置的值。" },
+  { type: "python_list_slice_set", message0: "将列表 %1 从 %2 到 %3 步长 %4 的内容替换为 %5", args0: [{ type: "input_value", name: "LIST", check: "Array" }, { type: "input_value", name: "START", check: "Number" }, { type: "input_value", name: "STOP", check: "Number" }, { type: "input_value", name: "STEP", check: "Number" }, { type: "input_value", name: "VALUES", check: "Array" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour, tooltip: "替换列表的一段内容；起点、终点和步长可以留空。" },
+  { type: "python_list_slice_delete", message0: "删除列表 %1 从 %2 到 %3 步长 %4 的内容", args0: [{ type: "input_value", name: "LIST", check: "Array" }, { type: "input_value", name: "START", check: "Number" }, { type: "input_value", name: "STOP", check: "Number" }, { type: "input_value", name: "STEP", check: "Number" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour, tooltip: "删除列表的一段内容；起点、终点和步长可以留空。" },
+  { type: "python_sequence_query", message0: "在序列 %1 中 %2 %3", args0: [{ type: "input_value", name: "SEQUENCE", check: ["Array", "PythonTuple"] }, { type: "field_dropdown", name: "METHOD", options: [["统计值出现次数", "count"], ["查找值的位置", "index"]] }, { type: "input_value", name: "VALUE" }], inputsInline: true, output: "Number", colour: collectionColour, tooltip: "适用于列表和元组；可以统计某个值出现的次数，或查找它第一次出现的位置。" },
+  { type: "python_sequence_combine", message0: "%1 %2 %3", args0: [{ type: "input_value", name: "SEQUENCE", check: ["Array", "PythonTuple"] }, { type: "field_dropdown", name: "OPERATION", options: [["拼接", "concat"], ["重复", "repeat"]] }, { type: "input_value", name: "OTHER" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "拼接两个同类的列表或元组，或者将一个列表或元组重复指定次数。" },
+  { type: "python_list_copy", message0: "复制列表 %1", args0: [{ type: "input_value", name: "LIST", check: "Array" }], output: "Array", colour: collectionColour, tooltip: "创建一个内容相同但相互独立的新列表。" },
+  { type: "python_set_operation", message0: "集合 %1 与集合 %2 的 %3", args0: [{ type: "input_value", name: "LEFT", check: "PythonSet" }, { type: "input_value", name: "RIGHT", check: "PythonSet" }, { type: "field_dropdown", name: "OPERATION", options: [["并集", "union"], ["交集", "intersection"], ["差集", "difference"], ["对称差集", "symmetric_difference"]] }], inputsInline: true, output: "PythonSet", colour: collectionColour, tooltip: "计算两个集合的并集、交集、差集或对称差集，不修改原集合。" },
+  { type: "python_set_relation", message0: "集合 %1 %3 集合 %2", args0: [{ type: "input_value", name: "LEFT", check: "PythonSet" }, { type: "input_value", name: "RIGHT", check: "PythonSet" }, { type: "field_dropdown", name: "RELATION", options: [["是子集", "subset"], ["是真子集", "proper_subset"], ["是超集", "superset"], ["是真超集", "proper_superset"], ["互不相交", "disjoint"]] }], inputsInline: true, output: "Boolean", colour: collectionColour, tooltip: "判断两个集合之间的包含关系，或它们是否没有共同元素。" },
+  { type: "python_set_copy", message0: "复制集合 %1", args0: [{ type: "input_value", name: "SET", check: "PythonSet" }], output: "PythonSet", colour: collectionColour, tooltip: "创建一个内容相同但相互独立的新集合。" },
+  { type: "python_dict_get", message0: "从字典 %1 获取键 %2，找不到时返回 %3", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }, { type: "input_value", name: "DEFAULT" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "读取键对应的值；键不存在时返回默认值。" },
+  { type: "python_dict_set", message0: "将字典 %1 的键 %2 设置为 %3", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour, tooltip: "新增键值对，或修改已有键的值。" },
+  { type: "python_dict_remove", message0: "从字典 %1 删除键 %2", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour, tooltip: "删除指定键；键不存在时不会报错。" },
+  { type: "python_dict_view", message0: "字典 %1 的 %2", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "field_dropdown", name: "METHOD", options: [["键 keys", "keys"], ["值 values", "values"], ["键值对 items", "items"]] }], inputsInline: true, output: null, colour: collectionColour },
+  { type: "python_dict_fromkeys", message0: "用键集合 %1 创建字典，初始值 %2", args0: [{ type: "input_value", name: "KEYS", check: ["Array", "PythonTuple", "PythonSet"] }, { type: "input_value", name: "VALUE" }], inputsInline: true, output: "PythonDict", colour: collectionColour, tooltip: "使用一组键创建新字典；初始值可以留空。" },
+  { type: "python_file_read_text", message0: "读取文本文件 %1 编码 %2", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_input", name: "ENCODING", text: "utf-8" }], inputsInline: true, output: "String", colour: colours.file, tooltip: "一次读取整个文本文件，读取完成后会自动关闭文件。" },
+  { type: "python_file_write_text", message0: "把 %1 %2 文件 %3 编码 %4", args0: [{ type: "input_value", name: "VALUE", check: "String" }, { type: "field_dropdown", name: "MODE", options: [["覆盖写入到", "w"], ["追加到", "a"]] }, { type: "input_value", name: "PATH", check: "String" }, { type: "field_input", name: "ENCODING", text: "utf-8" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file, tooltip: "写入文本并自动关闭文件；可以选择覆盖原内容或追加到末尾。" },
+  { type: "python_open_file", message0: "打开文件 %1 模式 %2 编码 %3", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_dropdown", name: "MODE", options: [["读取", "r"], ["覆盖写入", "w"], ["追加写入", "a"], ["独占创建", "x"], ["二进制读取", "rb"], ["二进制写入", "wb"], ["二进制追加", "ab"]] }, { type: "field_input", name: "ENCODING", text: "utf-8" }], inputsInline: true, output: null, colour: colours.file },
+  { type: "python_file_read", message0: "文件 %1 %2 最多读取 %3", args0: [{ type: "input_value", name: "FILE" }, { type: "field_dropdown", name: "METHOD", options: [["读取全部", "read"], ["读取一行", "readline"], ["读取多行", "readlines"]] }, { type: "input_value", name: "SIZE", check: "Number" }], inputsInline: true, output: null, colour: colours.file, tooltip: "读取数量可以留空；留空时读取全部可用内容。" },
+  { type: "python_file_write", message0: "文件 %1 %2 %3", args0: [{ type: "input_value", name: "FILE" }, { type: "field_dropdown", name: "METHOD", options: [["写入内容", "write"], ["写入多行", "writelines"]] }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file },
+  { type: "python_file_tell", message0: "文件 %1 当前读写位置", args0: [{ type: "input_value", name: "FILE" }], output: "Number", colour: colours.file },
+  { type: "python_file_seek", message0: "将文件 %1 读写位置移动到 %2 相对于 %3", args0: [{ type: "input_value", name: "FILE" }, { type: "input_value", name: "OFFSET", check: "Number" }, { type: "field_dropdown", name: "WHENCE", options: [["文件开头", "0"], ["当前位置", "1"], ["文件末尾", "2"]] }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file },
+  { type: "python_file_control", message0: "文件 %1 %2", args0: [{ type: "input_value", name: "FILE" }, { type: "field_dropdown", name: "ACTION", options: [["立即写入磁盘", "flush"], ["关闭文件", "close"]] }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file },
+  { type: "python_file_exists", message0: "文件 %1 是否存在", args0: [{ type: "input_value", name: "PATH", check: "String" }], output: "Boolean", colour: colours.file },
+  { type: "python_directory_exists", message0: "目录 %1 是否存在", args0: [{ type: "input_value", name: "PATH", check: "String" }], output: "Boolean", colour: colours.file },
+  { type: "python_path_info", message0: "%1 路径 %2 的 %3", args0: [{ type: "field_dropdown", name: "PATH_KIND", options: [["文件", "file"], ["目录", "directory"]] }, { type: "input_value", name: "PATH", check: "String" }, { type: "field_dropdown", name: "INFO", options: [["名称", "name"], ["不含扩展名的名称", "stem"], ["扩展名", "suffix"], ["父目录", "parent"], ["绝对路径", "resolve"], ["大小（字节，仅文件）", "size"]] }], inputsInline: true, output: null, colour: colours.file, tooltip: "读取文件或目录的名称、父目录、绝对路径等信息。文件大小单位为字节。" },
+  { type: "python_file_copy", message0: "复制文件 从 %1 到 %2", args0: [{ type: "input_value", name: "SOURCE", check: "String" }, { type: "input_value", name: "TARGET", check: "String" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file },
+  { type: "python_file_move", message0: "移动或重命名 %1 从 %2 到 %3", args0: [{ type: "field_dropdown", name: "PATH_KIND", options: [["文件", "file"], ["目录", "directory"]] }, { type: "input_value", name: "SOURCE", check: "String" }, { type: "input_value", name: "TARGET", check: "String" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file, tooltip: "选择文件时可直接指定新的文件名；选择目录时可先选择目标父目录，再在路径末尾填写新目录名。" },
+  { type: "python_file_delete", message0: "删除文件 %1 不存在时 %2", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_dropdown", name: "MISSING_OK", options: [["忽略", "True"], ["报错", "False"]] }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file },
+  { type: "python_directory_find", message0: "在目录 %1 中 %2 查找 %3", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_dropdown", name: "SCOPE", options: [["当前层", "direct"], ["包含子目录", "recursive"]] }, { type: "input_value", name: "PATTERN", check: "String" }], inputsInline: true, output: "Array", colour: colours.file, tooltip: "按名称模式查找文件或目录，例如 *.txt。返回匹配项目的路径列表。" },
+  { type: "python_directory_copy", message0: "复制目录 从 %1 到父目录 %2 新目录名 %3 已存在时 %4", args0: [{ type: "input_value", name: "SOURCE", check: "String" }, { type: "input_value", name: "TARGET", check: "String" }, { type: "field_input", name: "DIRECTORY_NAME", text: "" }, { type: "field_dropdown", name: "EXIST_OK", options: [["合并", "True"], ["报错", "False"]] }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file, tooltip: "选择源目录和目标父目录，再填写复制后的目录名称。名称留空时兼容旧版完整目标路径。" },
+  { type: "python_directory_move", message0: "移动目录 从 %1 到父目录 %2 新目录名 %3", args0: [{ type: "input_value", name: "SOURCE", check: "String" }, { type: "input_value", name: "TARGET", check: "String" }, { type: "field_input", name: "DIRECTORY_NAME", text: "" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file, tooltip: "选择源目录和目标父目录。填写新名称时同时重命名；名称留空时保留原目录名。" },
+  { type: "python_directory_remove", message0: "删除目录 %1 %2", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_dropdown", name: "REMOVE_MODE", options: [["仅当目录为空", "empty"], ["连同全部内容", "tree"]] }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file, tooltip: "默认只删除空目录。选择“连同全部内容”会永久删除目录中的所有文件和子目录。" },
 ]));
+
+installFileBlockPickerFields();
+
+const typedPythonOutputChecks: Record<string, string | string[]> = {
+  python_list_comprehension: "Array",
+  python_set_comprehension: "PythonSet",
+  python_dict_comprehension: "PythonDict",
+  python_sequence_combine: ["Array", "PythonTuple"],
+};
+for (const [type, check] of Object.entries(typedPythonOutputChecks)) {
+  const definition = Blockly.Blocks[type] as any;
+  if (!definition?.init) continue;
+  const originalInit = definition.init;
+  definition.init = function(this: Blockly.Block) {
+    originalInit.call(this);
+    this.setOutput(true, check);
+  };
+}
+
+const stringMethodOptions: Array<[string, string]> = [
+  ["转为大写", "upper"], ["转为小写", "lower"], ["去除两端空白", "strip"],
+  ["按分隔符拆分", "split"], ["使用分隔符连接", "join"],
+];
+
+Blockly.Blocks.python_string_method = {
+  init(this: Blockly.Block) {
+    this.setColour(colours.inputOutput);
+    this.setOutput(true, "String");
+    this.setInputsInline(true);
+    this.appendValueInput("TEXT").setCheck("String").appendField("将文本");
+    const method = new Blockly.FieldDropdown(stringMethodOptions);
+    this.appendDummyInput("METHOD_INPUT").appendField(method, "METHOD");
+    this.appendValueInput("ARG").appendField("参数", "ARG_LABEL");
+    const update = (value: string) => {
+      const argument = this.getInput("ARG");
+      if (!argument) return;
+      const labels: Record<string, string> = { split: "分隔符", join: "待连接内容" };
+      argument.setVisible(value === "split" || value === "join");
+      this.setOutput(true, value === "split" ? "Array" : "String");
+      this.setFieldValue(labels[value] ?? "参数", "ARG_LABEL");
+    };
+    method.setValidator((value) => { update(String(value)); return value; });
+    update(String(method.getValue()));
+    this.setTooltip("对文本执行常用操作；只有需要参数的操作才会显示参数插槽。");
+  },
+};
+
+const listMethodOptions: Array<[string, string]> = [
+  ["在末尾添加", "append"], ["合并另一个集合", "extend"], ["移除指定值", "remove"],
+  ["移除指定位置", "pop"], ["从小到大排序", "sort"], ["反转顺序", "reverse"], ["清空", "clear"],
+];
+
+Blockly.Blocks.python_list_method = {
+  init(this: Blockly.Block) {
+    this.setColour(collectionColour);
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.appendValueInput("LIST").setCheck("Array").appendField("对列表");
+    const method = new Blockly.FieldDropdown(listMethodOptions);
+    this.appendDummyInput("METHOD_INPUT").appendField(method, "METHOD");
+    this.appendValueInput("ARG").appendField("要添加的值", "ARG_LABEL");
+    const update = (value: string) => {
+      const argument = this.getInput("ARG");
+      if (!argument) return;
+      const labels: Record<string, string> = {
+        append: "要添加的值", extend: "要合并的内容", remove: "要移除的值", pop: "索引",
+      };
+      argument.setVisible(["append", "extend", "remove", "pop"].includes(value));
+      this.setFieldValue(labels[value] ?? "参数", "ARG_LABEL");
+    };
+    method.setValidator((value) => { update(String(value)); return value; });
+    update(String(method.getValue()));
+    this.setTooltip("修改列表内容；当前操作不需要参数时会自动隐藏参数插槽。");
+  },
+};
+
+const setMethodOptions: Array<[string, string]> = [
+  ["添加一个值", "add"], ["合并多个值", "update"], ["删除值（不存在时报错）", "remove"],
+  ["丢弃值（不存在时忽略）", "discard"], ["弹出一个值", "pop"], ["清空", "clear"],
+];
+
+Blockly.Blocks.python_set_method = {
+  init(this: Blockly.Block) {
+    this.setColour(collectionColour);
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.appendValueInput("SET").setCheck("PythonSet").appendField("对集合");
+    const method = new Blockly.FieldDropdown(setMethodOptions);
+    this.appendDummyInput("METHOD_INPUT").appendField(method, "METHOD");
+    this.appendValueInput("ARG").appendField("要添加的值", "ARG_LABEL");
+    const update = (methodName: string) => {
+      const argument = this.getInput("ARG");
+      if (!argument) return;
+      const labels: Record<string, string> = {
+        add: "要添加的值", update: "要合并的内容", remove: "要删除的值", discard: "要丢弃的值",
+      };
+      argument.setVisible(["add", "update", "remove", "discard"].includes(methodName));
+      this.setFieldValue(labels[methodName] ?? "参数", "ARG_LABEL");
+    };
+    method.setValidator((nextValue) => { update(String(nextValue)); return nextValue; });
+    update(String(method.getValue()));
+    this.setTooltip("修改集合内容；删除和丢弃的区别是值不存在时，删除会报错，丢弃会直接忽略。");
+  },
+};
+
+Blockly.Blocks.python_dict_method = {
+  init(this: Blockly.Block) {
+    this.setColour(collectionColour);
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setInputsInline(true);
+    this.appendValueInput("DICT").setCheck("PythonDict").appendField("对字典");
+    const method = new Blockly.FieldDropdown([["合并另一个字典", "update"], ["清空", "clear"]]);
+    this.appendDummyInput("METHOD_INPUT").appendField(method, "METHOD");
+    this.appendValueInput("OTHER").setCheck("PythonDict").appendField("要合并的字典");
+    const update = (methodName: string) => this.getInput("OTHER")?.setVisible(methodName === "update");
+    method.setValidator((nextValue) => { update(String(nextValue)); return nextValue; });
+    update(String(method.getValue()));
+    this.setTooltip("将另一个字典的键值对合并进当前字典，或删除当前字典中的全部内容。");
+  },
+};
+
+Blockly.Blocks.python_dict_query = {
+  init(this: Blockly.Block) {
+    this.setColour(collectionColour);
+    this.setOutput(true);
+    this.setInputsInline(true);
+    this.appendValueInput("DICT").setCheck("PythonDict").appendField("对字典");
+    const method = new Blockly.FieldDropdown([
+      ["复制", "copy"], ["删除键并返回值", "pop"], ["删除最后一项并返回", "popitem"], ["获取键或设置默认值", "setdefault"],
+    ]);
+    this.appendDummyInput("METHOD_INPUT").appendField(method, "METHOD");
+    this.appendValueInput("KEY").appendField("键");
+    this.appendValueInput("DEFAULT").appendField("默认值");
+    const update = (methodName: string) => {
+      this.getInput("KEY")?.setVisible(methodName === "pop" || methodName === "setdefault");
+      this.getInput("DEFAULT")?.setVisible(methodName === "pop" || methodName === "setdefault");
+    };
+    method.setValidator((nextValue) => { update(String(nextValue)); return nextValue; });
+    update(String(method.getValue()));
+    this.setTooltip("复制字典，或者在取得返回值的同时更新字典内容。默认值可以留空。");
+  },
+};
+
+const sequenceOutputCheck = () => ["Array", "PythonTuple", "PythonSet"];
 
 Blockly.Blocks.python_sequence_collection = {
   init(this: any) {
-    this.setColour(collectionColour); this.setOutput(true); this.setInputsInline(true);
+    this.setColour(collectionColour); this.setOutput(true, sequenceOutputCheck()); this.setInputsInline(true);
     const kindField = new Blockly.FieldDropdown([["列表 [", "list"], ["元组 (", "tuple"], ["集合 {", "set"]]);
+    kindField.setValidator((nextValue) => { this.outputConnection?.setCheck(sequenceOutputCheck()); return nextValue; });
     this.appendDummyInput("HEAD").appendField(kindField, "KIND");
-    this.itemCount_ = 2; this.updateShape_();
+    this.itemCount_ = 2; this.updateShape_(); this.updateOutputCheck_();
     this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg));
   },
   itemCount_: 2,
   saveExtraState(this: any) { return { itemCount: this.itemCount_ }; },
-  loadExtraState(this: any, state: { itemCount?: number }) { this.itemCount_ = state.itemCount ?? 0; this.updateShape_(); },
+  loadExtraState(this: any, state: { itemCount?: number }) { this.itemCount_ = state.itemCount ?? 0; this.updateShape_(); this.updateOutputCheck_(); },
   onchange(this: any, event: Blockly.Events.Abstract) {
-    if (event.type === Blockly.Events.BLOCK_CHANGE && (event as Blockly.Events.BlockChange).blockId === this.id && (event as Blockly.Events.BlockChange).name === "KIND") this.updateTail_();
+    if (event.type === Blockly.Events.BLOCK_CHANGE && (event as Blockly.Events.BlockChange).blockId === this.id && (event as Blockly.Events.BlockChange).name === "KIND") { this.updateTail_(); this.updateOutputCheck_(); }
   },
   decompose(this: any, workspace: Blockly.WorkspaceSvg) {
     const container = workspace.newBlock("python_collection_container"); container.initSvg();
@@ -225,13 +409,16 @@ Blockly.Blocks.python_sequence_collection = {
     const closing = this.getFieldValue("KIND") === "tuple" ? ")" : this.getFieldValue("KIND") === "set" ? "}" : "]";
     this.appendDummyInput("TAIL").appendField(closing);
   },
+  updateOutputCheck_(this: any) {
+    this.outputConnection?.setCheck(sequenceOutputCheck());
+  },
 } as unknown as (typeof Blockly.Blocks)[string];
 Blockly.Blocks.python_collection_container = { init(this: Blockly.Block) { this.setColour(collectionColour); this.appendDummyInput().appendField("项目"); this.appendStatementInput("STACK"); this.contextMenu = false; } };
 Blockly.Blocks.python_collection_item = { init(this: Blockly.Block) { this.setColour(collectionColour); this.appendDummyInput().appendField("项目"); this.setPreviousStatement(true); this.setNextStatement(true); this.contextMenu = false; } };
 
 Blockly.Blocks.python_list_collection = {
   init(this: any) {
-    this.setColour(collectionColour); this.setOutput(true); this.setInputsInline(true);
+    this.setColour(collectionColour); this.setOutput(true, ["Array", "ManimPointArguments"]); this.setInputsInline(true);
     this.appendDummyInput("HEAD").appendField("列表 [");
     this.itemCount_ = 2; this.updateShape_();
     this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg));
@@ -247,10 +434,11 @@ Blockly.Blocks.python_list_collection = {
     this.getInput("TAIL") && this.removeInput("TAIL");
     this.appendDummyInput("TAIL").appendField("]");
   },
+  updateOutputCheck_(this: any) { this.outputConnection?.setCheck(["Array", "ManimPointArguments"]); },
 } as unknown as (typeof Blockly.Blocks)[string];
 
 Blockly.Blocks.python_dynamic_dict = {
-  init(this: any) { this.setColour(collectionColour); this.setOutput(true); this.setInputsInline(true); this.appendDummyInput("HEAD").appendField("字典 {"); this.itemCount_ = 2; this.updateShape_(); this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg)); },
+  init(this: any) { this.setColour(collectionColour); this.setOutput(true, "PythonDict"); this.setInputsInline(true); this.appendDummyInput("HEAD").appendField("字典 {"); this.itemCount_ = 2; this.updateShape_(); this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg)); },
   itemCount_: 2,
   saveExtraState(this: any) { return { itemCount: this.itemCount_ }; },
   loadExtraState(this: any, state: { itemCount?: number }) { this.itemCount_ = state.itemCount ?? 0; this.updateShape_(); },
@@ -272,7 +460,8 @@ type ParameterSpec = {
 type ArgumentSpec = { kind: "positional" | "keyword" | "star" | "kwargs"; name: string };
 
 const normalizeIdentifier = (name: string, fallback: string, used: Set<string>) => {
-  const base = /^[A-Za-z_]\w*$/.test(name.trim()) ? name.trim() : fallback;
+  const normalized = normalizePythonIdentifier(name);
+  const base = isPythonIdentifier(normalized) ? normalized : fallback;
   let candidate = base;
   let suffix = 2;
   while (used.has(candidate)) candidate = `${base}_${suffix++}`;
@@ -310,7 +499,7 @@ function rebuildParameterShape(block: any) {
     if (/^PARAM(?:_FIELDS)?\d+$/.test(input.name)) block.removeInput(input.name);
   }
   block.getInput("TAIL") && block.removeInput("TAIL");
-  const name = block.getFieldValue("NAME") || (block.type.includes("method") ? "method" : "my_function");
+  const name = block.getFieldValue("NAME") || (block.type.includes("method") ? "自定义方法" : "自定义函数");
   const definitionLabel = block.definitionLabel_ || (block.type.includes("method") ? "定义方法" : "定义函数");
   block.removeInput("HEAD");
   let fieldInput = block.appendDummyInput("HEAD")
@@ -352,7 +541,7 @@ const parameterMixin = {
   },
   compose(this: any, container: Blockly.Block) {
     const parameters: ParameterSpec[] = []; const connections: Array<Blockly.Connection | null> = []; let item = container.getInputTargetBlock("STACK");
-    while (item) { if (!item.isInsertionMarker()) { parameters.push({ kind: item.getFieldValue("KIND"), name: item.getFieldValue("NAME") || "value", annotation: item.getFieldValue("TYPE") || "" }); connections.push((item as any).valueConnection_ ?? null); } item = item.getNextBlock(); }
+    while (item) { if (!item.isInsertionMarker()) { parameters.push({ kind: item.getFieldValue("KIND"), name: item.getFieldValue("NAME") || "数值", annotation: item.getFieldValue("TYPE") || "" }); connections.push((item as any).valueConnection_ ?? null); } item = item.getNextBlock(); }
     const normalized = normalizeParameters(parameters);
     const orderedConnections = normalized.map((parameter) => connections[parameters.findIndex((item) => item.name === parameter.name)] ?? null);
     this.parameters_ = normalized; rebuildParameterShape(this); orderedConnections.forEach((connection, i) => connection?.reconnect(this, `PARAM${i}`));
@@ -361,25 +550,25 @@ const parameterMixin = {
 };
 
 Blockly.Blocks.python_parameter_container = { init(this: Blockly.Block) { this.setColour(colours.function); this.appendDummyInput().appendField("函数参数"); this.appendStatementInput("STACK"); this.contextMenu = false; } };
-const parameterKindOptions: Blockly.MenuOption[] = [["仅限位置参数 /", "positional_only"], ["普通参数", "positional"], ["默认参数", "default"], ["*args", "args"], ["仅限关键字参数", "keyword_only"], ["关键字默认参数", "keyword_only_default"], ["**kwargs", "kwargs"]];
-Blockly.Blocks.python_parameter_item = { init(this: Blockly.Block) { this.setColour(colours.function); this.appendDummyInput().appendField(new Blockly.FieldDropdown(parameterKindOptions), "KIND").appendField(new Blockly.FieldTextInput("value"), "NAME"); this.setPreviousStatement(true); this.setNextStatement(true); this.contextMenu = false; } };
-Blockly.Blocks.python_typed_parameter_item = { init(this: Blockly.Block) { this.setColour(colours.function); this.appendDummyInput().appendField(new Blockly.FieldDropdown(parameterKindOptions), "KIND").appendField(new Blockly.FieldTextInput("value"), "NAME").appendField(":").appendField(new Blockly.FieldTextInput("object"), "TYPE"); this.setPreviousStatement(true); this.setNextStatement(true); this.contextMenu = false; } };
+const parameterKindOptions: Blockly.MenuOption[] = [["普通参数", "positional"], ["默认参数", "default"], ["*args", "args"], ["仅限关键字参数", "keyword_only"], ["关键字默认参数", "keyword_only_default"], ["仅限位置参数 /", "positional_only"], ["**kwargs", "kwargs"]];
+Blockly.Blocks.python_parameter_item = { init(this: Blockly.Block) { this.setColour(colours.function); this.appendDummyInput().appendField(new Blockly.FieldDropdown(parameterKindOptions), "KIND").appendField(new Blockly.FieldTextInput("数值"), "NAME"); this.setPreviousStatement(true); this.setNextStatement(true); this.contextMenu = false; } };
+Blockly.Blocks.python_typed_parameter_item = { init(this: Blockly.Block) { this.setColour(colours.function); this.appendDummyInput().appendField(new Blockly.FieldDropdown(parameterKindOptions), "KIND").appendField(new Blockly.FieldTextInput("数值"), "NAME").appendField(":").appendField(new Blockly.FieldTextInput("object"), "TYPE"); this.setPreviousStatement(true); this.setNextStatement(true); this.contextMenu = false; } };
 
 function defineStructuredFunction(type: string, label: string, colour: string, initial: ParameterSpec[]) {
-  Blockly.Blocks[type] = { ...parameterMixin, init(this: any) { this.definitionLabel_ = label; this.setColour(colour); this.setPreviousStatement(true); this.setNextStatement(true); this.appendDummyInput("HEAD").appendField(label).appendField(new Blockly.FieldTextInput(type.includes("method") ? "method" : "my_function"), "NAME").appendField("("); this.parameters_ = initial.map((item) => ({ ...item })); rebuildParameterShape(this); this.appendStatementInput("BODY"); this.setMutator(createMutatorIcon([type.includes("typed_function") ? "python_typed_parameter_item" : "python_parameter_item"], this as Blockly.BlockSvg)); } } as any;
+  Blockly.Blocks[type] = { ...parameterMixin, init(this: any) { this.definitionLabel_ = label; this.setColour(colour); this.setPreviousStatement(true); this.setNextStatement(true); this.appendDummyInput("HEAD").appendField(label).appendField(new Blockly.FieldTextInput(type.includes("method") ? "自定义方法" : "自定义函数"), "NAME").appendField("("); this.parameters_ = initial.map((item) => ({ ...item })); rebuildParameterShape(this); this.appendStatementInput("BODY"); this.setMutator(createMutatorIcon([type.includes("typed_function") ? "python_typed_parameter_item" : "python_parameter_item"], this as Blockly.BlockSvg)); } } as any;
 }
-defineStructuredFunction("python_function_structured", "定义函数", colours.function, [{ kind: "positional", name: "value" }]);
+defineStructuredFunction("python_function_structured", "定义函数", colours.function, [{ kind: "positional", name: "数值" }]);
 defineStructuredFunction("python_method_structured", "定义方法", colours.object, [{ kind: "positional", name: "self" }]);
-defineStructuredFunction("python_async_function_structured", "定义异步函数", colours.function, [{ kind: "positional", name: "value" }]);
-defineStructuredFunction("python_typed_function_structured", "定义带类型函数", colours.function, [{ kind: "positional", name: "value", annotation: "object" }]);
-defineStructuredFunction("python_async_typed_function_structured", "定义异步带类型函数", colours.function, [{ kind: "positional", name: "value", annotation: "object" }]);
+defineStructuredFunction("python_async_function_structured", "定义异步函数", colours.function, [{ kind: "positional", name: "数值" }]);
+defineStructuredFunction("python_typed_function_structured", "定义带类型函数", colours.function, [{ kind: "positional", name: "数值", annotation: "object" }]);
+defineStructuredFunction("python_async_typed_function_structured", "定义异步带类型函数", colours.function, [{ kind: "positional", name: "数值", annotation: "object" }]);
 
 function rebuildArgumentShape(block: any) {
   for (const input of [...block.inputList]) {
     if (/^ARG\d+$/.test(input.name)) block.removeInput(input.name);
   }
   block.getInput("TAIL") && block.removeInput("TAIL");
-  const target = block.getFieldValue("TARGET") || (block.type.includes("method") ? "items.append" : block.type.includes("new_object") ? "Person" : "function");
+  const target = block.getFieldValue("TARGET") || (block.type.includes("method") ? "项目列表.append" : block.type.includes("new_object") ? "自定义类" : "自定义函数");
   block.removeInput("HEAD");
   const head = block.appendDummyInput("HEAD");
   if (block.type.includes("method")) head.appendField("对象");
@@ -406,7 +595,7 @@ const argumentMixin = {
     let item = container.getInputTargetBlock("STACK");
     while (item) {
       if (!item.isInsertionMarker()) {
-        args.push({ kind: item.getFieldValue("KIND"), name: item.getFieldValue("NAME") || "name" });
+        args.push({ kind: item.getFieldValue("KIND"), name: item.getFieldValue("NAME") || "名称" });
         connections.push((item as any).valueConnection_ ?? null);
       }
       item = item.getNextBlock();
@@ -424,10 +613,10 @@ const argumentMixin = {
   saveConnections(this: any, container: Blockly.Block) { let item = container.getInputTargetBlock("STACK"); let i = 0; while (item) { if (!item.isInsertionMarker()) { (item as any).valueConnection_ = this.getInput(`ARG${i}`)?.connection?.targetConnection; i++; } item = item.getNextBlock(); } },
 };
 Blockly.Blocks.python_argument_container = { init(this: Blockly.Block) { this.setColour(colours.call); this.appendDummyInput().appendField("调用参数"); this.appendStatementInput("STACK"); this.contextMenu = false; } };
-Blockly.Blocks.python_argument_item = { init(this: Blockly.Block) { this.setColour(colours.call); this.appendDummyInput().appendField(new Blockly.FieldDropdown([["位置参数", "positional"], ["关键字参数", "keyword"], ["展开参数 *", "star"], ["展开关键字参数 **", "kwargs"]]), "KIND").appendField(new Blockly.FieldTextInput("name"), "NAME"); this.setPreviousStatement(true); this.setNextStatement(true); this.contextMenu = false; } };
+Blockly.Blocks.python_argument_item = { init(this: Blockly.Block) { this.setColour(colours.call); this.appendDummyInput().appendField(new Blockly.FieldDropdown([["位置参数", "positional"], ["关键字参数", "keyword"], ["展开参数 *", "star"], ["展开关键字参数 **", "kwargs"]]), "KIND").appendField(new Blockly.FieldTextInput("名称"), "NAME"); this.setPreviousStatement(true); this.setNextStatement(true); this.contextMenu = false; } };
 
 function defineStructuredCall(type: string, mode: "value" | "statement", target: "function" | "method" | "class") {
-  Blockly.Blocks[type] = { ...argumentMixin, init(this: any) { this.setColour(target === "function" ? colours.call : colours.object); if (mode === "value") this.setOutput(true); else { this.setPreviousStatement(true); this.setNextStatement(true); } const head = this.appendDummyInput("HEAD"); if (target === "method") head.appendField("对象"); head.appendField(new Blockly.FieldTextInput(target === "class" ? "Person" : target === "method" ? "items.append" : "function"), "TARGET").appendField("("); this.arguments_ = []; rebuildArgumentShape(this); this.setMutator(createMutatorIcon(["python_argument_item"], this as Blockly.BlockSvg)); } } as any;
+  Blockly.Blocks[type] = { ...argumentMixin, init(this: any) { this.setColour(target === "function" ? colours.call : colours.object); if (mode === "value") this.setOutput(true); else { this.setPreviousStatement(true); this.setNextStatement(true); } const head = this.appendDummyInput("HEAD"); if (target === "method") head.appendField("对象"); head.appendField(new Blockly.FieldTextInput(target === "class" ? "自定义类" : target === "method" ? "项目列表.append" : "自定义函数"), "TARGET").appendField("("); this.arguments_ = []; rebuildArgumentShape(this); this.setMutator(createMutatorIcon(["python_argument_item"], this as Blockly.BlockSvg)); } } as any;
 }
 defineStructuredCall("python_call_structured", "value", "function");
 defineStructuredCall("python_call_statement_structured", "statement", "function");
@@ -518,18 +707,22 @@ for (const definition of Object.values(Blockly.Blocks) as PatchableBlockDefiniti
 
 const value = (generator: typeof pythonGenerator, block: Blockly.Block, name: string, fallback = "None", order = Order.NONE) =>
   generator.valueToCode(block, name, order) || fallback;
-const safeIdentifier = (input: string, fallback: string) => /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(input.trim()) ? input.trim() : fallback;
+const safeIdentifier = (input: string, fallback: string) => pythonIdentifierOrFallback(input, fallback);
 const variableName = (generator: typeof pythonGenerator, block: Blockly.Block, field: string, fallback: string) => {
   const id = block.getFieldValue(field);
   return id ? generator.getVariableName(id) : fallback;
 };
-const safeParameters = (input: string) => input.split(",").map((part) => part.trim()).filter(Boolean).filter((part) => /^(?:\*{0,2}[A-Za-z_]\w*|[A-Za-z_]\w*\s*=\s*[^,]+)$/.test(part)).join(", ");
-const safeAnnotation = (input: string, fallback = "object") => /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\[[A-Za-z0-9_., |\[\]]+\])?(?:\s*\|\s*[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)*$/.test(String(input || "").trim()) ? String(input).trim() : fallback;
+const safeParameters = (input: string) => input.split(",").map((part) => part.trim()).filter(Boolean).filter((part) => {
+  if (part === "*" || part === "/") return true;
+  const match = part.match(/^(\*{0,2})([^=\s]+)(?:\s*=\s*.+)?$/u);
+  return Boolean(match && isPythonIdentifier(match[2]));
+}).join(", ");
+const safeAnnotation = (input: string, fallback = "object") => isPythonAnnotation(input) ? String(input).trim().normalize("NFKC") : fallback;
 const suite = (generator: typeof pythonGenerator, block: Blockly.Block, name: string) => generator.statementToCode(block, name) || `${generator.INDENT}pass\n`;
 
 pythonGenerator.forBlock.python_print = (block, generator) => `print(${value(generator, block, "VALUE", "''")})\n`;
 pythonGenerator.forBlock.python_input = (block, generator) => [`input(${value(generator, block, "PROMPT", "''")})`, Order.FUNCTION_CALL];
-pythonGenerator.forBlock.python_input_assign = (block, generator) => `${variableName(generator, block, "VAR", "answer")} = input(${value(generator, block, "PROMPT", "''")})\n`;
+pythonGenerator.forBlock.python_input_assign = (block, generator) => `${variableName(generator, block, "VAR", "回答")} = input(${value(generator, block, "PROMPT", "''")})\n`;
 pythonGenerator.forBlock.python_import = (block) => `import ${safeIdentifier(block.getFieldValue("MODULE"), "module")}\n`;
 pythonGenerator.forBlock.python_from_import = (block) => `from ${safeIdentifier(block.getFieldValue("MODULE"), "module")} import ${safeIdentifier(block.getFieldValue("NAME"), "name")}\n`;
 pythonGenerator.forBlock.python_raw_expression = (block) => [block.getFieldValue("CODE") || "None", Order.ATOMIC];
@@ -544,18 +737,18 @@ pythonGenerator.forBlock.python_membership = (block, generator) => [`${value(gen
 pythonGenerator.forBlock.python_identity = (block, generator) => [`${value(generator, block, "A", "None", Order.RELATIONAL)} ${block.getFieldValue("OP")} ${value(generator, block, "B", "None", Order.RELATIONAL)}`, Order.RELATIONAL];
 pythonGenerator.forBlock.python_none = () => ["None", Order.ATOMIC];
 pythonGenerator.forBlock.python_conditional = (block, generator) => [`${value(generator, block, "TRUE_VALUE", "None", Order.CONDITIONAL)} if ${value(generator, block, "CONDITION", "False", Order.CONDITIONAL)} else ${value(generator, block, "FALSE_VALUE", "None", Order.CONDITIONAL)}`, Order.CONDITIONAL];
-pythonGenerator.forBlock.python_call = (block, generator) => [`${safeIdentifier(block.getFieldValue("NAME"), "function")}(${value(generator, block, "ARG", "")})`, Order.FUNCTION_CALL];
-pythonGenerator.forBlock.python_call_statement = (block, generator) => `${safeIdentifier(block.getFieldValue("NAME"), "function")}(${value(generator, block, "ARG", "")})\n`;
-pythonGenerator.forBlock.python_keyword_argument = (block, generator) => [`${safeIdentifier(block.getFieldValue("NAME"), "name")}=${value(generator, block, "VALUE")}`, Order.ATOMIC];
+pythonGenerator.forBlock.python_call = (block, generator) => [`${safeIdentifier(block.getFieldValue("NAME"), "自定义函数")}(${value(generator, block, "ARG", "")})`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_call_statement = (block, generator) => `${safeIdentifier(block.getFieldValue("NAME"), "自定义函数")}(${value(generator, block, "ARG", "")})\n`;
+pythonGenerator.forBlock.python_keyword_argument = (block, generator) => [`${safeIdentifier(block.getFieldValue("NAME"), "名称")}=${value(generator, block, "VALUE")}`, Order.ATOMIC];
 pythonGenerator.forBlock.python_tuple = (block, generator) => [`(${value(generator, block, "A")}, ${value(generator, block, "B")})`, Order.COLLECTION];
 pythonGenerator.forBlock.python_set = (block, generator) => [`{${value(generator, block, "A")}, ${value(generator, block, "B")}}`, Order.COLLECTION];
 pythonGenerator.forBlock.python_dict = (block, generator) => [`{${value(generator, block, "K1")}: ${value(generator, block, "V1")}, ${value(generator, block, "K2")}: ${value(generator, block, "V2")}}`, Order.COLLECTION];
 pythonGenerator.forBlock.python_index = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}[${value(generator, block, "INDEX", "0")}]`, Order.MEMBER];
 pythonGenerator.forBlock.python_slice = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}[${value(generator, block, "START", "")}:${value(generator, block, "STOP", "")}:${value(generator, block, "STEP", "")}]`, Order.MEMBER];
-pythonGenerator.forBlock.python_attribute = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}.${safeIdentifier(block.getFieldValue("ATTRIBUTE"), "attribute")}`, Order.MEMBER];
-pythonGenerator.forBlock.python_method_call = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}.${safeIdentifier(block.getFieldValue("METHOD"), "method")}(${value(generator, block, "ARG", "")})`, Order.FUNCTION_CALL];
-pythonGenerator.forBlock.python_method_statement = (block, generator) => `${value(generator, block, "OBJECT")}.${safeIdentifier(block.getFieldValue("METHOD"), "method")}(${value(generator, block, "ARG", "")})\n`;
-pythonGenerator.forBlock.python_new_object = (block, generator) => [`${safeIdentifier(block.getFieldValue("CLASS"), "Object")}(${value(generator, block, "ARG", "")})`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_attribute = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}.${safeIdentifier(block.getFieldValue("ATTRIBUTE"), "属性")}`, Order.MEMBER];
+pythonGenerator.forBlock.python_method_call = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}.${safeIdentifier(block.getFieldValue("METHOD"), "自定义方法")}(${value(generator, block, "ARG", "")})`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_method_statement = (block, generator) => `${value(generator, block, "OBJECT")}.${safeIdentifier(block.getFieldValue("METHOD"), "自定义方法")}(${value(generator, block, "ARG", "")})\n`;
+pythonGenerator.forBlock.python_new_object = (block, generator) => [`${safeIdentifier(block.getFieldValue("CLASS"), "自定义类")}(${value(generator, block, "ARG", "")})`, Order.FUNCTION_CALL];
 pythonGenerator.forBlock.python_return = (block, generator) => `return ${value(generator, block, "VALUE")}\n`;
 pythonGenerator.forBlock.python_raise = (block, generator) => `raise ${value(generator, block, "ERROR", "Exception()") }\n`;
 pythonGenerator.forBlock.python_try_except = (block, generator) => {
@@ -582,10 +775,10 @@ pythonGenerator.forBlock.python_dynamic_dict = (block, generator) => {
   const pairs = Array.from({ length: count }, (_, i) => `${value(generator, block, `KEY${i}`)}: ${value(generator, block, `VALUE${i}`)}`);
   return [`{${pairs.join(", ")}}`, Order.COLLECTION];
 };
-pythonGenerator.forBlock.python_for_in = (block, generator) => `for ${variableName(generator, block, "VAR", "item")} in ${value(generator, block, "ITERABLE", "[]")}:\n${suite(generator, block, "DO")}`;
-pythonGenerator.forBlock.python_for_enumerate = (block, generator) => `for ${variableName(generator, block, "INDEX", "index")}, ${variableName(generator, block, "VALUE", "item")} in enumerate(${value(generator, block, "ITERABLE", "[]")}):\n${suite(generator, block, "DO")}`;
+pythonGenerator.forBlock.python_for_in = (block, generator) => `for ${variableName(generator, block, "VAR", "项目")} in ${value(generator, block, "ITERABLE", "[]")}:\n${suite(generator, block, "DO")}`;
+pythonGenerator.forBlock.python_for_enumerate = (block, generator) => `for ${variableName(generator, block, "INDEX", "序号")}, ${variableName(generator, block, "VALUE", "项目")} in enumerate(${value(generator, block, "ITERABLE", "[]")}):\n${suite(generator, block, "DO")}`;
 pythonGenerator.forBlock.python_while_else = (block, generator) => `while ${value(generator, block, "CONDITION", "False")}:\n${suite(generator, block, "DO")}else:\n${suite(generator, block, "ELSE")}`;
-pythonGenerator.forBlock.python_for_else = (block, generator) => `for ${variableName(generator, block, "VAR", "item")} in ${value(generator, block, "ITERABLE", "[]")}:\n${suite(generator, block, "DO")}else:\n${suite(generator, block, "ELSE")}`;
+pythonGenerator.forBlock.python_for_else = (block, generator) => `for ${variableName(generator, block, "VAR", "项目")} in ${value(generator, block, "ITERABLE", "[]")}:\n${suite(generator, block, "DO")}else:\n${suite(generator, block, "ELSE")}`;
 pythonGenerator.forBlock.python_pass = () => "pass\n";
 pythonGenerator.forBlock.python_assert = (block, generator) => {
   const message = generator.valueToCode(block, "MESSAGE", Order.NONE);
@@ -595,16 +788,16 @@ pythonGenerator.forBlock.python_scope_declaration = (block) => {
   const names = block.getFieldValue("NAMES").split(",").map((name: string) => safeIdentifier(name, "")).filter(Boolean).join(", ");
   return names ? `${block.getFieldValue("SCOPE")} ${names}\n` : "";
 };
-pythonGenerator.forBlock.python_function_def = (block, generator) => `def ${safeIdentifier(block.getFieldValue("NAME"), "my_function")}(${safeParameters(block.getFieldValue("PARAMS"))}):\n${suite(generator, block, "BODY")}`;
+pythonGenerator.forBlock.python_function_def = (block, generator) => `def ${safeIdentifier(block.getFieldValue("NAME"), "自定义函数")}(${safeParameters(block.getFieldValue("PARAMS"))}):\n${suite(generator, block, "BODY")}`;
 pythonGenerator.forBlock.python_method_def = pythonGenerator.forBlock.python_function_def;
 pythonGenerator.forBlock.python_class_def = (block, generator) => {
   const bases = block.getFieldValue("BASES").split(",").map((base: string) => safeIdentifier(base, "object")).join(", ");
   return `class ${safeIdentifier(block.getFieldValue("NAME"), "MyClass")}(${bases || "object"}):\n${suite(generator, block, "BODY")}`;
 };
-pythonGenerator.forBlock.python_set_attribute = (block, generator) => `${value(generator, block, "OBJECT", "self", Order.MEMBER)}.${safeIdentifier(block.getFieldValue("ATTRIBUTE"), "attribute")} = ${value(generator, block, "VALUE")}\n`;
+pythonGenerator.forBlock.python_set_attribute = (block, generator) => `${value(generator, block, "OBJECT", "self", Order.MEMBER)}.${safeIdentifier(block.getFieldValue("ATTRIBUTE"), "属性")} = ${value(generator, block, "VALUE")}\n`;
 pythonGenerator.forBlock.python_super_call = (block, generator) => `super().${safeIdentifier(block.getFieldValue("METHOD"), "__init__")}(${value(generator, block, "ARG", "")})\n`;
 pythonGenerator.forBlock.python_try_full = (block, generator) => `try:\n${suite(generator, block, "TRY")}except ${safeIdentifier(block.getFieldValue("ERROR"), "Exception")} as ${variableName(generator, block, "ALIAS", "error")}:\n${suite(generator, block, "EXCEPT")}else:\n${suite(generator, block, "ELSE")}finally:\n${suite(generator, block, "FINALLY")}`;
-pythonGenerator.forBlock.python_with = (block, generator) => `with ${value(generator, block, "CONTEXT")} as ${variableName(generator, block, "ALIAS", "resource")}:\n${suite(generator, block, "BODY")}`;
+pythonGenerator.forBlock.python_with = (block, generator) => `with ${value(generator, block, "CONTEXT")} as ${variableName(generator, block, "ALIAS", "资源")}:\n${suite(generator, block, "BODY")}`;
 const optionalValue = (generator: typeof pythonGenerator, block: Blockly.Block, name: string) => generator.valueToCode(block, name, Order.NONE);
 pythonGenerator.forBlock.python_range = (block, generator) => {
   const start = optionalValue(generator, block, "START");
@@ -616,18 +809,93 @@ pythonGenerator.forBlock.python_range = (block, generator) => {
 pythonGenerator.forBlock.python_length = (block, generator) => [`len(${value(generator, block, "VALUE")})`, Order.FUNCTION_CALL];
 pythonGenerator.forBlock.python_convert = (block, generator) => [`${block.getFieldValue("TYPE")}(${value(generator, block, "VALUE")})`, Order.FUNCTION_CALL];
 pythonGenerator.forBlock.python_string_method = (block, generator) => {
-  const argument = optionalValue(generator, block, "ARG");
+  const argument = ["split", "join"].includes(block.getFieldValue("METHOD")) ? optionalValue(generator, block, "ARG") : "";
   return [`${value(generator, block, "TEXT", "''", Order.MEMBER)}.${block.getFieldValue("METHOD")}(${argument})`, Order.FUNCTION_CALL];
 };
+pythonGenerator.forBlock.python_text_replace = (block, generator) => [
+  `${value(generator, block, "TEXT", "''", Order.MEMBER)}.replace(${value(generator, block, "OLD", "''")}, ${value(generator, block, "NEW", "''")})`,
+  Order.FUNCTION_CALL,
+];
 pythonGenerator.forBlock.python_list_method = (block, generator) => {
-  const argument = optionalValue(generator, block, "ARG");
-  return `${value(generator, block, "LIST", "[]", Order.MEMBER)}.${block.getFieldValue("METHOD")}(${argument})\n`;
+  const method = block.getFieldValue("METHOD");
+  const argument = ["append", "extend", "remove", "pop"].includes(method) ? optionalValue(generator, block, "ARG") : "";
+  return `${value(generator, block, "LIST", "[]", Order.MEMBER)}.${method}(${argument})\n`;
 };
+pythonGenerator.forBlock.python_list_insert = (block, generator) => `${value(generator, block, "LIST", "[]", Order.MEMBER)}.insert(${value(generator, block, "INDEX", "0")}, ${value(generator, block, "VALUE", "None")})\n`;
+pythonGenerator.forBlock.python_list_set = (block, generator) => `${value(generator, block, "LIST", "[]", Order.MEMBER)}[${value(generator, block, "INDEX", "0")}] = ${value(generator, block, "VALUE", "None")}\n`;
+const listSliceCode = (block: Blockly.Block, generator: typeof pythonGenerator) => {
+  const start = optionalValue(generator, block, "START");
+  const stop = optionalValue(generator, block, "STOP");
+  const step = optionalValue(generator, block, "STEP");
+  return `${value(generator, block, "LIST", "[]", Order.MEMBER)}[${start}:${stop}:${step}]`;
+};
+pythonGenerator.forBlock.python_list_slice_set = (block, generator) => `${listSliceCode(block, generator)} = ${value(generator, block, "VALUES", "[]")}\n`;
+pythonGenerator.forBlock.python_list_slice_delete = (block, generator) => `del ${listSliceCode(block, generator)}\n`;
+pythonGenerator.forBlock.python_sequence_query = (block, generator) => [
+  `${value(generator, block, "SEQUENCE", "[]", Order.MEMBER)}.${block.getFieldValue("METHOD")}(${value(generator, block, "VALUE", "None")})`,
+  Order.FUNCTION_CALL,
+];
+pythonGenerator.forBlock.python_sequence_combine = (block, generator) => {
+  const sequence = value(generator, block, "SEQUENCE", "[]", Order.ADDITIVE);
+  const operation = block.getFieldValue("OPERATION");
+  if (operation === "repeat") return [`${sequence} * ${value(generator, block, "OTHER", "1", Order.MULTIPLICATIVE)}`, Order.MULTIPLICATIVE];
+  return [`${sequence} + ${value(generator, block, "OTHER", "[]", Order.ADDITIVE)}`, Order.ADDITIVE];
+};
+pythonGenerator.forBlock.python_list_copy = (block, generator) => [`${value(generator, block, "LIST", "[]", Order.MEMBER)}.copy()`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_set_operation = (block, generator) => [
+  `${value(generator, block, "LEFT", "set()", Order.MEMBER)}.${block.getFieldValue("OPERATION")}(${value(generator, block, "RIGHT", "set()")})`,
+  Order.FUNCTION_CALL,
+];
+pythonGenerator.forBlock.python_set_relation = (block, generator) => {
+  const left = value(generator, block, "LEFT", "set()", Order.RELATIONAL);
+  const right = value(generator, block, "RIGHT", "set()", Order.RELATIONAL);
+  const relation = block.getFieldValue("RELATION");
+  if (relation === "proper_subset") return [`${left} < ${right}`, Order.RELATIONAL];
+  if (relation === "proper_superset") return [`${left} > ${right}`, Order.RELATIONAL];
+  const method = relation === "superset" ? "issuperset" : relation === "disjoint" ? "isdisjoint" : "issubset";
+  return [`${left}.${method}(${right})`, Order.FUNCTION_CALL];
+};
+pythonGenerator.forBlock.python_set_method = (block, generator) => {
+  const method = block.getFieldValue("METHOD");
+  const argument = ["add", "update", "remove", "discard"].includes(method) ? value(generator, block, "ARG", "None") : "";
+  return `${value(generator, block, "SET", "set()", Order.MEMBER)}.${method}(${argument})\n`;
+};
+pythonGenerator.forBlock.python_set_copy = (block, generator) => [`${value(generator, block, "SET", "set()", Order.MEMBER)}.copy()`, Order.FUNCTION_CALL];
 pythonGenerator.forBlock.python_dict_get = (block, generator) => {
   const fallback = optionalValue(generator, block, "DEFAULT");
   return [`${value(generator, block, "DICT", "{}", Order.MEMBER)}.get(${value(generator, block, "KEY")}${fallback ? `, ${fallback}` : ""})`, Order.FUNCTION_CALL];
 };
+pythonGenerator.forBlock.python_dict_set = (block, generator) => `${value(generator, block, "DICT", "{}", Order.MEMBER)}[${value(generator, block, "KEY", "''")}] = ${value(generator, block, "VALUE", "None")}\n`;
+pythonGenerator.forBlock.python_dict_remove = (block, generator) => `${value(generator, block, "DICT", "{}", Order.MEMBER)}.pop(${value(generator, block, "KEY", "''")}, None)\n`;
 pythonGenerator.forBlock.python_dict_view = (block, generator) => [`${value(generator, block, "DICT", "{}", Order.MEMBER)}.${block.getFieldValue("METHOD")}()`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_dict_method = (block, generator) => {
+  const method = block.getFieldValue("METHOD");
+  const argument = method === "update" ? value(generator, block, "OTHER", "{}") : "";
+  return `${value(generator, block, "DICT", "{}", Order.MEMBER)}.${method}(${argument})\n`;
+};
+pythonGenerator.forBlock.python_dict_query = (block, generator) => {
+  const dictionary = value(generator, block, "DICT", "{}", Order.MEMBER);
+  const method = block.getFieldValue("METHOD");
+  if (method === "copy" || method === "popitem") return [`${dictionary}.${method}()`, Order.FUNCTION_CALL];
+  const key = value(generator, block, "KEY", "''");
+  const fallback = optionalValue(generator, block, "DEFAULT");
+  return [`${dictionary}.${method}(${key}${fallback ? `, ${fallback}` : ""})`, Order.FUNCTION_CALL];
+};
+pythonGenerator.forBlock.python_dict_fromkeys = (block, generator) => {
+  const initialValue = optionalValue(generator, block, "VALUE");
+  return [`dict.fromkeys(${value(generator, block, "KEYS", "[]")}${initialValue ? `, ${initialValue}` : ""})`, Order.FUNCTION_CALL];
+};
+pythonGenerator.forBlock.python_file_read_text = (block, generator) => {
+  const encoding = String(block.getFieldValue("ENCODING") || "").trim();
+  const options = encoding ? `encoding=${JSON.stringify(encoding)}` : "";
+  return [`${standardLibraryCall(block, "pathlib", "Path")}(${value(generator, block, "PATH", "''")}).read_text(${options})`, Order.FUNCTION_CALL];
+};
+pythonGenerator.forBlock.python_file_write_text = (block, generator) => {
+  const mode = block.getFieldValue("MODE") === "a" ? "a" : "w";
+  const encoding = String(block.getFieldValue("ENCODING") || "").trim();
+  const encodingArgument = encoding ? `, encoding=${JSON.stringify(encoding)}` : "";
+  return `with open(${value(generator, block, "PATH", "''")}, ${JSON.stringify(mode)}${encodingArgument}) as 文件:\n${generator.INDENT}文件.write(${value(generator, block, "VALUE", "''")})\n`;
+};
 pythonGenerator.forBlock.python_open_file = (block, generator) => {
   const mode = block.getFieldValue("MODE");
   const encoding = block.getFieldValue("ENCODING").trim();
@@ -636,16 +904,66 @@ pythonGenerator.forBlock.python_open_file = (block, generator) => {
 };
 pythonGenerator.forBlock.python_file_read = (block, generator) => {
   const size = optionalValue(generator, block, "SIZE");
-  return [`${value(generator, block, "FILE", "file", Order.MEMBER)}.read(${size})`, Order.FUNCTION_CALL];
+  const method = ["read", "readline", "readlines"].includes(block.getFieldValue("METHOD")) ? block.getFieldValue("METHOD") : "read";
+  return [`${value(generator, block, "FILE", "文件", Order.MEMBER)}.${method}(${size})`, Order.FUNCTION_CALL];
 };
-pythonGenerator.forBlock.python_file_write = (block, generator) => `${value(generator, block, "FILE", "file", Order.MEMBER)}.write(${value(generator, block, "VALUE", "''")})\n`;
+pythonGenerator.forBlock.python_file_write = (block, generator) => {
+  const method = block.getFieldValue("METHOD") === "writelines" ? "writelines" : "write";
+  return `${value(generator, block, "FILE", "文件", Order.MEMBER)}.${method}(${value(generator, block, "VALUE", "''")})\n`;
+};
+pythonGenerator.forBlock.python_file_tell = (block, generator) => [`${value(generator, block, "FILE", "文件", Order.MEMBER)}.tell()`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_file_seek = (block, generator) => `${value(generator, block, "FILE", "文件", Order.MEMBER)}.seek(${value(generator, block, "OFFSET", "0")}, ${block.getFieldValue("WHENCE") || "0"})\n`;
+pythonGenerator.forBlock.python_file_control = (block, generator) => {
+  const action = block.getFieldValue("ACTION") === "close" ? "close" : "flush";
+  return `${value(generator, block, "FILE", "文件", Order.MEMBER)}.${action}()\n`;
+};
+pythonGenerator.forBlock.python_file_exists = (block, generator) => [`${standardLibraryCall(block, "pathlib", "Path")}(${value(generator, block, "PATH", "''")}).is_file()`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_directory_exists = (block, generator) => [`${standardLibraryCall(block, "pathlib", "Path")}(${value(generator, block, "PATH", "''")}).is_dir()`, Order.FUNCTION_CALL];
+pythonGenerator.forBlock.python_path_info = (block, generator) => {
+  const path = `${standardLibraryCall(block, "pathlib", "Path")}(${value(generator, block, "PATH", "''")})`;
+  switch (block.getFieldValue("INFO")) {
+    case "stem": return [`${path}.stem`, Order.MEMBER];
+    case "suffix": return [`${path}.suffix`, Order.MEMBER];
+    case "parent": return [`str(${path}.parent)`, Order.FUNCTION_CALL];
+    case "resolve": return [`str(${path}.resolve())`, Order.FUNCTION_CALL];
+    case "size": return [`${path}.stat().st_size`, Order.MEMBER];
+    default: return [`${path}.name`, Order.MEMBER];
+  }
+};
+pythonGenerator.forBlock.python_file_copy = (block, generator) => `${standardLibraryCall(block, "shutil", "copy2")}(${value(generator, block, "SOURCE", "''")}, ${value(generator, block, "TARGET", "''")})\n`;
+pythonGenerator.forBlock.python_file_move = (block, generator) => `${standardLibraryCall(block, "shutil", "move")}(${value(generator, block, "SOURCE", "''")}, ${value(generator, block, "TARGET", "''")})\n`;
+pythonGenerator.forBlock.python_file_delete = (block, generator) => `${standardLibraryCall(block, "pathlib", "Path")}(${value(generator, block, "PATH", "''")}).unlink(missing_ok=${block.getFieldValue("MISSING_OK") || "True"})\n`;
+pythonGenerator.forBlock.python_directory_find = (block, generator) => {
+  const path = `${standardLibraryCall(block, "pathlib", "Path")}(${value(generator, block, "PATH", "'.'")})`;
+  const method = block.getFieldValue("SCOPE") === "recursive" ? "rglob" : "glob";
+  return [`[str(匹配路径) for 匹配路径 in ${path}.${method}(${value(generator, block, "PATTERN", "'*'")})]`, Order.COLLECTION];
+};
+pythonGenerator.forBlock.python_directory_copy = (block, generator) => {
+  const targetParent = value(generator, block, "TARGET", "'.'");
+  const directoryName = String(block.getFieldValue("DIRECTORY_NAME") || "").trim();
+  const target = directoryName
+    ? `${standardLibraryCall(block, "os", "path.join")}(${targetParent}, ${JSON.stringify(directoryName)})`
+    : targetParent;
+  return `${standardLibraryCall(block, "shutil", "copytree")}(${value(generator, block, "SOURCE", "''")}, ${target}, dirs_exist_ok=${block.getFieldValue("EXIST_OK") || "True"})\n`;
+};
+pythonGenerator.forBlock.python_directory_move = (block, generator) => {
+  const targetParent = value(generator, block, "TARGET", "'.'");
+  const directoryName = String(block.getFieldValue("DIRECTORY_NAME") || "").trim();
+  const target = directoryName
+    ? `${standardLibraryCall(block, "os", "path.join")}(${targetParent}, ${JSON.stringify(directoryName)})`
+    : targetParent;
+  return `${standardLibraryCall(block, "shutil", "move")}(${value(generator, block, "SOURCE", "''")}, ${target})\n`;
+};
+pythonGenerator.forBlock.python_directory_remove = (block, generator) => block.getFieldValue("REMOVE_MODE") === "tree"
+  ? `${standardLibraryCall(block, "shutil", "rmtree")}(${value(generator, block, "PATH", "''")})\n`
+  : `${standardLibraryCall(block, "pathlib", "Path")}(${value(generator, block, "PATH", "''")}).rmdir()\n`;
 const comprehensionCondition = (generator: typeof pythonGenerator, block: Blockly.Block) => {
   const condition = generator.valueToCode(block, "CONDITION", Order.NONE);
   return condition ? ` if ${condition}` : "";
 };
-pythonGenerator.forBlock.python_list_comprehension = (block, generator) => [`[${value(generator, block, "EXPRESSION")} for ${safeIdentifier(block.getFieldValue("VAR"), "item")} in ${value(generator, block, "ITERABLE", "[]")}${comprehensionCondition(generator, block)}]`, Order.COLLECTION];
-pythonGenerator.forBlock.python_set_comprehension = (block, generator) => [`{${value(generator, block, "EXPRESSION")} for ${safeIdentifier(block.getFieldValue("VAR"), "item")} in ${value(generator, block, "ITERABLE", "[]")}${comprehensionCondition(generator, block)}}`, Order.COLLECTION];
-pythonGenerator.forBlock.python_dict_comprehension = (block, generator) => [`{${value(generator, block, "KEY")}: ${value(generator, block, "VALUE")} for ${safeIdentifier(block.getFieldValue("VAR"), "item")} in ${value(generator, block, "ITERABLE", "[]")}${comprehensionCondition(generator, block)}}`, Order.COLLECTION];
+pythonGenerator.forBlock.python_list_comprehension = (block, generator) => [`[${value(generator, block, "EXPRESSION")} for ${safeIdentifier(block.getFieldValue("VAR"), "项目")} in ${value(generator, block, "ITERABLE", "[]")}${comprehensionCondition(generator, block)}]`, Order.COLLECTION];
+pythonGenerator.forBlock.python_set_comprehension = (block, generator) => [`{${value(generator, block, "EXPRESSION")} for ${safeIdentifier(block.getFieldValue("VAR"), "项目")} in ${value(generator, block, "ITERABLE", "[]")}${comprehensionCondition(generator, block)}}`, Order.COLLECTION];
+pythonGenerator.forBlock.python_dict_comprehension = (block, generator) => [`{${value(generator, block, "KEY")}: ${value(generator, block, "VALUE")} for ${safeIdentifier(block.getFieldValue("VAR"), "项目")} in ${value(generator, block, "ITERABLE", "[]")}${comprehensionCondition(generator, block)}}`, Order.COLLECTION];
 pythonGenerator.forBlock.python_lambda = (block, generator) => [`lambda ${safeParameters(block.getFieldValue("PARAMS"))}: ${value(generator, block, "EXPRESSION")}`, Order.LAMBDA];
 pythonGenerator.forBlock.python_decorated_definition = (block, generator) => {
   const definition = generator.statementToCode(block, "DEFINITION") || `${generator.INDENT}pass\n`;
@@ -659,7 +977,7 @@ const structuredParameters = (block: Blockly.Block, generator: typeof pythonGene
   let hasArgs = false;
   let keywordSeparatorAdded = false;
   specs.forEach((spec, i) => {
-    const name = safeIdentifier(block.getFieldValue(`PARAM_NAME${i}`) || spec.name, "value");
+    const name = safeIdentifier(block.getFieldValue(`PARAM_NAME${i}`) || spec.name, "数值");
     const annotationValue = block.getFieldValue(`PARAM_TYPE${i}`) || spec.annotation;
     const annotation = annotationValue ? `: ${safeAnnotation(annotationValue)}` : "";
     if ((spec.kind === "keyword_only" || spec.kind === "keyword_only_default") && !hasArgs && !keywordSeparatorAdded) {
@@ -680,60 +998,275 @@ const structuredParameters = (block: Blockly.Block, generator: typeof pythonGene
   });
   return parameters.join(", ");
 };
-pythonGenerator.forBlock.python_function_structured = (block, generator) => `def ${safeIdentifier(block.getFieldValue("NAME"), "my_function")}(${structuredParameters(block, generator)}):\n${suite(generator, block, "BODY")}`;
+pythonGenerator.forBlock.python_function_structured = (block, generator) => `def ${safeIdentifier(block.getFieldValue("NAME"), "自定义函数")}(${structuredParameters(block, generator)}):\n${suite(generator, block, "BODY")}`;
 pythonGenerator.forBlock.python_method_structured = pythonGenerator.forBlock.python_function_structured;
-pythonGenerator.forBlock.python_async_function_structured = (block, generator) => `async def ${safeIdentifier(block.getFieldValue("NAME"), "my_function")}(${structuredParameters(block, generator)}):\n${suite(generator, block, "BODY")}`;
-pythonGenerator.forBlock.python_typed_function_structured = (block, generator) => `def ${safeIdentifier(block.getFieldValue("NAME"), "my_function")}(${structuredParameters(block, generator)}) -> ${safeAnnotation(block.getFieldValue("RETURN_TYPE"), "None")}:\n${suite(generator, block, "BODY")}`;
-pythonGenerator.forBlock.python_async_typed_function_structured = (block, generator) => `async def ${safeIdentifier(block.getFieldValue("NAME"), "my_function")}(${structuredParameters(block, generator)}) -> ${safeAnnotation(block.getFieldValue("RETURN_TYPE"), "None")}:\n${suite(generator, block, "BODY")}`;
+pythonGenerator.forBlock.python_async_function_structured = (block, generator) => `async def ${safeIdentifier(block.getFieldValue("NAME"), "自定义函数")}(${structuredParameters(block, generator)}):\n${suite(generator, block, "BODY")}`;
+pythonGenerator.forBlock.python_typed_function_structured = (block, generator) => `def ${safeIdentifier(block.getFieldValue("NAME"), "自定义函数")}(${structuredParameters(block, generator)}) -> ${safeAnnotation(block.getFieldValue("RETURN_TYPE"), "None")}:\n${suite(generator, block, "BODY")}`;
+pythonGenerator.forBlock.python_async_typed_function_structured = (block, generator) => `async def ${safeIdentifier(block.getFieldValue("NAME"), "自定义函数")}(${structuredParameters(block, generator)}) -> ${safeAnnotation(block.getFieldValue("RETURN_TYPE"), "None")}:\n${suite(generator, block, "BODY")}`;
 const structuredArguments = (block: Blockly.Block, generator: typeof pythonGenerator) => {
   const specs = (block as Blockly.Block & { arguments_?: ArgumentSpec[] }).arguments_ ?? [];
   return specs.map((spec, i) => {
     const argument = value(generator, block, `ARG${i}`);
-    if (spec.kind === "keyword") return `${safeIdentifier(block.getFieldValue(`ARG_NAME${i}`) || spec.name, "name")}=${argument}`;
+    if (spec.kind === "keyword") return `${safeIdentifier(block.getFieldValue(`ARG_NAME${i}`) || spec.name, "名称")}=${argument}`;
     if (spec.kind === "star") return `*${argument}`;
     if (spec.kind === "kwargs") return `**${argument}`;
     return argument;
   }).join(", ");
 };
-const structuredCallCode = (block: Blockly.Block, generator: typeof pythonGenerator) => `${safeIdentifier(block.getFieldValue("TARGET"), "function")}(${structuredArguments(block, generator)})`;
+const structuredCallCode = (block: Blockly.Block, generator: typeof pythonGenerator) => `${safeIdentifier(block.getFieldValue("TARGET"), "自定义函数")}(${structuredArguments(block, generator)})`;
 pythonGenerator.forBlock.python_call_structured = (block, generator) => [structuredCallCode(block, generator), Order.FUNCTION_CALL];
 pythonGenerator.forBlock.python_call_statement_structured = (block, generator) => `${structuredCallCode(block, generator)}\n`;
 pythonGenerator.forBlock.python_method_call_structured = pythonGenerator.forBlock.python_call_structured;
 pythonGenerator.forBlock.python_method_statement_structured = pythonGenerator.forBlock.python_call_statement_structured;
 pythonGenerator.forBlock.python_new_object_structured = pythonGenerator.forBlock.python_call_structured;
 
+const numberShadow = (value: number) => ({ shadow: { type: "math_number", fields: { NUM: value } } });
+const textShadow = (value: string) => ({ shadow: { type: "text", fields: { TEXT: value } } });
+const booleanShadow = (value: "TRUE" | "FALSE") => ({ shadow: { type: "logic_boolean", fields: { BOOL: value } } });
+const toolboxVariableField = (name: string) => ({ id: `toolbox-variable-${name}`, name });
+const variableShadow = (name: string) => ({ shadow: { type: "variables_get", fields: { VAR: toolboxVariableField(name) } } });
+const listShadow = (values: number[] = []) => ({
+  shadow: {
+    type: "python_sequence_collection",
+    fields: { KIND: "list" },
+    extraState: { itemCount: values.length },
+    inputs: Object.fromEntries(values.map((item, index) => [`ITEM${index}`, numberShadow(item)])),
+  },
+});
+const tupleShadow = (values: number[] = []) => ({
+  shadow: {
+    type: "python_sequence_collection",
+    fields: { KIND: "tuple" },
+    extraState: { itemCount: values.length },
+    inputs: Object.fromEntries(values.map((item, index) => [`ITEM${index}`, numberShadow(item)])),
+  },
+});
+const setShadow = (values: number[] = []) => ({
+  shadow: {
+    type: "python_sequence_collection",
+    fields: { KIND: "set" },
+    extraState: { itemCount: values.length },
+    inputs: Object.fromEntries(values.map((item, index) => [`ITEM${index}`, numberShadow(item)])),
+  },
+});
+const textListShadow = (values: string[]) => ({
+  shadow: {
+    type: "python_sequence_collection",
+    fields: { KIND: "list" },
+    extraState: { itemCount: values.length },
+    inputs: Object.fromEntries(values.map((item, index) => [`ITEM${index}`, textShadow(item)])),
+  },
+});
+const toolboxSectionLabel = (text: string) => ({
+  kind: "label",
+  text,
+  "web-class": "python-standard-library-label",
+}) as unknown as Blockly.utils.toolbox.FlyoutItemInfo;
+const collectionToolboxBlock = (kind: "list" | "tuple" | "set", values: number[]) => ({
+  kind: "block" as const,
+  type: "python_sequence_collection",
+  fields: { KIND: kind },
+  extraState: { itemCount: values.length },
+  inputs: Object.fromEntries(values.map((item, index) => [`ITEM${index}`, numberShadow(item)])),
+});
+const dictionaryShadow = () => ({
+  shadow: {
+    type: "python_dynamic_dict",
+    extraState: { itemCount: 1 },
+    inputs: { KEY0: textShadow("名称"), VALUE0: textShadow("示例") },
+  },
+});
+
 export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
   kind: "categoryToolbox",
   contents: [
-    { kind: "category", name: "输入输出", colour: "#2f9e8f", contents: [{ kind: "block", type: "python_print" }, { kind: "block", type: "python_input" }, { kind: "block", type: "python_input_assign" }, { kind: "block", type: "python_length" }, { kind: "block", type: "python_convert" }, { kind: "block", type: "text", fields: { TEXT: "你好，世界" } }] },
+    { kind: "category", name: "输入输出", colour: "#2f9e8f", contents: [
+      { kind: "block", type: "python_print", inputs: { VALUE: textShadow("你好，世界") } },
+      { kind: "block", type: "python_input_assign", inputs: { PROMPT: textShadow("请输入：") } },
+      { kind: "block", type: "python_input", inputs: { PROMPT: textShadow("请输入：") } },
+      { kind: "block", type: "python_length", inputs: { VALUE: textShadow("示例文本") } },
+      { kind: "block", type: "python_convert", fields: { TYPE: "int" }, inputs: { VALUE: textShadow("42") } },
+    ] },
     { kind: "category", name: "赋值", colour: "#b95073", contents: [...pythonSyntaxToolbox.assignment] },
-    { kind: "category", name: "逻辑", categorystyle: "logic_category", contents: [{ kind: "block", type: "controls_if" }, { kind: "block", type: "logic_compare" }, { kind: "block", type: "logic_operation" }, { kind: "block", type: "logic_negate" }, { kind: "block", type: "logic_boolean" }, { kind: "block", type: "python_none" }, { kind: "block", type: "python_membership" }, { kind: "block", type: "python_identity" }, { kind: "block", type: "python_conditional" }, ...pythonSyntaxToolbox.logic] },
-    { kind: "category", name: "循环", categorystyle: "loop_category", contents: [{ kind: "block", type: "python_for_in" }, { kind: "block", type: "python_for_enumerate" }, { kind: "block", type: "python_for_else" }, { kind: "block", type: "python_while_else" }, { kind: "block", type: "python_range" }, { kind: "block", type: "controls_repeat_ext" }, { kind: "block", type: "controls_whileUntil" }, { kind: "block", type: "controls_for" }, { kind: "block", type: "controls_flow_statements" }, { kind: "block", type: "python_pass" }] },
+    { kind: "category", name: "逻辑", categorystyle: "logic_category", contents: [
+      { kind: "block", type: "controls_if", inputs: { IF0: booleanShadow("TRUE") } },
+      { kind: "block", type: "logic_compare", inputs: { A: numberShadow(0), B: numberShadow(10) } },
+      { kind: "block", type: "logic_operation", inputs: { A: booleanShadow("TRUE"), B: booleanShadow("FALSE") } },
+      { kind: "block", type: "logic_negate", inputs: { BOOL: booleanShadow("TRUE") } },
+      { kind: "block", type: "logic_boolean" },
+      { kind: "block", type: "python_membership", inputs: { ITEM: textShadow("Python"), COLLECTION: textListShadow(["Python", "Blockly"]) } },
+      { kind: "block", type: "python_conditional", inputs: { CONDITION: booleanShadow("TRUE"), TRUE_VALUE: textShadow("成立"), FALSE_VALUE: textShadow("不成立") } },
+      { kind: "block", type: "python_none" },
+      { kind: "block", type: "python_identity", inputs: { A: variableShadow("数值"), B: { shadow: { type: "python_none" } } } },
+      ...pythonSyntaxToolbox.logic,
+    ] },
+    { kind: "category", name: "循环", categorystyle: "loop_category", contents: [
+      { kind: "block", type: "controls_repeat_ext", inputs: { TIMES: numberShadow(10) } },
+      { kind: "block", type: "python_for_in", inputs: { ITERABLE: listShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_range", inputs: { START: numberShadow(0), STOP: numberShadow(10), STEP: numberShadow(1) } },
+      { kind: "block", type: "controls_whileUntil", inputs: { BOOL: booleanShadow("TRUE") } },
+      { kind: "block", type: "python_for_enumerate", inputs: { ITERABLE: listShadow([1, 2, 3]) } },
+      { kind: "block", type: "controls_for", inputs: { FROM: numberShadow(0), TO: numberShadow(10), BY: numberShadow(1) } },
+      { kind: "block", type: "controls_flow_statements" },
+      { kind: "block", type: "python_for_else", inputs: { ITERABLE: listShadow() } },
+      { kind: "block", type: "python_while_else", inputs: { CONDITION: booleanShadow("TRUE") } },
+      { kind: "block", type: "python_pass" },
+    ] },
     { kind: "category", name: "数学", categorystyle: "math_category", contents: [
-      { kind: "block", type: "math_number" }, { kind: "block", type: "math_arithmetic" }, { kind: "block", type: "python_floor_divide" }, { kind: "block", type: "math_modulo" }, { kind: "block", type: "python_bitwise" }, { kind: "block", type: "python_bitwise_not" },
-      { kind: "block", type: "math_single" }, { kind: "block", type: "math_round" }, { kind: "block", type: "math_constant" }, { kind: "block", type: "math_constrain" },
-      { kind: "block", type: "math_random_int" }, { kind: "block", type: "math_random_float" }, { kind: "block", type: "math_on_list" }, ...pythonSyntaxToolbox.math,
+      toolboxSectionLabel("基础计算"),
+      { kind: "block", type: "math_number", fields: { NUM: 0 } },
+      { kind: "block", type: "math_arithmetic", fields: { OP: "ADD" }, inputs: { A: numberShadow(1), B: numberShadow(1) } },
+      { kind: "block", type: "python_floor_divide", inputs: { A: numberShadow(7), B: numberShadow(3) } },
+      { kind: "block", type: "math_modulo", inputs: { DIVIDEND: numberShadow(7), DIVISOR: numberShadow(3) } },
+      { kind: "block", type: "math_single", fields: { OP: "ROOT" }, inputs: { NUM: numberShadow(9) } },
+      { kind: "block", type: "math_round", fields: { OP: "ROUND" }, inputs: { NUM: numberShadow(3.6) } },
+      { kind: "block", type: "math_constant", fields: { CONSTANT: "PI" } },
+      { kind: "block", type: "math_constrain", inputs: { VALUE: numberShadow(15), LOW: numberShadow(0), HIGH: numberShadow(10) } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("随机与统计"),
+      { kind: "block", type: "math_random_int", inputs: { FROM: numberShadow(1), TO: numberShadow(10) } },
+      { kind: "block", type: "math_random_float" },
+      { kind: "block", type: "math_on_list", fields: { OP: "SUM" }, inputs: { LIST: listShadow([1, 2, 3]) } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("进阶运算"),
+      { kind: "block", type: "python_bitwise", fields: { OP: "&" }, inputs: { A: numberShadow(5), B: numberShadow(3) } },
+      { kind: "block", type: "python_bitwise_not", inputs: { VALUE: numberShadow(5) } },
+      ...pythonSyntaxToolbox.math,
     ] },
     { kind: "category", name: "文本", categorystyle: "text_category", contents: [
       { kind: "block", type: "text", fields: { TEXT: "你好，世界" } },
-      { kind: "block", type: "text_join", extraState: { itemCount: 1 } },
-      { kind: "block", type: "text_length" }, { kind: "block", type: "python_string_method" }, ...pythonSyntaxToolbox.text,
+      { kind: "block", type: "text_join", extraState: { itemCount: 2 }, inputs: { ADD0: textShadow("你好，"), ADD1: textShadow("世界") } },
+      { kind: "block", type: "text_length", inputs: { VALUE: textShadow("示例文本") } },
+      { kind: "block", type: "python_string_method", fields: { METHOD: "upper" }, inputs: { TEXT: textShadow("Python") } },
+      { kind: "block", type: "python_text_replace", inputs: { TEXT: textShadow("你好，世界"), OLD: textShadow("世界"), NEW: textShadow("Python") } },
+      ...pythonSyntaxToolbox.text,
     ] },
     { kind: "category", name: "集合", colour: "#7657b5", contents: [
-      { kind: "block", type: "python_sequence_collection", fields: { KIND: "list" } },
-      { kind: "block", type: "python_sequence_collection", fields: { KIND: "tuple" } },
-      { kind: "block", type: "python_sequence_collection", fields: { KIND: "set" } },
-      { kind: "block", type: "python_dynamic_dict" },
-      { kind: "block", type: "python_list_comprehension" }, { kind: "block", type: "python_set_comprehension" }, { kind: "block", type: "python_dict_comprehension" },
-      { kind: "block", type: "python_index" }, { kind: "block", type: "python_slice" }, { kind: "block", type: "python_list_method" }, { kind: "block", type: "python_dict_get" }, { kind: "block", type: "python_dict_view" },
+      toolboxSectionLabel("创建"),
+      collectionToolboxBlock("list", [1, 2, 3]),
+      collectionToolboxBlock("tuple", [1, 2]),
+      collectionToolboxBlock("set", [1, 2]),
+      { kind: "block", type: "python_dynamic_dict", extraState: { itemCount: 1 }, inputs: { KEY0: textShadow("名称"), VALUE0: textShadow("示例") } },
+      toolboxSectionLabel("列表与元组"),
+      { kind: "block", type: "python_list_method", fields: { METHOD: "append" }, inputs: { LIST: listShadow([1, 2]), ARG: numberShadow(3) } },
+      { kind: "block", type: "python_list_insert", inputs: { LIST: listShadow([1, 3]), INDEX: numberShadow(1), VALUE: numberShadow(2) } },
+      { kind: "block", type: "python_list_set", inputs: { LIST: listShadow([1, 2, 3]), INDEX: numberShadow(0), VALUE: numberShadow(10) } },
+      { kind: "block", type: "python_list_slice_set", inputs: { LIST: listShadow([1, 2, 3, 4]), START: numberShadow(1), STOP: numberShadow(3), STEP: numberShadow(1), VALUES: listShadow([20, 30]) } },
+      { kind: "block", type: "python_list_slice_delete", inputs: { LIST: listShadow([1, 2, 3, 4]), START: numberShadow(1), STOP: numberShadow(3), STEP: numberShadow(1) } },
+      { kind: "block", type: "python_sequence_query", fields: { METHOD: "count" }, inputs: { SEQUENCE: listShadow([1, 2, 1]), VALUE: numberShadow(1) } },
+      { kind: "block", type: "python_sequence_query", fields: { METHOD: "index" }, inputs: { SEQUENCE: tupleShadow([10, 20, 30]), VALUE: numberShadow(20) } },
+      { kind: "block", type: "python_sequence_combine", fields: { OPERATION: "concat" }, inputs: { SEQUENCE: listShadow([1, 2]), OTHER: listShadow([3, 4]) } },
+      { kind: "block", type: "python_list_copy", inputs: { LIST: listShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_index", inputs: { OBJECT: listShadow([1, 2, 3]), INDEX: numberShadow(0) } },
+      { kind: "block", type: "python_slice", inputs: { OBJECT: listShadow([1, 2, 3]), START: numberShadow(0), STOP: numberShadow(2), STEP: numberShadow(1) } },
+      toolboxSectionLabel("集合运算与修改"),
+      { kind: "block", type: "python_set_operation", fields: { OPERATION: "union" }, inputs: { LEFT: setShadow([1, 2]), RIGHT: setShadow([2, 3]) } },
+      { kind: "block", type: "python_set_relation", fields: { RELATION: "subset" }, inputs: { LEFT: setShadow([1, 2]), RIGHT: setShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_set_method", fields: { METHOD: "add" }, inputs: { SET: setShadow([1, 2]), ARG: numberShadow(3) } },
+      { kind: "block", type: "python_set_copy", inputs: { SET: setShadow([1, 2, 3]) } },
+      toolboxSectionLabel("字典"),
+      { kind: "block", type: "python_dict_get", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称"), DEFAULT: textShadow("") } },
+      { kind: "block", type: "python_dict_set", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称"), VALUE: textShadow("新值") } },
+      { kind: "block", type: "python_dict_remove", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称") } },
+      { kind: "block", type: "python_dict_view", fields: { METHOD: "keys" }, inputs: { DICT: dictionaryShadow() } },
+      { kind: "block", type: "python_dict_method", fields: { METHOD: "update" }, inputs: { DICT: dictionaryShadow(), OTHER: dictionaryShadow() } },
+      { kind: "block", type: "python_dict_query", fields: { METHOD: "copy" }, inputs: { DICT: dictionaryShadow() } },
+      { kind: "block", type: "python_dict_fromkeys", inputs: { KEYS: textListShadow(["名称", "语言"]), VALUE: textShadow("") } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("推导式"),
+      { kind: "block", type: "python_list_comprehension", fields: { VAR: "项目" }, inputs: { EXPRESSION: { shadow: { type: "python_raw_expression", fields: { CODE: "项目 * 2" } } }, ITERABLE: listShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_set_comprehension", fields: { VAR: "项目" }, inputs: { EXPRESSION: { shadow: { type: "python_raw_expression", fields: { CODE: "项目" } } }, ITERABLE: listShadow([1, 2, 2, 3]) } },
+      { kind: "block", type: "python_dict_comprehension", fields: { VAR: "项目" }, inputs: { KEY: { shadow: { type: "python_raw_expression", fields: { CODE: "项目" } } }, VALUE: { shadow: { type: "python_raw_expression", fields: { CODE: "项目 * 2" } } }, ITERABLE: listShadow([1, 2, 3]) } },
     ] },
     { kind: "category", name: "内置函数", colour: "#397bc0", contents: [...pythonSyntaxToolbox.builtins] },
     { kind: "category", name: "变量", categorystyle: "variable_category", custom: "USED_VARIABLES" },
-    { kind: "category", name: "函数", categorystyle: "procedure_category", contents: [{ kind: "block", type: "python_function_structured" }, { kind: "block", type: "python_lambda" }, { kind: "block", type: "python_decorated_definition" }, { kind: "block", type: "python_scope_declaration" }, { kind: "block", type: "python_return" }, ...pythonSyntaxToolbox.function] },
+    { kind: "category", name: "函数", categorystyle: "procedure_category", contents: [
+      toolboxSectionLabel("常用"),
+      { kind: "block", type: "python_function_structured" },
+      { kind: "block", type: "python_return", inputs: { VALUE: numberShadow(0) } },
+      { kind: "block", type: "python_return_none" },
+      { kind: "block", type: "python_lambda", inputs: { EXPRESSION: { shadow: { type: "python_raw_expression", fields: { CODE: "数值" } } } } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("进阶"),
+      { kind: "block", type: "python_typed_function_structured" },
+      { kind: "block", type: "python_decorated_definition", inputs: {
+        DECORATOR: { shadow: { type: "python_functools_cache" } },
+        DEFINITION: { block: {
+          type: "python_function_structured", fields: { NAME: "计算", PARAM_NAME0: "数值" }, extraState: { parameters: [{ kind: "positional", name: "数值" }] },
+          inputs: { BODY: { block: { type: "python_return", inputs: { VALUE: { shadow: { type: "python_raw_expression", fields: { CODE: "数值" } } } } } } },
+        } },
+      } },
+      { kind: "block", type: "python_scope_declaration" },
+      ...pythonSyntaxToolbox.function,
+    ] },
     { kind: "category", name: "调用", colour: "#397bc0", custom: "DEFINED_FUNCTION_CALLS" },
-    { kind: "category", name: "对象", colour: "#a64ca6", contents: [{ kind: "block", type: "python_class_def" }, { kind: "block", type: "python_method_structured" }, { kind: "block", type: "python_set_attribute" }, { kind: "block", type: "python_super_call" }, { kind: "block", type: "python_new_object_structured" }, { kind: "block", type: "python_attribute" }, { kind: "block", type: "python_method_call_structured" }, { kind: "block", type: "python_method_statement_structured" }] },
-    { kind: "category", name: "异常", colour: "#b95050", contents: [{ kind: "block", type: "python_try_full" }, { kind: "block", type: "python_try_except" }, { kind: "block", type: "python_try_two_except" }, { kind: "block", type: "python_with" }, { kind: "block", type: "python_raise" }, { kind: "block", type: "python_assert" }, ...pythonSyntaxToolbox.exception] },
-    { kind: "category", name: "模块", colour: "#c58b32", contents: [{ kind: "block", type: "python_import" }, { kind: "block", type: "python_from_import" }, ...pythonSyntaxToolbox.module, { kind: "block", type: "python_open_file" }, { kind: "block", type: "python_file_read" }, { kind: "block", type: "python_file_write" }, { kind: "block", type: "python_raw_expression" }] },
+    { kind: "category", name: "文件", colour: colours.file, contents: [
+      toolboxSectionLabel("快捷读写"),
+      { kind: "block", type: "python_file_read_text", fields: { ENCODING: "utf-8" }, inputs: { PATH: textShadow("data.txt") } },
+      { kind: "block", type: "python_file_write_text", fields: { MODE: "w", ENCODING: "utf-8" }, inputs: { VALUE: textShadow("示例内容"), PATH: textShadow("output.txt") } },
+      { kind: "block", type: "python_file_write_text", fields: { MODE: "a", ENCODING: "utf-8" }, inputs: { VALUE: textShadow("追加内容"), PATH: textShadow("output.txt") } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("安全打开"),
+      { kind: "block", type: "python_with", fields: { ALIAS: toolboxVariableField("文件") }, inputs: {
+        CONTEXT: { shadow: { type: "python_open_file", fields: { MODE: "r", ENCODING: "utf-8" }, inputs: { PATH: textShadow("data.txt") } } },
+        BODY: { block: { type: "variables_set", fields: { VAR: toolboxVariableField("文件内容") }, inputs: { VALUE: { block: { type: "python_file_read", fields: { METHOD: "read" }, inputs: { FILE: variableShadow("文件") } } } } } },
+      } },
+      { kind: "block", type: "python_with", fields: { ALIAS: toolboxVariableField("文件") }, inputs: {
+        CONTEXT: { shadow: { type: "python_open_file", fields: { MODE: "w", ENCODING: "utf-8" }, inputs: { PATH: textShadow("output.txt") } } },
+        BODY: { block: { type: "python_file_write", fields: { METHOD: "write" }, inputs: { FILE: variableShadow("文件"), VALUE: textShadow("示例内容") } } },
+      } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("文件对象"),
+      { kind: "block", type: "python_open_file", fields: { MODE: "r", ENCODING: "utf-8" }, inputs: { PATH: textShadow("data.txt") } },
+      { kind: "block", type: "python_file_read", fields: { METHOD: "read" }, inputs: { FILE: variableShadow("文件") } },
+      { kind: "block", type: "python_file_write", fields: { METHOD: "write" }, inputs: { FILE: variableShadow("文件"), VALUE: textShadow("示例内容") } },
+      { kind: "block", type: "python_file_tell", inputs: { FILE: variableShadow("文件") } },
+      { kind: "block", type: "python_file_seek", fields: { WHENCE: "0" }, inputs: { FILE: variableShadow("文件"), OFFSET: numberShadow(0) } },
+      { kind: "block", type: "python_file_control", fields: { ACTION: "flush" }, inputs: { FILE: variableShadow("文件") } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("查询与查找"),
+      { kind: "block", type: "python_file_exists", inputs: { PATH: textShadow("data.txt") } },
+      { kind: "block", type: "python_directory_exists", inputs: { PATH: textShadow("data") } },
+      { kind: "block", type: "python_path_info", fields: { PATH_KIND: "file", INFO: "name" }, inputs: { PATH: textShadow("data.txt") } },
+      { kind: "block", type: "python_os_listdir", fields: { FILTER: "all" }, inputs: { PATH: textShadow(".") } },
+      { kind: "block", type: "python_directory_find", fields: { SCOPE: "recursive" }, inputs: { PATH: textShadow("."), PATTERN: textShadow("*.txt") } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("文件管理"),
+      { kind: "block", type: "python_file_copy", inputs: { SOURCE: textShadow("source.txt"), TARGET: textShadow("copy.txt") } },
+      { kind: "block", type: "python_file_move", fields: { PATH_KIND: "file" }, inputs: { SOURCE: textShadow("old.txt"), TARGET: textShadow("new.txt") } },
+      { kind: "block", type: "python_file_delete", fields: { MISSING_OK: "True" }, inputs: { PATH: textShadow("data.txt") } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("目录操作"),
+      { kind: "block", type: "python_os_getcwd" },
+      { kind: "block", type: "python_os_makedirs", fields: { DIRECTORY_NAME: "新建目录", EXIST_OK: "True" }, inputs: { PATH: textShadow(".") } },
+      { kind: "block", type: "python_directory_copy", fields: { DIRECTORY_NAME: "目录副本", EXIST_OK: "True" }, inputs: { SOURCE: textShadow("源目录"), TARGET: textShadow(".") } },
+      { kind: "block", type: "python_directory_move", fields: { DIRECTORY_NAME: "新目录名称" }, inputs: { SOURCE: textShadow("源目录"), TARGET: textShadow(".") } },
+      { kind: "block", type: "python_directory_remove", fields: { REMOVE_MODE: "empty" }, inputs: { PATH: textShadow("空目录") } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("路径和资源"),
+      ...pythonSyntaxToolbox.file,
+    ] },
+    { kind: "category", name: "对象", colour: "#a64ca6", custom: "DEFINED_OBJECTS" },
+    { kind: "category", name: "异常", colour: "#b95050", contents: [
+      toolboxSectionLabel("捕获错误"),
+      { kind: "block", type: "python_try_except" },
+      { kind: "block", type: "python_try_full" },
+      { kind: "block", type: "python_try_two_except" },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("检查与抛出"),
+      { kind: "block", type: "python_assert", inputs: { CONDITION: booleanShadow("TRUE"), MESSAGE: textShadow("条件不成立") } },
+      { kind: "block", type: "python_raise", inputs: { ERROR: { shadow: { type: "python_raw_expression", fields: { CODE: "ValueError('错误信息')" } } } } },
+      ...pythonSyntaxToolbox.exception,
+    ] },
+    { kind: "category", name: "模块", colour: "#c58b32", contents: [
+      toolboxSectionLabel("常用导入"),
+      { kind: "block", type: "python_import", fields: { MODULE: "math" } },
+      { kind: "block", type: "python_from_import", fields: { MODULE: "math", NAME: "sqrt" } },
+      ...pythonSyntaxToolbox.module,
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("高级"),
+      { kind: "block", type: "python_raw_expression", fields: { CODE: "len([1, 2, 3])" } },
+    ] },
     { kind: "category", name: "标准库", colour: "#c58b32", contents: [...pythonSyntaxToolbox.standardLibrary] },
     { kind: "category", name: "现代语法", colour: "#5968b0", contents: [...pythonSyntaxToolbox.modern] },
     { kind: "category", name: "异步", colour: "#8762b8", contents: [...pythonSyntaxToolbox.async] },
@@ -741,16 +1274,18 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
 };
 
 export const starterState = {
-  blocks: { languageVersion: 0, blocks: [{ type: "variables_set", x: 90, y: 70, fields: { VAR: { name: "message" } }, inputs: { VALUE: { block: { type: "text", fields: { TEXT: "你好，Python！" } } } }, next: { block: { type: "python_print", inputs: { VALUE: { block: { type: "variables_get", fields: { VAR: { name: "message" } } } } }, next: { block: { type: "controls_repeat_ext", inputs: { TIMES: { shadow: { type: "math_number", fields: { NUM: 3 } } }, DO: { block: { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "图形化编程" } } } } } } } } } } } }] },
+  blocks: { languageVersion: 0, blocks: [{ type: "variables_set", x: 90, y: 70, fields: { VAR: { name: "消息" } }, inputs: { VALUE: { block: { type: "text", fields: { TEXT: "你好，Python！" } } } }, next: { block: { type: "python_print", inputs: { VALUE: { block: { type: "variables_get", fields: { VAR: { name: "消息" } } } } }, next: { block: { type: "controls_repeat_ext", inputs: { TIMES: { shadow: { type: "math_number", fields: { NUM: 3 } } }, DO: { block: { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "图形化编程" } } } } } } } } } } } }] },
 };
 
 function stripGeneratedVariableDeclarations(code: string): string {
   const lines = code.split("\n");
-  let index = 0;
-  while (/^[A-Za-z_]\w* = None$/.test(lines[index] || "")) index += 1;
-  if (!index) return code;
-  while (!lines[index]?.trim()) index += 1;
-  return lines.slice(index).join("\n");
+  let declarationStart = 0;
+  while (declarationStart < lines.length && (/^(?:from\s+\S+\s+)?import\s+\S+/.test(lines[declarationStart] || "") || !lines[declarationStart]?.trim())) declarationStart += 1;
+  let declarationEnd = declarationStart;
+  while (/^[_\p{ID_Start}][_\p{ID_Continue}]* = None$/u.test(lines[declarationEnd] || "")) declarationEnd += 1;
+  if (declarationEnd === declarationStart) return code;
+  while (declarationEnd < lines.length && !lines[declarationEnd]?.trim()) declarationEnd += 1;
+  return [...lines.slice(0, declarationStart), ...lines.slice(declarationEnd)].join("\n");
 }
 
 export function generatePython(state: object): string {
@@ -829,6 +1364,61 @@ export function findWorkspaceBlockCodeRange(workspace: Blockly.Workspace, blockI
   return null;
 }
 
+const structuredDefinitionTypes = new Set([
+  "python_function_structured",
+  "python_method_structured",
+  "python_async_function_structured",
+  "python_typed_function_structured",
+  "python_async_typed_function_structured",
+]);
+
+function readDefinitionParameters(block: Blockly.Block): ParameterSpec[] {
+  if (structuredDefinitionTypes.has(block.type)) {
+    return ((block as Blockly.Block & { parameters_?: ParameterSpec[] }).parameters_ ?? []).map((parameter, index) => ({
+      ...parameter,
+      name: block.getFieldValue(`PARAM_NAME${index}`) || parameter.name,
+    }));
+  }
+
+  const parts = String(block.getFieldValue("PARAMS") || "").split(",").map((part) => part.trim()).filter(Boolean);
+  const slashIndex = parts.indexOf("/");
+  let keywordOnly = false;
+  return parts.flatMap((part, index): ParameterSpec[] => {
+    if (part === "/") return [];
+    if (part === "*") {
+      keywordOnly = true;
+      return [];
+    }
+    if (part.startsWith("**")) {
+      const name = part.slice(2).split(":", 1)[0].trim();
+      return [{ kind: "kwargs", name }];
+    }
+    if (part.startsWith("*")) {
+      keywordOnly = true;
+      const name = part.slice(1).split(":", 1)[0].trim();
+      return [{ kind: "args", name }];
+    }
+    const hasDefault = part.includes("=");
+    const name = part.split("=", 1)[0].split(":", 1)[0].trim();
+    const kind: ParameterSpec["kind"] = keywordOnly
+      ? hasDefault ? "keyword_only_default" : "keyword_only"
+      : hasDefault ? "default" : slashIndex >= 0 && index < slashIndex ? "positional_only" : "positional";
+    return [{ kind, name }];
+  }).filter((parameter) => Boolean(parameter.name));
+}
+
+const requiredCallArguments = (parameters: ParameterSpec[]): ArgumentSpec[] => parameters.flatMap((parameter): ArgumentSpec[] => {
+  if (parameter.kind === "positional" || parameter.kind === "positional_only") return [{ kind: "positional", name: "" }];
+  if (parameter.kind === "keyword_only") return [{ kind: "keyword", name: parameter.name }];
+  return [];
+});
+
+const callToolboxBlock = (type: string, target: string, arguments_: ArgumentSpec[]) => {
+  const fields: Record<string, string> = { TARGET: target };
+  arguments_.forEach((argument, index) => { if (argument.kind === "keyword") fields[`ARG_NAME${index}`] = argument.name; });
+  return { kind: "block", type, fields, extraState: { arguments: arguments_ } } as Blockly.utils.toolbox.BlockInfo;
+};
+
 export function buildDefinedFunctionCallToolbox(workspace: Blockly.Workspace): Blockly.utils.toolbox.FlyoutItemInfoArray {
   const names = new Set<string>();
   const calls: Blockly.utils.toolbox.FlyoutItemInfoArray = [
@@ -836,41 +1426,61 @@ export function buildDefinedFunctionCallToolbox(workspace: Blockly.Workspace): B
     { kind: "block", type: "python_call_statement_structured" },
   ];
   const definedCalls: Blockly.utils.toolbox.FlyoutItemInfoArray = [];
-  const structuredFunctionTypes = new Set([
-    "python_function_structured",
-    "python_async_function_structured",
-    "python_typed_function_structured",
-    "python_async_typed_function_structured",
-  ]);
+  const structuredFunctionTypes = new Set([...structuredDefinitionTypes].filter((type) => type !== "python_method_structured"));
   for (const block of workspace.getAllBlocks(false)) {
     if (!structuredFunctionTypes.has(block.type) && block.type !== "python_function_def") continue;
     const surroundParent = block.getSurroundParent();
-    if (surroundParent && surroundParent.type !== "python_decorated_definition") continue;
+    if (surroundParent && (surroundParent.type !== "python_decorated_definition" || surroundParent.getSurroundParent())) continue;
     const name = safeIdentifier(block.getFieldValue("NAME") || "", "");
     if (!name || names.has(name)) continue;
     names.add(name);
 
-    let parameters: ParameterSpec[] = [];
-    if (structuredFunctionTypes.has(block.type)) {
-      parameters = ((block as Blockly.Block & { parameters_?: ParameterSpec[] }).parameters_ ?? []).map((parameter, index) => ({
-        ...parameter,
-        name: block.getFieldValue(`PARAM_NAME${index}`) || parameter.name,
-      }));
-    } else {
-      parameters = String(block.getFieldValue("PARAMS") || "").split(",").map((part) => part.trim()).filter(Boolean).map((part) => {
-        const rawName = part.replace(/^\*{1,2}/, "").split("=", 1)[0].trim();
-        return { kind: part.startsWith("**") ? "kwargs" : part.startsWith("*") ? "args" : part.includes("=") ? "default" : "positional", name: rawName } as ParameterSpec;
-      });
-    }
-
-    const arguments_: ArgumentSpec[] = parameters.filter((parameter) => parameter.kind !== "args" && parameter.kind !== "kwargs").map((parameter) => parameter.kind === "default" || parameter.kind === "keyword_only" || parameter.kind === "keyword_only_default"
-      ? { kind: "keyword", name: parameter.name }
-      : { kind: "positional", name: "" });
-    const fields: Record<string, string> = { TARGET: name };
-    arguments_.forEach((argument, index) => { if (argument.kind === "keyword") fields[`ARG_NAME${index}`] = argument.name; });
-    definedCalls.push({ kind: "block", type: "python_call_structured", fields, extraState: { arguments: arguments_ } } as Blockly.utils.toolbox.BlockInfo);
+    definedCalls.push(callToolboxBlock("python_call_structured", name, requiredCallArguments(readDefinitionParameters(block))));
   }
   if (definedCalls.length) calls.push({ kind: "sep", gap: 20 }, ...definedCalls);
+  return calls;
+}
+
+const objectToolboxBlocks: Blockly.utils.toolbox.FlyoutItemInfoArray = [
+  { kind: "block", type: "python_class_def" },
+  { kind: "block", type: "python_method_structured" },
+  { kind: "block", type: "python_set_attribute", inputs: { OBJECT: variableShadow("self"), VALUE: numberShadow(0) } } as Blockly.utils.toolbox.BlockInfo,
+  { kind: "block", type: "python_super_call" },
+  { kind: "block", type: "python_new_object_structured" },
+  { kind: "block", type: "python_attribute", inputs: { OBJECT: variableShadow("object") } } as Blockly.utils.toolbox.BlockInfo,
+  { kind: "block", type: "python_method_call_structured" },
+  { kind: "block", type: "python_method_statement_structured" },
+];
+
+const classBodyDefinition = (block: Blockly.Block) => block.type === "python_decorated_definition"
+  ? block.getInputTargetBlock("DEFINITION")
+  : block;
+
+export function buildDefinedClassConstructorToolbox(workspace: Blockly.Workspace): Blockly.utils.toolbox.FlyoutItemInfoArray {
+  const calls: Blockly.utils.toolbox.FlyoutItemInfoArray = [...objectToolboxBlocks];
+  const constructors: Blockly.utils.toolbox.FlyoutItemInfoArray = [];
+  const names = new Set<string>();
+  for (const classBlock of workspace.getAllBlocks(false).filter((block) => block.type === "python_class_def")) {
+    const className = safeIdentifier(classBlock.getFieldValue("NAME") || "", "");
+    if (!className || names.has(className)) continue;
+    names.add(className);
+
+    let definition = classBlock.getInputTargetBlock("BODY");
+    let constructor: Blockly.Block | null = null;
+    while (definition) {
+      const candidate = classBodyDefinition(definition);
+      if (candidate && (candidate.type === "python_method_structured" || candidate.type === "python_method_def") && candidate.getFieldValue("NAME") === "__init__") {
+        constructor = candidate;
+        break;
+      }
+      definition = definition.getNextBlock();
+    }
+
+    const parameters = constructor ? readDefinitionParameters(constructor) : [];
+    if (parameters[0] && ["self", "cls"].includes(parameters[0].name)) parameters.shift();
+    constructors.push(callToolboxBlock("python_new_object_structured", className, requiredCallArguments(parameters)));
+  }
+  if (constructors.length) calls.push({ kind: "sep", gap: 20 }, ...constructors);
   return calls;
 }
 
@@ -894,4 +1504,5 @@ export function registerUsedVariablesToolbox(workspace: Blockly.WorkspaceSvg) {
     ];
   });
   workspace.registerToolboxCategoryCallback("DEFINED_FUNCTION_CALLS", () => buildDefinedFunctionCallToolbox(workspace));
+  workspace.registerToolboxCategoryCallback("DEFINED_OBJECTS", () => buildDefinedClassConstructorToolbox(workspace));
 }

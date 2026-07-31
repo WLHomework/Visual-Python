@@ -5,7 +5,7 @@ import { validatePythonBlockContexts } from "../../pythonSyntaxBlocks";
 import { manimPlugin } from "../../plugins/builtin/manim";
 import { parseVoiceoverMarker } from "../../plugins/builtin/manim/voiceoverMarkers";
 import { PluginRegistry } from "../../plugins/core/pluginRegistry";
-import { animationOrchestrationExample, arcsSectorsAnnulusExample, axesAndFunctionsExample, basicShapesExample, bubbleSortVisualizationExample, circleTangentTheoremExample, clearUpdaterExample, definiteIntegralAreaExample, dynamicCounterExample, dynamicRedrawExample, emphasisAnimationsExample, entranceAndExitExample, followTargetExample, formulaTransformExample, functionAreaExample, geometryAnnotationsExample, groupsAndLayoutExample, growthAnimationsExample, helloManimExample, linearFunctionVisualizationExample, linesArrowsVectorsExample, manimExampleCatalog, manimExamples, matrixAndTableExample, motionRotateScaleExample, movingCameraExample, narratedBinarySearchExample, narratedCircleAreaExample, narratedCompoundInterestExample, narratedDayNightCycleExample, narratedDerivativeGeometryExample, narratedDiceFrequencyExample, narratedDnaReplicationExample, narratedElectronShellsExample, narratedEulerFormulaExample, narratedGradientDescentExample, narratedHarmonicMotionExample, narratedLeverTorqueExample, narratedLimitDialogueExample, narratedLinearFunctionExample, narratedMatrixTransformationExample, narratedMeanAndOutlierExample, narratedPacketEncapsulationExample, narratedPerfectSquareFormulaExample, narratedPlanetaryOrbitExample, narratedProjectileMotionExample, narratedPythagoreanTheoremExample, narratedQuadraticVertexExample, narratedReflectionRefractionExample, narratedRiemannSumExample, narratedSeriesParallelCircuitsExample, narratedStackOperationsExample, narratedSupplyDemandExample, narratedTriangleAngleSumExample, narratedUnitCircleExample, narratedVectorAdditionExample, numberLineAndGridExample, objectStylesExample, polygonsAndVerticesExample, positionLayoutExample, pythagoreanTheoremExample, quadraticFunctionParametersExample, sceneObjectManagementExample, shapeTransformExample, textAndFormulasExample, threeDCameraMotionExample, threeDObjectsExample, threeDSolidCollectionExample, threeDSurfaceExample, torusAndArrow3DExample, tracedPathExample, valueTrackerExample, vectorAdditionExample } from ".";
+import { animationOrchestrationExample, arcsSectorsAnnulusExample, axesAndFunctionsExample, basicShapesExample, bubbleSortVisualizationExample, circleTangentTheoremExample, clearUpdaterExample, colorGradientExample, definiteIntegralAreaExample, dynamicCounterExample, dynamicRedrawExample, emphasisAnimationsExample, entranceAndExitExample, followTargetExample, formulaTransformExample, functionAreaExample, geometryAnnotationsExample, groupsAndLayoutExample, growthAnimationsExample, helloManimExample, linearFunctionVisualizationExample, linesArrowsVectorsExample, manimExampleCatalog, manimExamples, matrixAndTableExample, motionRotateScaleExample, movingCameraExample, narratedBinarySearchExample, narratedCircleAreaExample, narratedCompoundInterestExample, narratedDayNightCycleExample, narratedDerivativeGeometryExample, narratedDiceFrequencyExample, narratedDnaReplicationExample, narratedElectronShellsExample, narratedEulerFormulaExample, narratedGradientDescentExample, narratedHarmonicMotionExample, narratedLeverTorqueExample, narratedLimitDialogueExample, narratedLinearFunctionExample, narratedMatrixTransformationExample, narratedMeanAndOutlierExample, narratedPacketEncapsulationExample, narratedPerfectSquareFormulaExample, narratedPlanetaryOrbitExample, narratedProjectileMotionExample, narratedPythagoreanTheoremExample, narratedQuadraticVertexExample, narratedReflectionRefractionExample, narratedRiemannSumExample, narratedSeriesParallelCircuitsExample, narratedStackOperationsExample, narratedSupplyDemandExample, narratedTriangleAngleSumExample, narratedUnitCircleExample, narratedVectorAdditionExample, numberLineAndGridExample, objectStylesExample, polygonsAndVerticesExample, positionLayoutExample, pythagoreanTheoremExample, quadraticFunctionParametersExample, sceneObjectManagementExample, shapeTransformExample, textAndFormulasExample, threeDCameraMotionExample, threeDObjectsExample, threeDSolidCollectionExample, threeDSurfaceExample, torusAndArrow3DExample, tracedPathExample, valueTrackerExample, vectorAdditionExample } from ".";
 
 const registry = new PluginRegistry();
 
@@ -28,11 +28,11 @@ describe("Manim examples", () => {
   });
 
   it("registers the complete 20-example plan", () => {
-    expect(manimExampleCatalog).toHaveLength(71);
-    expect(manimExamples).toHaveLength(71);
-    expect(manimExampleCatalog.filter((item) => item.example)).toHaveLength(71);
+    expect(manimExampleCatalog).toHaveLength(72);
+    expect(manimExamples).toHaveLength(72);
+    expect(manimExampleCatalog.filter((item) => item.example)).toHaveLength(72);
     expect(manimExampleCatalog.filter((item) => item.difficulty === "intro")).toHaveLength(5);
-    expect(manimExampleCatalog.filter((item) => item.difficulty === "basic")).toHaveLength(13);
+    expect(manimExampleCatalog.filter((item) => item.difficulty === "basic")).toHaveLength(14);
     expect(manimExampleCatalog.filter((item) => item.difficulty === "intermediate")).toHaveLength(11);
     expect(manimExampleCatalog.filter((item) => item.difficulty === "advanced")).toHaveLength(5);
     expect(manimExampleCatalog.filter((item) => item.difficulty === "practical")).toHaveLength(7);
@@ -418,7 +418,7 @@ describe("Manim examples", () => {
     expect(code).toContain("class BasicShapes(Scene):");
     expect(code).toContain("circle = Circle(radius=1, color=BLUE).shift(LEFT * 3)");
     expect(code).toContain("square = Square(side_length=2, color=GREEN)");
-    expect(code).toContain("triangle = Triangle(color=YELLOW).shift(RIGHT * 3)");
+    expect(code).toContain("triangle = Triangle(radius=(2) / (3 ** 0.5), color=YELLOW).shift(RIGHT * 3)");
     expect(code).toContain("*[Create(circle, run_time=1), Create(square, run_time=1), Create(triangle, run_time=1)]");
   });
 
@@ -483,7 +483,7 @@ describe("Manim examples", () => {
   it("generates a VGroup with arrange and next_to layout", () => {
     const code = generatePython(groupsAndLayoutExample.workspace);
     expect(code).toContain("class GroupsAndLayout(Scene):");
-    expect(code).toContain("VGroup(*[Circle(radius=0.8, color=BLUE), Square(side_length=1.6, color=GREEN), Triangle(color=YELLOW)]).arrange(");
+    expect(code).toContain("VGroup(*[Circle(radius=0.8, color=BLUE), Square(side_length=1.6, color=GREEN), Triangle(radius=(2) / (3 ** 0.5), color=YELLOW)]).arrange(");
     expect(code).toContain("RIGHT,\n        buff=0.75,\n        center=True,");
     expect(code).toContain(".next_to(\n        shapes,\n        UP,\n        buff=0.6,");
   });
@@ -574,6 +574,16 @@ describe("Manim examples", () => {
     expect(code).toContain(".set_fill(");
     expect(code).toContain(".set_stroke(");
     expect(code).toContain(".set_opacity(0.9)");
+  });
+
+  it("generates a complete custom-colour and gradient demonstration", () => {
+    const code = generatePython(colorGradientExample.workspace);
+    expect(code).toContain("class ColorGradientDemo(Scene):");
+    expect(code).toContain('ManimColor("#3A86FF")');
+    expect(code).toContain('set_color([ManimColor("#3A86FF"), ManimColor("#FF006E")])');
+    expect(code).toContain('set_color(interpolate_color(ManimColor("#FB5607"), ManimColor("#8338EC"), 0.5))');
+    expect(code).toContain("gradient_circle.animate(run_time=2).set_color([GREEN, PURPLE])");
+    expect(code).toContain('mixed_square.animate(run_time=2).set_color(ManimColor("#FFBE0B"))');
   });
 
   it("generates three distinct growth animations", () => {

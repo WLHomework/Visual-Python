@@ -3,7 +3,16 @@ import type { PluginContext } from "../../../api/types";
 import { colour } from "../constants";
 import { suite, value } from "../helpers";
 import { createVoiceoverEndMarker, createVoiceoverMarker } from "../voiceoverMarkers";
+import { previewVoiceoverBlock } from "../voiceoverBlockPreview";
 import { voiceoverRoleOptions } from "../voiceoverRoles";
+
+const previewAudioIcon = `data:image/svg+xml,${encodeURIComponent([
+  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">',
+  '<path d="M11 5 6 9H2v6h4l5 4Z"/>',
+  '<path d="M15.5 8.5a5 5 0 0 1 0 7"/>',
+  '<path d="M18 6a8 8 0 0 1 0 12"/>',
+  '</svg>',
+].join(""))}`;
 
 export const registerVoiceoverBlocks = (context: PluginContext) => {
   const roleDropdownExtension = "visual_python_manim_voiceover_role_dropdown";
@@ -11,6 +20,13 @@ export const registerVoiceoverBlocks = (context: PluginContext) => {
     Blockly.Extensions.register(roleDropdownExtension, function (this: Blockly.Block) {
       const field = this.getField("ROLE");
       if (field instanceof Blockly.FieldDropdown) field.setOptions(() => voiceoverRoleOptions());
+      this.getInput("TEXT")?.appendField(new Blockly.FieldImage(
+        previewAudioIcon,
+        18,
+        18,
+        "试听或停止此段配音",
+        () => previewVoiceoverBlock(this),
+      ), "VOICEOVER_PREVIEW");
     });
   }
 

@@ -23,6 +23,8 @@ describe("Python error diagnostics", () => {
     expect(diagnosePythonError("FileNotFoundError: [Errno 2] No such file or directory: 'data.txt'").suggestion).toContain("data.txt");
     expect(diagnosePythonError("AttributeError: 'list' object has no attribute 'push'").suggestion).toContain("push");
     expect(diagnosePythonError("ZeroDivisionError: division by zero").suggestion).toContain("除数不能为 0");
+    expect(diagnosePythonError("IsADirectoryError: [Errno 21] Is a directory: 'data'").suggestion).toContain("需要文件路径");
+    expect(diagnosePythonError("OSError: [Errno 39] Directory not empty: 'data'").suggestion).toContain("连同全部内容");
   });
 
   it("diagnoses common syntax placement errors", () => {

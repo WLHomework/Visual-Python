@@ -1,16 +1,16 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions } from "../constants";
+import { colour } from "../constants";
 import { addManimImport, pythonCall, value } from "../helpers";
 
 export const registerPrismTorusBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_prism_object",
-    message0: "棱柱 Prism 尺寸 %1 不透明度 %2 颜色 %3",
+    message0: "棱柱 尺寸 %1 不透明度 %2 颜色 %3",
     args0: [
-      { type: "input_value", name: "DIMENSIONS" },
+      { type: "input_value", name: "DIMENSIONS", check: "ManimDimensions" },
       { type: "input_value", name: "FILL_OPACITY", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -25,12 +25,12 @@ export const registerPrismTorusBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_torus_object",
-    message0: "圆环面 Torus 主半径 %1 管半径 %2 不透明度 %3 颜色 %4",
+    message0: "圆环面 主半径 %1 管半径 %2 不透明度 %3 颜色 %4",
     args0: [
       { type: "input_value", name: "MAJOR_RADIUS", check: "Number" },
       { type: "input_value", name: "MINOR_RADIUS", check: "Number" },
       { type: "input_value", name: "FILL_OPACITY", check: "Number" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

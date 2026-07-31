@@ -6,6 +6,8 @@ export type AiModelConfig = {
   model: string;
 };
 
+export type AiAgentPermissionMode = "auto" | "confirm";
+
 export type AiChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
@@ -42,7 +44,7 @@ export type AiChatCompletionResult = {
 
 type AiChatStreamEvent = {
   requestId: string;
-  channel?: "content" | "toolArguments";
+  channel?: "content" | "reasoning" | "toolArguments";
   delta: string;
   toolIndex?: number;
   toolName?: string;
@@ -55,6 +57,7 @@ export type AiToolCallStreamDelta = {
 };
 
 const storageKey = "visual-python:ai-model-config";
+const permissionModeStorageKey = "visual-python:ai-agent-permission-mode";
 
 export const defaultAiModelConfig: AiModelConfig = {
   baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -82,6 +85,20 @@ export function getAiModelConfig(): AiModelConfig {
 export function saveAiModelConfig(config: AiModelConfig): AiModelConfig {
   const normalized = normalizeAiModelConfig(config);
   localStorage.setItem(storageKey, JSON.stringify(normalized));
+  return normalized;
+}
+
+export function getAiAgentPermissionMode(): AiAgentPermissionMode {
+  try {
+    return localStorage.getItem(permissionModeStorageKey) === "confirm" ? "confirm" : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+export function saveAiAgentPermissionMode(mode: AiAgentPermissionMode): AiAgentPermissionMode {
+  const normalized = mode === "confirm" ? "confirm" : "auto";
+  localStorage.setItem(permissionModeStorageKey, normalized);
   return normalized;
 }
 
@@ -113,7 +130,7 @@ let streamRequestSequence = 1;
 export async function streamAiChat(
   messages: AiChatMessage[],
   onDelta: (delta: string) => void,
-  options: { maxTokens?: number; signal?: AbortSignal; tools?: AiChatToolDefinition[]; onToolCallDelta?: (delta: AiToolCallStreamDelta) => void } = {},
+  options: { maxTokens?: number; signal?: AbortSignal; tools?: AiChatToolDefinition[]; onReasoningDelta?: (delta: string) => void; onToolCallDelta?: (delta: AiToolCallStreamDelta) => void } = {},
 ): Promise<AiChatCompletionResult> {
   const requestId = `${Date.now().toString(36)}-${streamRequestSequence++}`;
   if (options.signal?.aborted) throw new Error("已停止生成");
@@ -121,6 +138,10 @@ export async function streamAiChat(
     if (event.payload.requestId !== requestId || !event.payload.delta) return;
     if (event.payload.channel === "toolArguments") {
       options.onToolCallDelta?.({ index: event.payload.toolIndex ?? 0, name: event.payload.toolName, delta: event.payload.delta });
+      return;
+    }
+    if (event.payload.channel === "reasoning") {
+      options.onReasoningDelta?.(event.payload.delta);
       return;
     }
     onDelta(event.payload.delta);

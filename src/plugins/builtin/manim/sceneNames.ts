@@ -1,4 +1,8 @@
-export const extractManimSceneNames = (source: string) => [...source.matchAll(/class\s+([A-Za-z_]\w*)\s*\(\s*(?:Scene|MovingCameraScene|ThreeDScene|SpecialThreeDScene)\s*\)/g)]
+import { pythonIdentifierSource } from "../../../pythonIdentifiers";
+
+const manimScenePattern = new RegExp(`class\\s+(${pythonIdentifierSource})\\s*\\(\\s*(?:Scene|MovingCameraScene|ThreeDScene|SpecialThreeDScene)\\s*\\)`, "gu");
+
+export const extractManimSceneNames = (source: string) => [...source.matchAll(manimScenePattern)]
   .map((match) => match[1])
   .filter((name, index, names) => names.indexOf(name) === index);
 

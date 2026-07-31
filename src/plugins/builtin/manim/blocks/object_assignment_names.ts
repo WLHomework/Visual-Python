@@ -75,6 +75,16 @@ const inferManimObjectVariableName = (block: Blockly.Block | null) => {
     visual_python_manim_angle: "angle",
     visual_python_manim_right_angle: "right_angle",
     visual_python_manim_determinant_object: "determinant",
+    visual_python_manim_value_tracker: "tracker",
+    visual_python_manim_decimal_number: "number",
+    visual_python_manim_variable: "variable",
+    visual_python_manim_decimal_follow_tracker: "counter",
+    visual_python_manim_always_redraw: "dynamic_object",
+    visual_python_manim_traced_path: "traced_path",
+    visual_python_manim_axes_plot: "graph",
+    visual_python_manim_axis_labels: "labels",
+    visual_python_manim_axes_area: "area",
+    visual_python_manim_parametric_surface: "surface",
   };
   const fieldName = fieldNameByBlockType[block.type];
   if (fieldName) return classNameToVariableName(String(block.getFieldValue(fieldName) || "obj"));

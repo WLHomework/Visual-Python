@@ -9,7 +9,7 @@ export const registerPositionMethodBlocks = (context: PluginContext) => {
     message0: "对象 %1 移动到 %2",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "POINT" },
+      { type: "input_value", name: "POINT", check: ["ManimVector", "Number"] },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -24,7 +24,7 @@ export const registerPositionMethodBlocks = (context: PluginContext) => {
     message0: "对象 %1 相对移动 %2",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "VECTOR" },
+      { type: "input_value", name: "VECTOR", check: ["ManimVector", "Number"] },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -54,7 +54,7 @@ export const registerPositionMethodBlocks = (context: PluginContext) => {
     message0: "对象 %1 旋转角度 %2",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "ANGLE" },
+      { type: "input_value", name: "ANGLE", check: ["ManimAngle", "Number"] },
     ],
     inputsInline: true,
     output: "ManimObject",
@@ -69,7 +69,7 @@ export const registerPositionMethodBlocks = (context: PluginContext) => {
     message0: "对象 %1 移到边缘 %2 间距 %3",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "BUFF", check: "Number" },
     ],
     inputsInline: true,
@@ -87,7 +87,7 @@ export const registerPositionMethodBlocks = (context: PluginContext) => {
     message0: "对象 %1 移到角落 %2 间距 %3",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "BUFF", check: "Number" },
     ],
     inputsInline: true,
@@ -106,7 +106,7 @@ export const registerPositionMethodBlocks = (context: PluginContext) => {
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
       { type: "input_value", name: "TARGET", check: "ManimObject" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "BUFF", check: "Number" },
     ],
     inputsInline: true,
@@ -126,7 +126,7 @@ export const registerPositionMethodBlocks = (context: PluginContext) => {
     message0: "群组 %1 沿 %2 排列 间距 %3 居中 %4",
     args0: [
       { type: "input_value", name: "MOBJECT", check: "ManimObject" },
-      { type: "input_value", name: "DIRECTION" },
+      { type: "input_value", name: "DIRECTION", check: ["ManimVector", "Number"] },
       { type: "input_value", name: "BUFF", check: "Number" },
       { type: "field_checkbox", name: "CENTER", checked: true },
     ],

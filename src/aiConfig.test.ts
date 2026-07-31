@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultAiModelConfig, getAiModelConfig, normalizeAiModelConfig, saveAiModelConfig } from "./aiConfig";
+import { defaultAiModelConfig, getAiAgentPermissionMode, getAiModelConfig, normalizeAiModelConfig, saveAiAgentPermissionMode, saveAiModelConfig } from "./aiConfig";
 
 describe("AI model configuration", () => {
   beforeEach(() => {
@@ -23,5 +23,13 @@ describe("AI model configuration", () => {
   it("recovers from malformed stored configuration", () => {
     vi.mocked(localStorage.getItem).mockReturnValue("not-json");
     expect(getAiModelConfig()).toEqual(defaultAiModelConfig);
+  });
+
+  it("persists the Agent permission mode with autonomous execution as the default", () => {
+    expect(getAiAgentPermissionMode()).toBe("auto");
+    expect(saveAiAgentPermissionMode("confirm")).toBe("confirm");
+    expect(localStorage.setItem).toHaveBeenCalledWith("visual-python:ai-agent-permission-mode", "confirm");
+    vi.mocked(localStorage.getItem).mockReturnValue("confirm");
+    expect(getAiAgentPermissionMode()).toBe("confirm");
   });
 });

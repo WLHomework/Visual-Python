@@ -1,16 +1,16 @@
 import { Order } from "blockly/python";
 import type { PluginContext } from "../../../api/types";
-import { colour, colorOptions, threeDObjectArgumentDefaults, threeDObjectOptions } from "../constants";
+import { colour, threeDObjectArgumentDefaults, threeDObjectOptions } from "../constants";
 import { addManimImport, joinArguments, value } from "../helpers";
 
 export const registerGenericThreeDObjectBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_3d_object",
-    message0: "3D 对象 %1 参数 %2 颜色 %3",
+    message0: "三维对象 %1 参数 %2 颜色 %3",
     args0: [
       { type: "field_dropdown", name: "OBJECT", options: threeDObjectOptions },
       { type: "input_value", name: "ARG" },
-      { type: "field_dropdown", name: "COLOR", options: colorOptions },
+      { type: "field_manim_color", name: "COLOR" },
     ],
     inputsInline: true,
     output: "ManimObject",

@@ -6,7 +6,7 @@ import { addManimImport, value } from "../helpers";
 export const registerSceneCameraBlocks = (context: PluginContext) => {
   context.registerBlock({
     type: "visual_python_manim_camera_frame_animation",
-    message0: "camera frame target %1 scale %2 time %3",
+    message0: "相机画面 聚焦对象 %1 缩放 %2 时间 %3",
     args0: [
       { type: "input_value", name: "TARGET", check: "ManimObject" },
       { type: "input_value", name: "SCALE", check: "Number" },
@@ -25,10 +25,10 @@ export const registerSceneCameraBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_3d_camera_orientation",
-    message0: "3D 视角 phi %1 theta %2 distance %3",
+    message0: "三维视角 垂直角 %1 水平角 %2 距离 %3",
     args0: [
-      { type: "input_value", name: "PHI" },
-      { type: "input_value", name: "THETA" },
+      { type: "input_value", name: "PHI", check: ["ManimAngle", "Number"] },
+      { type: "input_value", name: "THETA", check: ["ManimAngle", "Number"] },
       { type: "input_value", name: "DISTANCE", check: "Number" },
     ],
     inputsInline: true,
@@ -45,10 +45,10 @@ export const registerSceneCameraBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_3d_move_camera",
-    message0: "3D 移动相机 phi %1 theta %2 distance %3 时间 %4",
+    message0: "移动三维相机 垂直角 %1 水平角 %2 距离 %3 时间 %4",
     args0: [
-      { type: "input_value", name: "PHI" },
-      { type: "input_value", name: "THETA" },
+      { type: "input_value", name: "PHI", check: ["ManimAngle", "Number"] },
+      { type: "input_value", name: "THETA", check: ["ManimAngle", "Number"] },
       { type: "input_value", name: "DISTANCE", check: "Number" },
       { type: "input_value", name: "RUN_TIME", check: "Number" },
     ],
@@ -67,7 +67,7 @@ export const registerSceneCameraBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_3d_ambient_rotation",
-    message0: "3D 相机旋转 %1 速度 %2",
+    message0: "三维相机旋转 %1 速度 %2",
     args0: [
       { type: "field_dropdown", name: "ACTION", options: [["开始", "begin"], ["停止", "stop"]] },
       { type: "input_value", name: "RATE", check: "Number" },

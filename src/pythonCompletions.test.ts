@@ -72,8 +72,22 @@ def calculate(value: float, count=1, *, mode="fast"):
       { lineNumber: 4, startColumn: 12, endColumn: 17 },
     ]);
     expect(isValidPythonIdentifier("final_total")).toBe(true);
+    expect(isValidPythonIdentifier("最终结果")).toBe(true);
     expect(isValidPythonIdentifier("for")).toBe(false);
     expect(isValidPythonIdentifier("2total")).toBe(false);
+  });
+
+  it("recognizes Chinese functions, classes and variables", () => {
+    const source = "结果 = 1\n\ndef 计算面积(半径):\n    return 半径 * 半径\n\nclass 动画场景:\n    pass\n";
+    const symbols = collectPythonDocumentSymbols(source);
+    expect(symbols.find((item) => item.label === "结果")?.kind).toBe("variable");
+    expect(symbols.find((item) => item.label === "计算面积")?.signature).toBe("计算面积(半径)");
+    expect(symbols.find((item) => item.label === "动画场景")?.kind).toBe("class");
+    expect(findPythonCallContext("计算面积(")).toEqual({ name: "计算面积", activeParameter: 0 });
+    expect(findPythonIdentifierOccurrences("结果 = 1\nprint(结果)", "结果")).toEqual([
+      { lineNumber: 1, startColumn: 1, endColumn: 3 },
+      { lineNumber: 2, startColumn: 7, endColumn: 9 },
+    ]);
   });
 
   it("orders functions and classes by their source positions", () => {

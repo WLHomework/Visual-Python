@@ -1,6 +1,6 @@
 import type { PluginContext } from "../../api/types";
 import { colour, manimBlockColours } from "./constants";
-import { animationListShadow, category, degreesShadow, directionShadow, dynamicMatrixDataShadow, dynamicTableDataShadow, expressionShadow, formulaShadow, manimObjectListShadow, numberShadow, pointShadow, polygonVertexListShadow, rangeMinMaxShadow, rangeShadow, textShadow, toolboxBlock } from "./helpers";
+import { animationListShadow, category, degreesShadow, directionShadow, dynamicMatrixDataShadow, dynamicTableDataShadow, formulaShadow, manimAxesShadow, manimCircleShadow, manimCreateAnimationShadow, manimDimensionsBlock, manimFunctionPresetBlock, manimLineShadow, manimObjectListShadow, manimSquareShadow, manimSurfaceFunctionPresetBlock, manimTrackerShadow, numberShadow, pointList3Inputs, pointShadow, polygonVertexListShadow, rangeMinMaxShadow, rangeShadow, textShadow, toolboxBlock } from "./helpers";
 
 const colouredCategory = (categoryColour: string) => (name: string, contents: Array<Record<string, unknown>>) => category(name, contents, categoryColour);
 const sceneCategory = colouredCategory(manimBlockColours.scene);
@@ -26,13 +26,509 @@ export const hiddenCompatibilityBlockTypes = [
   "visual_python_manim_transform_method",
 ] as const;
 
+const tableShadow = () => ({
+  block: {
+    type: "visual_python_manim_table_object",
+    fields: { OBJECT: "Table" },
+    inputs: { DATA: dynamicTableDataShadow() },
+  },
+});
+
+const fadeInAnimationShadow = () => ({
+  block: {
+    type: "visual_python_manim_fade_in_animation",
+    inputs: {
+      MOBJECT: manimSquareShadow(),
+      SHIFT: directionShadow("ORIGIN"),
+      SCALE: numberShadow(1),
+      RUN_TIME: numberShadow(1),
+    },
+  },
+});
+
+const objectReferenceBlock = (name: string) => ({
+  block: { type: "visual_python_manim_object_ref", fields: { VAR: name } },
+});
+
+const manimToolboxValueDefaults: Record<string, Record<string, unknown>> = {
+  visual_python_manim_add: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_add_two: { FIRST: objectReferenceBlock("first"), SECOND: objectReferenceBlock("second") },
+  visual_python_manim_always_redraw: { MOBJECT: manimCircleShadow() },
+  visual_python_manim_angle: { LINE1: objectReferenceBlock("line1"), LINE2: objectReferenceBlock("line2") },
+  visual_python_manim_animate_move_to: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_animate_rotate: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_animate_scale: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_animate_set_color: { MOBJECT: objectReferenceBlock("obj"), RUN_TIME: numberShadow(1) },
+  visual_python_manim_animate_set_color_gradient: { MOBJECT: objectReferenceBlock("obj"), RUN_TIME: numberShadow(1) },
+  visual_python_manim_animate_set_color_blend: { MOBJECT: objectReferenceBlock("obj"), RATIO: numberShadow(0.5), RUN_TIME: numberShadow(1) },
+  visual_python_manim_animate_shift: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_apply_matrix: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_apply_wave_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_arrange: { MOBJECT: objectReferenceBlock("group") },
+  visual_python_manim_assign: { MOBJECT: manimCircleShadow() },
+  visual_python_manim_assign_add: { MOBJECT: manimCircleShadow() },
+  visual_python_manim_axes_area: { AXES: objectReferenceBlock("axes"), GRAPH: objectReferenceBlock("graph") },
+  visual_python_manim_axes_c2p: { AXES: objectReferenceBlock("axes") },
+  visual_python_manim_axes_p2c: { AXES: objectReferenceBlock("axes") },
+  visual_python_manim_axes_plot: { AXES: objectReferenceBlock("axes") },
+  visual_python_manim_axis_labels: { AXES: objectReferenceBlock("axes") },
+  visual_python_manim_brace: { TARGET: objectReferenceBlock("obj") },
+  visual_python_manim_brace_label: { TARGET: objectReferenceBlock("obj") },
+  visual_python_manim_camera_frame_animation: { TARGET: objectReferenceBlock("obj") },
+  visual_python_manim_circumscribe_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_clear_updaters: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_create_object_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_decimal_follow_tracker: { TRACKER: manimTrackerShadow() },
+  visual_python_manim_draw_border_then_fill_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_fade_in_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_fade_out_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_fade_transform_animation: { SOURCE: manimCircleShadow(), TARGET: manimSquareShadow() },
+  visual_python_manim_follow_target_updater: { MOBJECT: objectReferenceBlock("obj"), TARGET: objectReferenceBlock("target") },
+  visual_python_manim_group_object: { FIRST: manimCircleShadow(), SECOND: manimSquareShadow() },
+  visual_python_manim_grow_arrow_animation: { ARROW: objectReferenceBlock("arrow") },
+  visual_python_manim_grow_from_center_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_grow_from_edge_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_grow_from_point_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_indicate_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_matrix_data_2x2: {
+    A: numberShadow(1), B: numberShadow(2), C: numberShadow(3), D: numberShadow(4),
+  },
+  visual_python_manim_move_to: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_next_to: { MOBJECT: objectReferenceBlock("obj"), TARGET: objectReferenceBlock("target") },
+  visual_python_manim_play: { ANIMATION: manimCreateAnimationShadow() },
+  visual_python_manim_play_two: { FIRST: manimCreateAnimationShadow(), SECOND: fadeInAnimationShadow() },
+  visual_python_manim_play_with_options: { ANIMATION: manimCreateAnimationShadow() },
+  visual_python_manim_point_list_3: pointList3Inputs(),
+  visual_python_manim_remove: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_remove_two: { FIRST: objectReferenceBlock("first"), SECOND: objectReferenceBlock("second") },
+  visual_python_manim_replacement_transform_animation: { SOURCE: manimCircleShadow(), TARGET: manimSquareShadow() },
+  visual_python_manim_right_angle: { LINE1: objectReferenceBlock("line1"), LINE2: objectReferenceBlock("line2") },
+  visual_python_manim_rotate: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_scale: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_set_color: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_set_color_gradient: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_set_color_gradient_three: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_set_color_blend: { MOBJECT: objectReferenceBlock("obj"), RATIO: numberShadow(0.5) },
+  visual_python_manim_set_fill: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_set_opacity: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_set_stroke: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_shift: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_show_passing_flash_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_shrink_to_center_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_spin_in_from_nothing_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_surrounding_rectangle: { TARGET: objectReferenceBlock("obj") },
+  visual_python_manim_table_data_2x2: {
+    A: textShadow("A"), B: textShadow("B"), C: textShadow("C"), D: textShadow("D"),
+  },
+  visual_python_manim_table_highlight_cell: { TABLE: tableShadow() },
+  visual_python_manim_to_corner: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_to_edge: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_traced_path: { TARGET: objectReferenceBlock("obj") },
+  visual_python_manim_tracker_get_value: { TRACKER: manimTrackerShadow() },
+  visual_python_manim_tracker_set_value_animation: { TRACKER: manimTrackerShadow() },
+  visual_python_manim_transform_from_copy_animation: { SOURCE: manimCircleShadow(), TARGET: manimSquareShadow() },
+  visual_python_manim_transform_to_animation: { SOURCE: manimCircleShadow(), TARGET: manimSquareShadow() },
+  visual_python_manim_uncreate_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_unwrite_animation: { MOBJECT: objectReferenceBlock("text") },
+  visual_python_manim_wiggle_animation: { MOBJECT: objectReferenceBlock("obj") },
+  visual_python_manim_write_animation: { MOBJECT: objectReferenceBlock("text") },
+};
+
+const withManimToolboxDefaults = (contents: Array<Record<string, any>>): Array<Record<string, any>> =>
+  contents.map((item) => {
+    if (item.kind === "category") {
+      return { ...item, contents: withManimToolboxDefaults(item.contents ?? []) };
+    }
+    if (item.kind !== "block") return item;
+    const defaults = manimToolboxValueDefaults[item.type];
+    return defaults ? { ...item, inputs: { ...defaults, ...(item.inputs ?? {}) } } : item;
+  });
+
+const starterSceneBlock = {
+  kind: "block",
+  type: "visual_python_manim_scene",
+  fields: { NAME: "MainScene", SCENE_TYPE: "Scene" },
+  inputs: {
+    BODY: {
+      block: {
+        type: "visual_python_manim_assign",
+        fields: { VAR: "circle" },
+        inputs: { MOBJECT: manimCircleShadow("BLUE", 2) },
+        next: {
+          block: {
+            type: "visual_python_manim_play",
+            inputs: {
+              ANIMATION: {
+                block: {
+                  type: "visual_python_manim_create_object_animation",
+                  inputs: {
+                    MOBJECT: { block: { type: "visual_python_manim_object_ref", fields: { VAR: "circle" } } },
+                    RUN_TIME: numberShadow(1),
+                  },
+                },
+              },
+            },
+            next: { block: { type: "visual_python_manim_wait", inputs: { SECONDS: numberShadow(1) } } },
+          },
+        },
+      },
+    },
+  },
+};
+
+const dynamicTrackerSceneBlock = {
+  kind: "block",
+  type: "visual_python_manim_scene",
+  fields: { NAME: "DynamicScene", SCENE_TYPE: "Scene" },
+  inputs: {
+    BODY: {
+      block: {
+        type: "visual_python_manim_assign",
+        fields: { VAR: "tracker" },
+        inputs: { MOBJECT: manimTrackerShadow() },
+        next: {
+          block: {
+            type: "visual_python_manim_assign_add",
+            fields: { VAR: "counter" },
+            inputs: {
+              MOBJECT: {
+                block: {
+                  type: "visual_python_manim_decimal_follow_tracker",
+                  inputs: { TRACKER: objectReferenceBlock("tracker"), PLACES: numberShadow(1) },
+                },
+              },
+            },
+            next: {
+              block: {
+                type: "visual_python_manim_play",
+                inputs: {
+                  ANIMATION: {
+                    block: {
+                      type: "visual_python_manim_tracker_set_value_animation",
+                      inputs: { TRACKER: objectReferenceBlock("tracker"), VALUE: numberShadow(10) },
+                    },
+                  },
+                },
+                next: { block: { type: "visual_python_manim_wait", inputs: { SECONDS: numberShadow(1) } } },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const transformSceneBlock = {
+  kind: "block",
+  type: "visual_python_manim_scene",
+  fields: { NAME: "TransformScene", SCENE_TYPE: "Scene" },
+  inputs: {
+    BODY: {
+      block: {
+        type: "visual_python_manim_assign",
+        fields: { VAR: "source" },
+        inputs: { MOBJECT: manimCircleShadow("BLUE", 1) },
+        next: {
+          block: {
+            type: "visual_python_manim_assign",
+            fields: { VAR: "target" },
+            inputs: { MOBJECT: manimSquareShadow("RED", 2) },
+            next: {
+              block: {
+                type: "visual_python_manim_play",
+                inputs: {
+                  ANIMATION: {
+                    block: {
+                      type: "visual_python_manim_create_object_animation",
+                      inputs: { MOBJECT: objectReferenceBlock("source"), RUN_TIME: numberShadow(1) },
+                    },
+                  },
+                },
+                next: {
+                  block: {
+                    type: "visual_python_manim_play",
+                    inputs: {
+                      ANIMATION: {
+                        block: {
+                          type: "visual_python_manim_transform_to_animation",
+                          inputs: {
+                            SOURCE: objectReferenceBlock("source"),
+                            TARGET: objectReferenceBlock("target"),
+                            RUN_TIME: numberShadow(1),
+                          },
+                        },
+                      },
+                    },
+                    next: { block: { type: "visual_python_manim_wait", inputs: { SECONDS: numberShadow(1) } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const chainStatementBlocks = (blocks: Array<Record<string, any>>): Record<string, any> => {
+  const root = blocks.reduceRight<Record<string, any> | null>((next, block) => (
+    next ? { ...block, next: { block: next } } : block
+  ), null);
+  if (!root) throw new Error("Manim toolbox statement chain cannot be empty");
+  return root;
+};
+
+const playAnimationBlock = (animation: Record<string, any>) => ({
+  type: "visual_python_manim_play",
+  inputs: { ANIMATION: { block: animation } },
+});
+
+const createReferencedObjectAnimation = (name: string) => ({
+  type: "visual_python_manim_create_object_animation",
+  inputs: { MOBJECT: objectReferenceBlock(name), RUN_TIME: numberShadow(1) },
+});
+
+const functionGraphSceneBlock = {
+  kind: "block",
+  type: "visual_python_manim_scene",
+  fields: { NAME: "FunctionGraphScene", SCENE_TYPE: "Scene" },
+  inputs: {
+    BODY: {
+      block: chainStatementBlocks([
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "axes" },
+          inputs: { MOBJECT: manimAxesShadow() },
+        },
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "graph" },
+          inputs: {
+            MOBJECT: {
+              block: {
+                type: "visual_python_manim_axes_plot",
+                fields: { COLOR: "YELLOW" },
+                inputs: {
+                  AXES: objectReferenceBlock("axes"),
+                  FUNCTION: manimFunctionPresetBlock("quadratic"),
+                  X_RANGE: rangeMinMaxShadow(-3, 3),
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "area" },
+          inputs: {
+            MOBJECT: {
+              block: {
+                type: "visual_python_manim_axes_area",
+                fields: { COLOR: "BLUE" },
+                inputs: {
+                  AXES: objectReferenceBlock("axes"),
+                  GRAPH: objectReferenceBlock("graph"),
+                  X_RANGE: rangeMinMaxShadow(-2, 2),
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "labels" },
+          inputs: {
+            MOBJECT: {
+              block: {
+                type: "visual_python_manim_axis_labels",
+                inputs: {
+                  AXES: objectReferenceBlock("axes"),
+                  X_LABEL: textShadow("x"),
+                  Y_LABEL: textShadow("y"),
+                },
+              },
+            },
+          },
+        },
+        playAnimationBlock(createReferencedObjectAnimation("axes")),
+        playAnimationBlock(createReferencedObjectAnimation("graph")),
+        playAnimationBlock({
+          type: "visual_python_manim_fade_in_animation",
+          inputs: {
+            MOBJECT: objectReferenceBlock("area"),
+            SHIFT: directionShadow("ORIGIN"),
+            SCALE: numberShadow(1),
+            RUN_TIME: numberShadow(1),
+          },
+        }),
+        playAnimationBlock(createReferencedObjectAnimation("labels")),
+        { type: "visual_python_manim_wait", inputs: { SECONDS: numberShadow(1) } },
+      ]),
+    },
+  },
+};
+
+const tableSceneBlock = {
+  kind: "block",
+  type: "visual_python_manim_scene",
+  fields: { NAME: "TableScene", SCENE_TYPE: "Scene" },
+  inputs: {
+    BODY: {
+      block: chainStatementBlocks([
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "table" },
+          inputs: {
+            MOBJECT: {
+              block: {
+                type: "visual_python_manim_table_object",
+                fields: { OBJECT: "Table" },
+                inputs: { DATA: dynamicTableDataShadow() },
+              },
+            },
+          },
+        },
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "highlighted_table" },
+          inputs: {
+            MOBJECT: {
+              block: {
+                type: "visual_python_manim_table_highlight_cell",
+                fields: { COLOR: "YELLOW" },
+                inputs: {
+                  TABLE: objectReferenceBlock("table"),
+                  ROW: numberShadow(2),
+                  COLUMN: numberShadow(2),
+                },
+              },
+            },
+          },
+        },
+        playAnimationBlock(createReferencedObjectAnimation("highlighted_table")),
+        { type: "visual_python_manim_wait", inputs: { SECONDS: numberShadow(1) } },
+      ]),
+    },
+  },
+};
+
+const groupSceneBlock = {
+  kind: "block",
+  type: "visual_python_manim_scene",
+  fields: { NAME: "GroupScene", SCENE_TYPE: "Scene" },
+  inputs: {
+    BODY: {
+      block: chainStatementBlocks([
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "circle" },
+          inputs: { MOBJECT: manimCircleShadow("BLUE", 1) },
+        },
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "square" },
+          inputs: { MOBJECT: manimSquareShadow("RED", 2) },
+        },
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "group" },
+          inputs: {
+            MOBJECT: {
+              block: {
+                type: "visual_python_manim_arrange",
+                fields: { CENTER: "TRUE" },
+                inputs: {
+                  MOBJECT: {
+                    block: {
+                      type: "visual_python_manim_group_object",
+                      inputs: {
+                        FIRST: objectReferenceBlock("circle"),
+                        SECOND: objectReferenceBlock("square"),
+                      },
+                    },
+                  },
+                  DIRECTION: directionShadow("RIGHT"),
+                  BUFF: numberShadow(0.5),
+                },
+              },
+            },
+          },
+        },
+        playAnimationBlock(createReferencedObjectAnimation("group")),
+        playAnimationBlock({
+          type: "visual_python_manim_animate_shift",
+          inputs: {
+            MOBJECT: objectReferenceBlock("group"),
+            VECTOR: directionShadow("UP"),
+            RUN_TIME: numberShadow(1),
+          },
+        }),
+        { type: "visual_python_manim_wait", inputs: { SECONDS: numberShadow(1) } },
+      ]),
+    },
+  },
+};
+
+const annotationSceneBlock = {
+  kind: "block",
+  type: "visual_python_manim_scene",
+  fields: { NAME: "AnnotationScene", SCENE_TYPE: "Scene" },
+  inputs: {
+    BODY: {
+      block: chainStatementBlocks([
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "horizontal_line" },
+          inputs: { MOBJECT: manimLineShadow("ORIGIN", "RIGHT") },
+        },
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "vertical_line" },
+          inputs: { MOBJECT: manimLineShadow("ORIGIN", "UP") },
+        },
+        {
+          type: "visual_python_manim_assign",
+          fields: { VAR: "angle" },
+          inputs: {
+            MOBJECT: {
+              block: {
+                type: "visual_python_manim_angle",
+                fields: { COLOR: "YELLOW" },
+                inputs: {
+                  LINE1: objectReferenceBlock("horizontal_line"),
+                  LINE2: objectReferenceBlock("vertical_line"),
+                  RADIUS: numberShadow(0.5),
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "visual_python_manim_play_two",
+          inputs: {
+            FIRST: { block: createReferencedObjectAnimation("horizontal_line") },
+            SECOND: { block: createReferencedObjectAnimation("vertical_line") },
+            RUN_TIME: numberShadow(1),
+            LAG_RATIO: numberShadow(0),
+          },
+        },
+        playAnimationBlock(createReferencedObjectAnimation("angle")),
+        { type: "visual_python_manim_wait", inputs: { SECONDS: numberShadow(1) } },
+      ]),
+    },
+  },
+};
+
 export const registerManimToolbox = (context: PluginContext) => {
   context.registerToolboxCategory({
     id: "visual-python.manim.toolbox",
     name: "Manim",
     colour,
-    contents: [
+    contents: withManimToolboxDefaults([
       category("常用", [
+        starterSceneBlock,
         toolboxBlock("visual_python_manim_scene"),
         toolboxBlock("visual_python_manim_plain_text_object", {
           CONTENT: textShadow("你好"),
@@ -76,7 +572,11 @@ export const registerManimToolbox = (context: PluginContext) => {
           SCALE: numberShadow(1),
           RUN_TIME: numberShadow(1),
         }),
-        toolboxBlock("visual_python_manim_transform_to_animation", { RUN_TIME: numberShadow(1) }),
+        toolboxBlock("visual_python_manim_transform_to_animation", {
+          SOURCE: objectReferenceBlock("source"),
+          TARGET: objectReferenceBlock("target"),
+          RUN_TIME: numberShadow(1),
+        }),
         toolboxBlock("visual_python_manim_animate_shift", {
           VECTOR: directionShadow("RIGHT"),
           RUN_TIME: numberShadow(1),
@@ -170,7 +670,7 @@ export const registerManimToolbox = (context: PluginContext) => {
             POINT: pointShadow(0, 0, 0),
             RADIUS: numberShadow(0.08),
           }),
-          toolboxBlock("visual_python_manim_triangle_object"),
+          toolboxBlock("visual_python_manim_triangle_object", { SIDE_LENGTH: numberShadow(2) }),
           toolboxBlock("visual_python_manim_regular_polygon_object", {
             N: numberShadow(6),
             RADIUS: numberShadow(1),
@@ -260,8 +760,9 @@ export const registerManimToolbox = (context: PluginContext) => {
           }),
         ]),
         objectCategory("坐标方法", [
+          functionGraphSceneBlock,
           toolboxBlock("visual_python_manim_axes_plot", {
-            FUNCTION: expressionShadow("lambda x: x**2"),
+            FUNCTION: manimFunctionPresetBlock("quadratic"),
             X_RANGE: rangeMinMaxShadow(-3, 3),
           }),
           toolboxBlock("visual_python_manim_axes_c2p", {
@@ -280,6 +781,7 @@ export const registerManimToolbox = (context: PluginContext) => {
           }),
         ]),
         objectCategory("表格与矩阵", [
+          tableSceneBlock,
           toolboxBlock("visual_python_manim_table_object", {
             DATA: dynamicTableDataShadow(),
           }),
@@ -295,6 +797,7 @@ export const registerManimToolbox = (context: PluginContext) => {
           }),
         ]),
         objectCategory("标注与装饰", [
+          annotationSceneBlock,
           toolboxBlock("visual_python_manim_brace", { DIRECTION: directionShadow("DOWN") }),
           toolboxBlock("visual_python_manim_brace_label", {
             LABEL: textShadow("标注"),
@@ -324,7 +827,7 @@ export const registerManimToolbox = (context: PluginContext) => {
             DIRECTION: directionShadow("OUT"),
           }),
           toolboxBlock("visual_python_manim_prism_object", {
-            DIMENSIONS: expressionShadow("[3, 2, 1]"),
+            DIMENSIONS: manimDimensionsBlock(),
             FILL_OPACITY: numberShadow(0.75),
           }),
           toolboxBlock("visual_python_manim_torus_object", {
@@ -333,7 +836,7 @@ export const registerManimToolbox = (context: PluginContext) => {
             FILL_OPACITY: numberShadow(0.75),
           }),
           toolboxBlock("visual_python_manim_parametric_surface", {
-            FUNCTION: expressionShadow("lambda u, v: np.array([u, v, 0])"),
+            FUNCTION: manimSurfaceFunctionPresetBlock("wave"),
             U_RANGE: rangeMinMaxShadow(-3, 3),
             V_RANGE: rangeMinMaxShadow(-3, 3),
             RESOLUTION: numberShadow(24),
@@ -347,6 +850,7 @@ export const registerManimToolbox = (context: PluginContext) => {
           }),
         ]),
         objectCategory("复用与组合", [
+          groupSceneBlock,
           toolboxBlock("visual_python_manim_group_object"),
           toolboxBlock("visual_python_manim_assign"),
           toolboxBlock("visual_python_manim_assign_add"),
@@ -375,10 +879,27 @@ export const registerManimToolbox = (context: PluginContext) => {
           }),
         ]),
         animationCategory("变换动画", [
-          toolboxBlock("visual_python_manim_transform_to_animation", { RUN_TIME: numberShadow(1) }),
-          toolboxBlock("visual_python_manim_replacement_transform_animation", { RUN_TIME: numberShadow(1) }),
-          toolboxBlock("visual_python_manim_transform_from_copy_animation", { RUN_TIME: numberShadow(1) }),
-          toolboxBlock("visual_python_manim_fade_transform_animation", { RUN_TIME: numberShadow(1) }),
+          transformSceneBlock,
+          toolboxBlock("visual_python_manim_transform_to_animation", {
+            SOURCE: objectReferenceBlock("source"),
+            TARGET: objectReferenceBlock("target"),
+            RUN_TIME: numberShadow(1),
+          }),
+          toolboxBlock("visual_python_manim_replacement_transform_animation", {
+            SOURCE: objectReferenceBlock("source"),
+            TARGET: objectReferenceBlock("target"),
+            RUN_TIME: numberShadow(1),
+          }),
+          toolboxBlock("visual_python_manim_transform_from_copy_animation", {
+            SOURCE: objectReferenceBlock("source"),
+            TARGET: objectReferenceBlock("target"),
+            RUN_TIME: numberShadow(1),
+          }),
+          toolboxBlock("visual_python_manim_fade_transform_animation", {
+            SOURCE: objectReferenceBlock("source"),
+            TARGET: objectReferenceBlock("target"),
+            RUN_TIME: numberShadow(1),
+          }),
         ]),
         animationCategory("属性动画", [
           toolboxBlock("visual_python_manim_animate_shift", {
@@ -395,6 +916,12 @@ export const registerManimToolbox = (context: PluginContext) => {
           }),
           toolboxBlock("visual_python_manim_animate_move_to", {
             POINT: directionShadow("ORIGIN"),
+            RUN_TIME: numberShadow(1),
+          }),
+          toolboxBlock("visual_python_manim_animate_set_color", { RUN_TIME: numberShadow(1) }),
+          toolboxBlock("visual_python_manim_animate_set_color_gradient", { RUN_TIME: numberShadow(1) }),
+          toolboxBlock("visual_python_manim_animate_set_color_blend", {
+            RATIO: numberShadow(0.5),
             RUN_TIME: numberShadow(1),
           }),
         ]),
@@ -426,7 +953,7 @@ export const registerManimToolbox = (context: PluginContext) => {
           }),
           toolboxBlock("visual_python_manim_wiggle_animation", {
             SCALE_VALUE: numberShadow(1.1),
-            ROTATION_ANGLE: expressionShadow("0.01 * TAU"),
+            ROTATION_ANGLE: degreesShadow(4),
             N_WIGGLES: numberShadow(6),
             RUN_TIME: numberShadow(2),
           }),
@@ -444,6 +971,17 @@ export const registerManimToolbox = (context: PluginContext) => {
       ]),
 
       valueCategory("坐标与数学工具", [
+        toolboxBlock("visual_python_manim_function_preset", {
+          AMPLITUDE: numberShadow(1),
+          FREQUENCY: numberShadow(1),
+          OFFSET: numberShadow(0),
+        }),
+        toolboxBlock("visual_python_manim_surface_function_preset", { HEIGHT: numberShadow(0.5) }),
+        toolboxBlock("visual_python_manim_dimensions", {
+          WIDTH: numberShadow(3),
+          HEIGHT: numberShadow(2),
+          DEPTH: numberShadow(1),
+        }),
         toolboxBlock("visual_python_manim_direction_constant"),
         toolboxBlock("visual_python_manim_scaled_direction", { SCALE: numberShadow(2) }),
         toolboxBlock("visual_python_manim_math_constant"),
@@ -483,6 +1021,7 @@ export const registerManimToolbox = (context: PluginContext) => {
       ]),
 
       dynamicCategory("动态绑定", [
+        dynamicTrackerSceneBlock,
         toolboxBlock("visual_python_manim_value_tracker", { VALUE: numberShadow(0) }),
         toolboxBlock("visual_python_manim_decimal_number", {
           VALUE: numberShadow(0),
@@ -492,18 +1031,27 @@ export const registerManimToolbox = (context: PluginContext) => {
           VALUE: numberShadow(0),
           LABEL: textShadow("x"),
         }),
-        toolboxBlock("visual_python_manim_tracker_get_value"),
+        toolboxBlock("visual_python_manim_tracker_get_value", { TRACKER: objectReferenceBlock("tracker") }),
         toolboxBlock("visual_python_manim_always_redraw"),
         toolboxBlock("visual_python_manim_traced_path", { WIDTH: numberShadow(4) }),
-        toolboxBlock("visual_python_manim_decimal_follow_tracker", { PLACES: numberShadow(2) }),
+        toolboxBlock("visual_python_manim_decimal_follow_tracker", {
+          TRACKER: objectReferenceBlock("tracker"),
+          PLACES: numberShadow(2),
+        }),
         toolboxBlock("visual_python_manim_follow_target_updater", { DIRECTION: directionShadow("RIGHT") }),
-        toolboxBlock("visual_python_manim_clear_updaters"),
-        toolboxBlock("visual_python_manim_tracker_set_value_animation", { VALUE: numberShadow(10) }),
+        toolboxBlock("visual_python_manim_clear_updaters", { MOBJECT: objectReferenceBlock("obj") }),
+        toolboxBlock("visual_python_manim_tracker_set_value_animation", {
+          TRACKER: objectReferenceBlock("tracker"),
+          VALUE: numberShadow(10),
+        }),
       ]),
 
       methodCategory("属性与样式", [
         methodCategory("样式设置", [
           toolboxBlock("visual_python_manim_set_color"),
+          toolboxBlock("visual_python_manim_set_color_gradient"),
+          toolboxBlock("visual_python_manim_set_color_gradient_three"),
+          toolboxBlock("visual_python_manim_set_color_blend", { RATIO: numberShadow(0.5) }),
           toolboxBlock("visual_python_manim_set_opacity", { OPACITY: numberShadow(0.5) }),
           toolboxBlock("visual_python_manim_set_fill", { OPACITY: numberShadow(1) }),
           toolboxBlock("visual_python_manim_set_stroke", {
@@ -535,6 +1083,6 @@ export const registerManimToolbox = (context: PluginContext) => {
           toolboxBlock("visual_python_manim_apply_matrix", { MATRIX: dynamicMatrixDataShadow() }),
         ]),
       ]),
-    ],
+    ]),
   });
 };

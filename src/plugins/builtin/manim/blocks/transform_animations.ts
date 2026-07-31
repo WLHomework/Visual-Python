@@ -25,7 +25,7 @@ export const registerTransformAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_transform_to_animation",
-    message0: "变形 Transform 从 %1 到 %2 时间 %3",
+    message0: "变形 从 %1 到 %2 时间 %3",
     args0: [
       { type: "input_value", name: "SOURCE", check: "ManimObject" },
       { type: "input_value", name: "TARGET", check: "ManimObject" },
@@ -44,7 +44,7 @@ export const registerTransformAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_replacement_transform_animation",
-    message0: "替换变形 ReplacementTransform 从 %1 到 %2 时间 %3",
+    message0: "替换变形 从 %1 到 %2 时间 %3",
     args0: [
       { type: "input_value", name: "SOURCE", check: "ManimObject" },
       { type: "input_value", name: "TARGET", check: "ManimObject" },
@@ -63,7 +63,7 @@ export const registerTransformAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_transform_from_copy_animation",
-    message0: "复制变形 TransformFromCopy 从 %1 到 %2 时间 %3",
+    message0: "复制后变形 从 %1 到 %2 时间 %3",
     args0: [
       { type: "input_value", name: "SOURCE", check: "ManimObject" },
       { type: "input_value", name: "TARGET", check: "ManimObject" },
@@ -82,7 +82,7 @@ export const registerTransformAnimationBlocks = (context: PluginContext) => {
 
   context.registerBlock({
     type: "visual_python_manim_fade_transform_animation",
-    message0: "淡化变形 FadeTransform 从 %1 到 %2 时间 %3",
+    message0: "淡化变形 从 %1 到 %2 时间 %3",
     args0: [
       { type: "input_value", name: "SOURCE", check: "ManimObject" },
       { type: "input_value", name: "TARGET", check: "ManimObject" },

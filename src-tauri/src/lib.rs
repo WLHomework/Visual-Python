@@ -29,6 +29,16 @@ struct TtsConfig {
     voice: String,
     speed: f32,
     audio_format: String,
+    #[serde(default)]
+    emotion: String,
+    #[serde(default)]
+    tone: String,
+    #[serde(default)]
+    intonation: String,
+    #[serde(default)]
+    reading_style: String,
+    #[serde(default)]
+    custom_instruction: String,
 }
 
 #[derive(Serialize)]
@@ -39,6 +49,39 @@ struct TtsPreviewResult {
     duration_seconds: f64,
     cached: bool,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoiceCloneResult {
+    voice: String,
+    target_model: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteClonedVoice {
+    voice: String,
+    target_model: String,
+    language: String,
+    created_at: String,
+    modified_at: String,
+}
+
+#[derive(Deserialize)]
+struct BailianUploadPolicy {
+    upload_host: String,
+    upload_dir: String,
+    oss_access_key_id: String,
+    signature: String,
+    policy: String,
+    x_oss_object_acl: String,
+    x_oss_forbid_overwrite: String,
+}
+
+const BAILIAN_VOICE_CLONE_MODEL: &str = "qwen-audio-3.0-tts-plus";
+const BAILIAN_VOICE_ENROLLMENT_MODEL: &str = "voice-enrollment";
+const BAILIAN_PLUS_BUILTIN_VOICES: [&str; 2] = ["longanlingxin", "longanlufeng"];
+const MAX_VOICE_SAMPLE_BYTES: u64 = 10 * 1024 * 1024;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -443,6 +486,16 @@ fn project_assets_path(project: &Path) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
+fn read_project_file(project_path: String) -> Result<String, String> {
+    let path = Path::new(&project_path);
+    validate_project_file_path(path)?;
+    if !path.is_file() {
+        return Err("Visual Python project file does not exist".into());
+    }
+    fs::read_to_string(path).map_err(|error| format!("cannot read Visual Python project: {error}"))
+}
+
+#[tauri::command]
 fn write_project_file(project_path: String, contents: String) -> Result<(), String> {
     replace_file_atomically(Path::new(&project_path), contents.as_bytes())
 }
@@ -779,7 +832,10 @@ struct ManimFinished {
     stopped: bool,
     scene: String,
     work_dir: String,
-    video_path: Option<String>,
+    output_type: String,
+    transparent_background: bool,
+    played_animation_count: Option<u32>,
+    output_path: Option<String>,
     error: Option<String>,
 }
 
@@ -807,10 +863,91 @@ struct OpenProjectEvent {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ManimRenderConfig {
+    #[serde(default = "default_manim_output_type")]
+    output_type: String,
+    #[serde(default)]
+    transparent_background: bool,
+    #[serde(default = "default_manim_image_size_mode")]
+    image_size_mode: String,
+    #[serde(default = "default_manim_image_width")]
+    image_width: u16,
+    #[serde(default = "default_manim_image_height")]
+    image_height: u16,
+    #[serde(default = "default_manim_image_capture_mode")]
+    image_capture_mode: String,
+    #[serde(default = "default_manim_image_animation_step")]
+    image_animation_step: u16,
     quality: String,
     fps: u16,
     renderer: String,
     disable_caching: bool,
+}
+
+fn default_manim_output_type() -> String {
+    "video".into()
+}
+
+fn default_manim_image_size_mode() -> String {
+    "preset".into()
+}
+
+fn default_manim_image_width() -> u16 {
+    1920
+}
+
+fn default_manim_image_height() -> u16 {
+    1080
+}
+
+fn default_manim_image_capture_mode() -> String {
+    "final".into()
+}
+
+fn default_manim_image_animation_step() -> u16 {
+    1
+}
+
+fn manim_output_flags(
+    output_type: &str,
+    renderer: &str,
+    transparent_background: bool,
+) -> Vec<&'static str> {
+    if output_type == "image" {
+        let mut flags = vec!["--save_last_frame"];
+        if transparent_background {
+            flags.push("--transparent");
+        }
+        flags
+    } else if renderer == "opengl" {
+        vec!["--write_to_movie"]
+    } else {
+        Vec::new()
+    }
+}
+
+fn manim_resolution_override(
+    output_type: &str,
+    image_size_mode: &str,
+    image_width: u16,
+    image_height: u16,
+    quality: &str,
+) -> Option<String> {
+    if output_type == "image" && image_size_mode == "custom" {
+        Some(format!("{image_width},{image_height}"))
+    } else if quality == "preview" {
+        Some("640,360".into())
+    } else {
+        None
+    }
+}
+
+fn manim_image_animation_range(
+    output_type: &str,
+    image_capture_mode: &str,
+    image_animation_step: u16,
+) -> Option<String> {
+    (output_type == "image" && image_capture_mode == "animation")
+        .then(|| format!("0,{}", image_animation_step.saturating_sub(1)))
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -888,6 +1025,99 @@ fn bailian_speech_endpoint(base_url: &str) -> String {
     }
 }
 
+fn bailian_api_endpoint(base_url: &str, service_path: &str) -> String {
+    let lower = base_url.to_ascii_lowercase();
+    if let Some(index) = lower.find("/api/v1/") {
+        format!("{}/{}", &base_url[..index + "/api/v1".len()], service_path)
+    } else if lower.ends_with("/api/v1") {
+        format!("{base_url}/{service_path}")
+    } else {
+        format!("{base_url}/api/v1/{service_path}")
+    }
+}
+
+fn bailian_voice_customization_endpoint(base_url: &str) -> String {
+    bailian_api_endpoint(base_url, "services/audio/tts/customization")
+}
+
+fn bailian_uploads_endpoint(base_url: &str) -> String {
+    bailian_api_endpoint(base_url, "uploads")
+}
+
+fn is_cloned_voice_id(voice: &str) -> bool {
+    !voice.is_empty()
+        && voice.len() <= 160
+        && voice
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn is_bailian_plus_cloned_voice(voice: &str) -> bool {
+    voice.starts_with("qwen-audio-3.0-tts-plus-") && is_cloned_voice_id(voice)
+}
+
+fn voice_sample_mime(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("wav") => Some("audio/wav"),
+        Some("mp3") => Some("audio/mpeg"),
+        Some("m4a") => Some("audio/mp4"),
+        _ => None,
+    }
+}
+
+fn parse_remote_cloned_voices(payload: &Value) -> Vec<RemoteClonedVoice> {
+    payload
+        .get("output")
+        .and_then(|output| output.get("voice_list"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let voice = item
+                .get("voice_id")
+                .or_else(|| item.get("voice"))?
+                .as_str()?
+                .trim();
+            let target_model = item
+                .get("target_model")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or(BAILIAN_VOICE_CLONE_MODEL);
+            if target_model != BAILIAN_VOICE_CLONE_MODEL || !is_bailian_plus_cloned_voice(voice) {
+                return None;
+            }
+            let text = |key: &str| {
+                item.get(key)
+                    .and_then(|value| {
+                        value
+                            .as_str()
+                            .map(str::to_string)
+                            .or_else(|| value.as_i64().map(|number| number.to_string()))
+                    })
+                    .unwrap_or_default()
+            };
+            Some(RemoteClonedVoice {
+                voice: voice.to_string(),
+                target_model: target_model.to_string(),
+                language: item
+                    .get("language_hints")
+                    .and_then(Value::as_array)
+                    .and_then(|values| values.first())
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| text("language")),
+                created_at: text("gmt_create"),
+                modified_at: text("gmt_modified"),
+            })
+        })
+        .collect()
+}
+
 fn tts_speed_instruction(speed: f32) -> Option<&'static str> {
     if speed <= 0.7 {
         Some("请使用很慢且清晰的语速朗读。")
@@ -902,24 +1132,119 @@ fn tts_speed_instruction(speed: f32) -> Option<&'static str> {
     }
 }
 
+fn tts_instruction(config: &TtsConfig) -> Result<Option<String>, String> {
+    let choice = |value: &str, allowed: &[&str], label: &str| {
+        if value.is_empty() || allowed.contains(&value) {
+            Ok(())
+        } else {
+            Err(format!("不支持的配音{label}设置"))
+        }
+    };
+    choice(
+        &config.emotion,
+        &[
+            "auto", "neutral", "calm", "happy", "sad", "excited", "serious", "warm",
+        ],
+        "情感",
+    )?;
+    choice(
+        &config.tone,
+        &[
+            "natural",
+            "friendly",
+            "professional",
+            "firm",
+            "gentle",
+            "lively",
+        ],
+        "语气",
+    )?;
+    choice(
+        &config.intonation,
+        &["natural", "flat", "expressive", "emphatic"],
+        "语调",
+    )?;
+    choice(
+        &config.reading_style,
+        &[
+            "natural",
+            "narration",
+            "teaching",
+            "news",
+            "storytelling",
+            "dialogue",
+            "promotional",
+        ],
+        "朗读风格",
+    )?;
+
+    let custom = config.custom_instruction.trim();
+    if custom.chars().count() > 200 || custom.chars().any(char::is_control) {
+        return Err("自定义表达要求不能超过 200 个字符或包含控制字符".into());
+    }
+
+    let mut sentences = Vec::new();
+    let emotion = match config.emotion.as_str() {
+        "neutral" => Some("请保持中性克制的情绪。"),
+        "calm" => Some("请带着平静从容的情绪。"),
+        "happy" => Some("请带着愉快明朗的情绪。"),
+        "sad" => Some("请带着悲伤低沉的情绪。"),
+        "excited" => Some("请带着激动高昂的情绪。"),
+        "serious" => Some("请带着严肃庄重的情绪。"),
+        "warm" => Some("请带着温暖真诚的情绪。"),
+        _ => None,
+    };
+    let tone = match config.tone.as_str() {
+        "friendly" => Some("请使用亲切友好的语气。"),
+        "professional" => Some("请使用清晰专业的语气。"),
+        "firm" => Some("请使用坚定有力的语气。"),
+        "gentle" => Some("请使用温柔舒缓的语气。"),
+        "lively" => Some("请使用活泼生动的语气。"),
+        _ => None,
+    };
+    let intonation = match config.intonation.as_str() {
+        "flat" => Some("请采用平缓稳定的语调。"),
+        "expressive" => Some("请采用抑扬丰富、富有表现力的语调。"),
+        "emphatic" => Some("请在关键词和重点内容上加强语调。"),
+        _ => None,
+    };
+    let style = match config.reading_style.as_str() {
+        "narration" => Some("请以自然清晰的旁白解说风格朗读。"),
+        "teaching" => Some("请以条理清楚的课程讲解风格朗读。"),
+        "news" => Some("请以准确稳重的新闻播报风格朗读。"),
+        "storytelling" => Some("请以有画面感的故事讲述风格朗读。"),
+        "dialogue" => Some("请以自然鲜活的角色对白风格朗读。"),
+        "promotional" => Some("请以有感染力的宣传介绍风格朗读。"),
+        _ => None,
+    };
+    sentences.extend(
+        [
+            emotion,
+            tone,
+            intonation,
+            style,
+            tts_speed_instruction(config.speed),
+        ]
+        .into_iter()
+        .flatten()
+        .map(str::to_string),
+    );
+    if !custom.is_empty() {
+        let punctuation = custom.ends_with(['。', '！', '？', '.', '!', '?']);
+        sentences.push(if punctuation {
+            custom.to_string()
+        } else {
+            format!("{custom}。")
+        });
+    }
+    Ok((!sentences.is_empty()).then(|| sentences.join("")))
+}
+
 fn is_bailian_voice_compatible(model: &str, voice: &str) -> bool {
     match model {
-        "qwen-audio-3.0-tts-plus" => matches!(voice, "longanlingxin" | "longanlufeng"),
-        "qwen-audio-3.0-tts-flash" => matches!(
-            voice,
-            "longanfengyue"
-                | "longanyuanfei"
-                | "longanlingxi"
-                | "longanxiaoxin"
-                | "longanhuan_v3.6"
-                | "longjielidou_v3.6"
-                | "longpaopao_v3.6"
-                | "longhuohuo_v3.6"
-                | "longchuanshu_v3.6"
-                | "loongmary"
-                | "loongeva_v3.6"
-                | "loongjohn"
-        ),
+        BAILIAN_VOICE_CLONE_MODEL => {
+            BAILIAN_PLUS_BUILTIN_VOICES.contains(&voice) || is_bailian_plus_cloned_voice(voice)
+        }
         _ => false,
     }
 }
@@ -961,6 +1286,18 @@ fn tts_error_body(body: &str) -> String {
     compact.chars().take(500).collect()
 }
 
+fn voice_clone_error_body(body: &str) -> String {
+    let payload = serde_json::from_str::<Value>(body).ok();
+    match payload
+        .as_ref()
+        .and_then(|value| value.get("code"))
+        .and_then(Value::as_str)
+    {
+        Some("Audio.AudioShortError") => "声音样本中的有效人声不足。请录制 12-20 秒，至少持续清晰说话 10 秒，减少开头和中间的停顿后重试。".into(),
+        _ => tts_error_body(body),
+    }
+}
+
 fn tts_cache_key(config: &TtsConfig, text: &str, format: &str) -> String {
     let mut digest = Sha256::new();
     for value in [
@@ -969,6 +1306,11 @@ fn tts_cache_key(config: &TtsConfig, text: &str, format: &str) -> String {
         config.base_url.trim().trim_end_matches('/'),
         config.model.as_str(),
         config.voice.as_str(),
+        config.emotion.as_str(),
+        config.tone.as_str(),
+        config.intonation.as_str(),
+        config.reading_style.as_str(),
+        config.custom_instruction.trim(),
         format,
         text,
     ] {
@@ -1374,6 +1716,15 @@ fn should_disable_ai_thinking(base_url: &str, model: &str) -> bool {
     is_aliyun && (model.starts_with("qwen") || model.starts_with("qwq"))
 }
 
+fn supports_ai_stream_usage(base_url: &str) -> bool {
+    url::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| {
+            host == "api.openai.com" || host == "aliyuncs.com" || host.ends_with(".aliyuncs.com")
+        })
+}
+
 fn sse_event_boundary(buffer: &[u8]) -> Option<(usize, usize)> {
     let lf = buffer.windows(2).position(|window| window == b"\n\n");
     let crlf = buffer.windows(4).position(|window| window == b"\r\n\r\n");
@@ -1518,6 +1869,9 @@ async fn perform_ai_chat_completion(
     if should_disable_ai_thinking(&base_url, model) {
         request_body["enable_thinking"] = Value::Bool(false);
     }
+    if stream_target.is_some() && supports_ai_stream_usage(&base_url) {
+        request_body["stream_options"] = serde_json::json!({ "include_usage": true });
+    }
     if let Some(definitions) = tools {
         request_body["tools"] = Value::Array(definitions);
         request_body["tool_choice"] = Value::String("auto".into());
@@ -1587,8 +1941,23 @@ async fn perform_ai_chat_completion(
                 if let Some(value) = payload.get("model").and_then(Value::as_str) {
                     response_model = value.to_string();
                 }
-                if ai_stream_reasoning_delta(&payload).is_some_and(|value| !value.is_empty()) {
+                if let Some(delta) =
+                    ai_stream_reasoning_delta(&payload).filter(|value| !value.is_empty())
+                {
                     received_reasoning = true;
+                    target
+                        .app
+                        .emit(
+                            "ai-chat-stream",
+                            AiChatStreamEvent {
+                                request_id: target.request_id.clone(),
+                                channel: "reasoning".into(),
+                                delta: delta.to_string(),
+                                tool_index: None,
+                                tool_name: None,
+                            },
+                        )
+                        .map_err(|error| format!("无法发送 AI 思考状态：{error}"))?;
                 }
                 if let Some(value) = ai_stream_finish_reason(&payload) {
                     finish_reason = Some(value.to_string());
@@ -1640,6 +2009,24 @@ async fn perform_ai_chat_completion(
                 }
                 let payload: Value = serde_json::from_str(&data)
                     .map_err(|_| "AI 服务返回了无效的流式 JSON".to_string())?;
+                if let Some(delta) =
+                    ai_stream_reasoning_delta(&payload).filter(|value| !value.is_empty())
+                {
+                    received_reasoning = true;
+                    target
+                        .app
+                        .emit(
+                            "ai-chat-stream",
+                            AiChatStreamEvent {
+                                request_id: target.request_id.clone(),
+                                channel: "reasoning".into(),
+                                delta: delta.to_string(),
+                                tool_index: None,
+                                tool_name: None,
+                            },
+                        )
+                        .map_err(|error| format!("无法发送 AI 思考状态：{error}"))?;
+                }
                 for (tool_index, tool_name, delta) in ai_stream_tool_argument_deltas(&payload) {
                     target
                         .app
@@ -1841,6 +2228,377 @@ fn cancel_ai_chat_stream(
     Ok(())
 }
 
+fn voice_clone_recording_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("无法读取应用数据目录：{error}"))?
+        .join("voice-clone-recordings"))
+}
+
+#[tauri::command]
+fn save_voice_clone_recording(app: AppHandle, audio_base64: String) -> Result<String, String> {
+    if audio_base64.len() > (MAX_VOICE_SAMPLE_BYTES as usize * 4 / 3) + 128 {
+        return Err("录音文件不能超过 10 MB".into());
+    }
+    let encoded = audio_base64
+        .rsplit_once(',')
+        .map(|(_, value)| value)
+        .unwrap_or(audio_base64.as_str());
+    let audio = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("无法读取录音数据：{error}"))?;
+    if audio.is_empty() || audio.len() as u64 > MAX_VOICE_SAMPLE_BYTES {
+        return Err("录音文件需要大于 0 字节且不超过 10 MB".into());
+    }
+    let duration =
+        wav_duration_seconds(&audio).ok_or_else(|| "录音不是有效的 PCM WAV 文件".to_string())?;
+    if !(10.0..=20.5).contains(&duration) {
+        return Err("录音时长需要在 10 到 20 秒之间，并至少包含 10 秒清晰人声".into());
+    }
+    let directory = voice_clone_recording_directory(&app)?;
+    fs::create_dir_all(&directory).map_err(|error| format!("无法创建录音目录：{error}"))?;
+    if let Ok(entries) = fs::read_dir(&directory) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let managed = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("voice-sample-") && name.ends_with(".wav"));
+            if managed {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+    let path = directory.join(format!("voice-sample-{}.wav", transaction_stamp()));
+    fs::write(&path, audio).map_err(|error| format!("无法保存录音：{error}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn delete_voice_clone_recording(app: AppHandle, path: String) -> Result<(), String> {
+    let directory = voice_clone_recording_directory(&app)?;
+    let candidate = PathBuf::from(path);
+    if !candidate.is_file() {
+        return Ok(());
+    }
+    let root = directory
+        .canonicalize()
+        .map_err(|error| format!("无法读取录音目录：{error}"))?;
+    let candidate = candidate
+        .canonicalize()
+        .map_err(|error| format!("无法读取录音文件：{error}"))?;
+    if !candidate.starts_with(&root) {
+        return Err("拒绝删除录音目录之外的文件".into());
+    }
+    fs::remove_file(candidate).map_err(|error| format!("无法删除临时录音：{error}"))
+}
+
+async fn upload_bailian_voice_sample(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    path: &Path,
+    mime: &str,
+    audio: Vec<u8>,
+) -> Result<String, String> {
+    let mut policy_url = url::Url::parse(&bailian_uploads_endpoint(base_url))
+        .map_err(|_| "百炼声音样本上传凭证地址无效".to_string())?;
+    policy_url
+        .query_pairs_mut()
+        .append_pair("action", "getPolicy")
+        .append_pair("model", BAILIAN_VOICE_CLONE_MODEL);
+    let response = client
+        .get(policy_url)
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|error| format!("获取百炼声音样本上传凭证失败：{error}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "获取百炼声音样本上传凭证失败（HTTP {}）：{}",
+            status.as_u16(),
+            tts_error_body(&body)
+        ));
+    }
+    let payload: Value = serde_json::from_str(&body)
+        .map_err(|_| "百炼没有返回有效的声音样本上传凭证".to_string())?;
+    let policy: BailianUploadPolicy = serde_json::from_value(
+        payload
+            .get("data")
+            .cloned()
+            .ok_or_else(|| "百炼声音样本上传凭证中缺少 data".to_string())?,
+    )
+    .map_err(|error| format!("百炼声音样本上传凭证不完整：{error}"))?;
+    let upload_url = url::Url::parse(&policy.upload_host)
+        .map_err(|_| "百炼返回了无效的声音样本上传地址".to_string())?;
+    if upload_url.scheme() != "https"
+        || !upload_url
+            .host_str()
+            .is_some_and(|host| host == "aliyuncs.com" || host.ends_with(".aliyuncs.com"))
+    {
+        return Err("百炼返回了不受信任的声音样本上传地址".into());
+    }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("wav")
+        .to_ascii_lowercase();
+    let file_name = format!("voice-sample-{}.{}", transaction_stamp(), extension);
+    let object_key = format!("{}/{}", policy.upload_dir.trim_matches('/'), file_name);
+    let file_part = reqwest::multipart::Part::bytes(audio)
+        .file_name(file_name)
+        .mime_str(mime)
+        .map_err(|error| format!("无法准备声音样本上传内容：{error}"))?;
+    let form = reqwest::multipart::Form::new()
+        .text("OSSAccessKeyId", policy.oss_access_key_id)
+        .text("Signature", policy.signature)
+        .text("policy", policy.policy)
+        .text("x-oss-object-acl", policy.x_oss_object_acl)
+        .text("x-oss-forbid-overwrite", policy.x_oss_forbid_overwrite)
+        .text("key", object_key.clone())
+        .text("success_action_status", "200")
+        .part("file", file_part);
+    let upload = client
+        .post(upload_url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| format!("上传声音样本到百炼临时存储失败：{error}"))?;
+    if !upload.status().is_success() {
+        let status = upload.status();
+        let body = upload.text().await.unwrap_or_default();
+        return Err(format!(
+            "上传声音样本到百炼临时存储失败（HTTP {}）：{}",
+            status.as_u16(),
+            tts_error_body(&body)
+        ));
+    }
+    Ok(format!("oss://{object_key}"))
+}
+
+#[tauri::command]
+async fn create_cloned_voice(
+    config: TtsConfig,
+    sample_path: String,
+    preferred_name: String,
+    language: String,
+    api_key: Option<String>,
+) -> Result<VoiceCloneResult, String> {
+    if config.provider != "aliyun-bailian" {
+        return Err("声音复刻仅支持阿里百炼配音服务".into());
+    }
+    let base_url = validate_tts_url(&config.base_url)?;
+    let preferred_name = preferred_name.trim();
+    if preferred_name.is_empty()
+        || preferred_name.len() > 9
+        || !preferred_name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+    {
+        return Err("声音复刻标识需要包含 1 到 9 个小写英文字母或数字".into());
+    }
+    let supported_languages = ["zh", "en", "de", "it", "pt", "es", "ja", "ko", "fr", "ru"];
+    if !supported_languages.contains(&language.as_str()) {
+        return Err("不支持所选的样本语言".into());
+    }
+    let path = PathBuf::from(sample_path.trim());
+    let mime = voice_sample_mime(&path)
+        .ok_or_else(|| "声音样本仅支持 WAV、MP3 或 M4A 文件".to_string())?;
+    let metadata = fs::metadata(&path).map_err(|error| format!("无法读取声音样本：{error}"))?;
+    if !metadata.is_file() {
+        return Err("声音样本不是有效文件".into());
+    }
+    if metadata.len() == 0 || metadata.len() > MAX_VOICE_SAMPLE_BYTES {
+        return Err("声音样本需要大于 0 字节且不超过 10 MB".into());
+    }
+    let audio = fs::read(&path).map_err(|error| format!("无法读取声音样本：{error}"))?;
+    if mime == "audio/wav" {
+        let duration = wav_duration_seconds(&audio)
+            .ok_or_else(|| "声音样本不是有效的 PCM WAV 文件".to_string())?;
+        if !(10.0..=20.5).contains(&duration) {
+            return Err("声音样本时长需要在 10 到 20 秒之间".into());
+        }
+    }
+    let supplied_key = api_key
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let key = supplied_key
+        .clone()
+        .or(load_stored_tts_api_key(&config)?)
+        .or_else(|| tts_environment_api_key(&config))
+        .ok_or_else(|| "请先填写 API Key".to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|error| format!("无法创建声音复刻请求：{error}"))?;
+    let sample_url =
+        upload_bailian_voice_sample(&client, &base_url, &key, &path, mime, audio).await?;
+    let input = serde_json::json!({
+        "action": "create_voice",
+        "target_model": BAILIAN_VOICE_CLONE_MODEL,
+        "prefix": preferred_name,
+        "url": sample_url,
+        "language_hints": [language],
+        "max_prompt_audio_length": 20.0,
+    });
+    let response = client
+        .post(bailian_voice_customization_endpoint(&base_url))
+        .bearer_auth(&key)
+        .header("X-DashScope-OssResourceResolve", "enable")
+        .json(&serde_json::json!({ "model": BAILIAN_VOICE_ENROLLMENT_MODEL, "input": input }))
+        .send()
+        .await
+        .map_err(|error| format!("声音复刻请求失败：{error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("无法读取声音复刻响应：{error}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "声音复刻失败（HTTP {}）：{}",
+            status.as_u16(),
+            voice_clone_error_body(&body)
+        ));
+    }
+    let payload: Value =
+        serde_json::from_str(&body).map_err(|_| "百炼没有返回有效的声音复刻响应".to_string())?;
+    let output = payload
+        .get("output")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "声音复刻响应中缺少 output".to_string())?;
+    let voice = output
+        .get("voice_id")
+        .and_then(Value::as_str)
+        .filter(|voice| is_bailian_plus_cloned_voice(voice))
+        .ok_or_else(|| "声音复刻响应中没有有效的音色 ID".to_string())?
+        .to_string();
+    let target_model = output
+        .get("target_model")
+        .and_then(Value::as_str)
+        .unwrap_or(BAILIAN_VOICE_CLONE_MODEL)
+        .to_string();
+    if target_model != BAILIAN_VOICE_CLONE_MODEL {
+        return Err(format!("百炼返回了不兼容的声音复刻模型：{target_model}"));
+    }
+    if let Some(value) = supplied_key {
+        store_tts_api_key(&config, &value)?;
+    }
+    Ok(VoiceCloneResult {
+        voice,
+        target_model,
+    })
+}
+
+#[tauri::command]
+async fn list_cloned_voices(
+    config: TtsConfig,
+    api_key: Option<String>,
+) -> Result<Vec<RemoteClonedVoice>, String> {
+    if config.provider != "aliyun-bailian" {
+        return Err("云端音色仅支持阿里百炼配音服务".into());
+    }
+    let base_url = validate_tts_url(&config.base_url)?;
+    let supplied_key = api_key
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let key = supplied_key
+        .clone()
+        .or(load_stored_tts_api_key(&config)?)
+        .or_else(|| tts_environment_api_key(&config))
+        .ok_or_else(|| "请先填写 API Key".to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|error| format!("无法创建音色查询请求：{error}"))?;
+    let mut voices = Vec::new();
+    for page_index in 0..10 {
+        let response = client
+            .post(bailian_voice_customization_endpoint(&base_url))
+            .bearer_auth(&key)
+            .json(&serde_json::json!({
+                "model": BAILIAN_VOICE_ENROLLMENT_MODEL,
+                "input": { "action": "list_voice", "page_size": 100, "page_index": page_index }
+            }))
+            .send()
+            .await
+            .map_err(|error| format!("查询百炼音色失败：{error}"))?;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(format!(
+                "查询百炼音色失败（HTTP {}）：{}",
+                status.as_u16(),
+                tts_error_body(&body)
+            ));
+        }
+        let payload: Value =
+            serde_json::from_str(&body).map_err(|_| "百炼没有返回有效的音色列表".to_string())?;
+        let page_count = payload
+            .get("output")
+            .and_then(|output| output.get("voice_list"))
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        voices.extend(parse_remote_cloned_voices(&payload));
+        if page_count < 100 {
+            break;
+        }
+    }
+    if let Some(value) = supplied_key {
+        store_tts_api_key(&config, &value)?;
+    }
+    Ok(voices)
+}
+
+#[tauri::command]
+async fn delete_cloned_voice(
+    config: TtsConfig,
+    voice: String,
+    api_key: Option<String>,
+) -> Result<(), String> {
+    if config.provider != "aliyun-bailian" || !is_bailian_plus_cloned_voice(voice.trim()) {
+        return Err("声音复刻音色 ID 无效".into());
+    }
+    let base_url = validate_tts_url(&config.base_url)?;
+    let supplied_key = api_key
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let key = supplied_key
+        .clone()
+        .or(load_stored_tts_api_key(&config)?)
+        .or_else(|| tts_environment_api_key(&config))
+        .ok_or_else(|| "请先填写 API Key".to_string())?;
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|error| format!("无法创建删除音色请求：{error}"))?
+        .post(bailian_voice_customization_endpoint(&base_url))
+        .bearer_auth(&key)
+        .json(&serde_json::json!({
+            "model": BAILIAN_VOICE_ENROLLMENT_MODEL,
+            "input": { "action": "delete_voice", "voice_id": voice.trim() }
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("删除百炼音色失败：{error}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "删除百炼音色失败（HTTP {}）：{}",
+            status.as_u16(),
+            tts_error_body(&body)
+        ));
+    }
+    if let Some(value) = supplied_key {
+        store_tts_api_key(&config, &value)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn synthesize_tts_preview(
     app: AppHandle,
@@ -1862,6 +2620,7 @@ async fn synthesize_tts_preview(
     if !(0.5..=2.0).contains(&config.speed) {
         return Err("配音语速需要在 0.5 到 2.0 之间".into());
     }
+    let instruction = tts_instruction(&config)?;
     let base_url = validate_tts_url(&config.base_url)?;
     let format = if config.audio_format == "mp3" {
         "mp3"
@@ -1938,7 +2697,7 @@ async fn synthesize_tts_preview(
             "format": format,
             "sample_rate": 24000
         });
-        if let Some(instruction) = tts_speed_instruction(config.speed) {
+        if let Some(instruction) = instruction.as_deref() {
             input["instruction"] = Value::String(instruction.into());
         }
         let response = client
@@ -1983,7 +2742,7 @@ async fn synthesize_tts_preview(
     } else if config.provider == "openai-compatible" {
         if uses_openai_chat_audio(&base_url) {
             let mut messages = Vec::new();
-            if let Some(instruction) = tts_speed_instruction(config.speed) {
+            if let Some(instruction) = instruction.as_deref() {
                 messages.push(serde_json::json!({
                     "role": "system",
                     "content": [{ "type": "text", "text": instruction }]
@@ -2837,7 +3596,8 @@ fn emit_manim_reader<R: Read + Send + 'static>(
     task_id: u64,
     stream: &'static str,
     mut reader: R,
-) {
+    captured_output: Arc<Mutex<String>>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut buffer = [0_u8; 1024];
         loop {
@@ -2846,6 +3606,16 @@ fn emit_manim_reader<R: Read + Send + 'static>(
                 Ok(size) => {
                     let data = String::from_utf8_lossy(&buffer[..size]).into_owned();
                     if !data.is_empty() {
+                        if let Ok(mut output) = captured_output.lock() {
+                            output.push_str(&data);
+                            if output.len() > 64_000 {
+                                let mut boundary = output.len() - 64_000;
+                                while !output.is_char_boundary(boundary) {
+                                    boundary += 1;
+                                }
+                                output.drain(..boundary);
+                            }
+                        }
                         let _ = app.emit(
                             "manim-output",
                             ManimOutput {
@@ -2859,24 +3629,39 @@ fn emit_manim_reader<R: Read + Send + 'static>(
                 Err(_) => break,
             }
         }
-    });
+    })
 }
 
-fn find_latest_mp4(root: &Path) -> Option<PathBuf> {
-    fn visit(dir: &Path, latest: &mut Option<(SystemTime, PathBuf)>) {
+fn extract_manim_played_animation_count(output: &str) -> Option<u32> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let rest = line.rsplit_once("Played ")?.1;
+            let (count, suffix) = rest.split_once(char::is_whitespace)?;
+            suffix
+                .trim_start()
+                .starts_with("animation")
+                .then(|| count.parse().ok())
+                .flatten()
+        })
+        .last()
+}
+
+fn find_latest_manim_output(root: &Path, extension: &str) -> Option<PathBuf> {
+    fn visit(dir: &Path, extension: &str, latest: &mut Option<(SystemTime, PathBuf)>) {
         let Ok(entries) = fs::read_dir(dir) else {
             return;
         };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                visit(&path, latest);
+                visit(&path, extension, latest);
                 continue;
             }
             if path
                 .extension()
                 .and_then(|value| value.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"))
+                .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
             {
                 let modified = entry
                     .metadata()
@@ -2892,7 +3677,7 @@ fn find_latest_mp4(root: &Path) -> Option<PathBuf> {
         }
     }
     let mut latest = None;
-    visit(root, &mut latest);
+    visit(root, extension, &mut latest);
     latest.map(|(_, path)| path)
 }
 
@@ -2930,12 +3715,17 @@ fn is_manim_render_entry(path: &Path) -> bool {
 
 const MANIM_OUTPUT_MARKER: &str = ".visual-python-output";
 
-fn sanitize_manim_output_filename(value: Option<&str>, fallback: &str) -> String {
+fn sanitize_manim_output_filename(
+    value: Option<&str>,
+    fallback: &str,
+    output_type: &str,
+) -> String {
     let raw = value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(fallback);
-    let without_extension = if raw.to_ascii_lowercase().ends_with(".mp4") {
+    let lower = raw.to_ascii_lowercase();
+    let without_extension = if lower.ends_with(".mp4") || lower.ends_with(".png") {
         &raw[..raw.len() - 4]
     } else {
         raw
@@ -2987,7 +3777,8 @@ fn sanitize_manim_output_filename(value: Option<&str>, fallback: &str) -> String
     ) {
         sanitized.insert(0, '_');
     }
-    format!("{sanitized}.mp4")
+    let extension = if output_type == "image" { "png" } else { "mp4" };
+    format!("{sanitized}.{extension}")
 }
 
 fn is_safe_manim_output_filename(value: &str) -> bool {
@@ -2996,7 +3787,9 @@ fn is_safe_manim_output_filename(value: &str) -> bool {
         && path
             .extension()
             .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("mp4"))
+            .is_some_and(|extension| {
+                matches!(extension.to_ascii_lowercase().as_str(), "mp4" | "png")
+            })
 }
 
 fn unique_manim_output_path(storage_dir: &Path, requested_name: &str) -> PathBuf {
@@ -3007,9 +3800,13 @@ fn unique_manim_output_path(storage_dir: &Path, requested_name: &str) -> PathBuf
     let stem = Path::new(requested_name)
         .file_stem()
         .and_then(|value| value.to_str())
-        .unwrap_or("video");
+        .unwrap_or("render");
+    let extension = Path::new(requested_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mp4");
     for index in 2_u32.. {
-        let candidate = storage_dir.join(format!("{stem} ({index}).mp4"));
+        let candidate = storage_dir.join(format!("{stem} ({index}).{extension}"));
         if !candidate.exists() {
             return candidate;
         }
@@ -3027,7 +3824,7 @@ fn managed_manim_output_path(storage_dir: &Path, work_dir: &Path) -> Option<Path
     output.is_file().then_some(output)
 }
 
-fn finalize_manim_video(
+fn finalize_manim_output(
     storage_dir: &Path,
     work_dir: &Path,
     source: &Path,
@@ -3035,26 +3832,32 @@ fn finalize_manim_video(
 ) -> Result<PathBuf, String> {
     let destination = unique_manim_output_path(storage_dir, requested_name);
     fs::copy(source, &destination)
-        .map_err(|error| format!("cannot save final Manim video: {error}"))?;
+        .map_err(|error| format!("cannot save final Manim output: {error}"))?;
     let Some(file_name) = destination.file_name().and_then(|name| name.to_str()) else {
         let _ = fs::remove_file(&destination);
-        return Err("cannot determine final Manim video name".into());
+        return Err("cannot determine final Manim output name".into());
     };
     if let Err(error) = fs::write(work_dir.join(MANIM_OUTPUT_MARKER), file_name) {
         let _ = fs::remove_file(&destination);
-        return Err(format!("cannot record final Manim video: {error}"));
+        return Err(format!("cannot record final Manim output: {error}"));
     }
     Ok(destination)
 }
 
-fn finalize_rendered_manim_video(
+fn finalize_rendered_manim_output(
     storage_dir: &Path,
     work_dir: &Path,
     requested_name: &str,
+    output_type: &str,
 ) -> Result<PathBuf, String> {
-    let source = find_latest_mp4(work_dir)
-        .ok_or_else(|| "Manim completed without producing an MP4 video".to_string())?;
-    finalize_manim_video(storage_dir, work_dir, &source, requested_name)
+    let (extension, missing_output_label) = if output_type == "image" {
+        ("png", "a PNG image")
+    } else {
+        ("mp4", "an MP4 video")
+    };
+    let source = find_latest_manim_output(work_dir, extension)
+        .ok_or_else(|| format!("Manim completed without producing {missing_output_label}"))?;
+    finalize_manim_output(storage_dir, work_dir, &source, requested_name)
 }
 
 fn directory_size(path: &Path) -> u64 {
@@ -4104,6 +4907,7 @@ fn start_python(
     code: String,
     timeout_secs: Option<u64>,
     python_path: Option<String>,
+    project_path: Option<String>,
 ) -> Result<u64, String> {
     let mut active = tasks
         .active
@@ -4122,6 +4926,13 @@ fn start_python(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(project_directory) = project_path
+        .as_deref()
+        .and_then(|path| Path::new(path).parent())
+        .filter(|path| path.is_dir())
+    {
+        command.current_dir(project_directory);
+    }
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000);
     let mut child = command
@@ -4230,6 +5041,15 @@ fn stop_python(tasks: State<PythonTasks>, task_id: u64) -> Result<(), String> {
     Ok(())
 }
 
+fn is_valid_manim_scene_name(value: &str) -> bool {
+    let mut characters = value.trim().chars();
+    match characters.next() {
+        Some(character) if character.is_alphabetic() || character == '_' => {}
+        _ => return false,
+    }
+    characters.all(|character| character.is_alphanumeric() || character == '_')
+}
+
 #[tauri::command]
 fn render_manim(
     app: AppHandle,
@@ -4249,14 +5069,7 @@ fn render_manim(
         return Err("已有 Manim 渲染任务正在运行".into());
     }
     let scene_name = scene_name.trim().to_owned();
-    if !scene_name
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
-        || !scene_name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-    {
+    if !is_valid_manim_scene_name(&scene_name) {
         return Err("invalid Manim scene name".into());
     }
     let stamp = SystemTime::now()
@@ -4264,10 +5077,6 @@ fn render_manim(
         .map_err(|error| error.to_string())?
         .as_millis();
     let storage_dir = manim_storage_dir(&app, storage_path.as_deref())?;
-    let requested_output_name = sanitize_manim_output_filename(
-        output_file_name.as_deref(),
-        &format!("{scene_name}-{stamp}"),
-    );
     let work_dir = storage_dir.join(format!("manim-{stamp}"));
     fs::create_dir_all(&work_dir)
         .map_err(|error| format!("cannot create Manim work directory: {error}"))?;
@@ -4276,11 +5085,38 @@ fn render_manim(
         .map_err(|error| format!("cannot write Manim scene file: {error}"))?;
 
     let config = render_config.unwrap_or(ManimRenderConfig {
+        output_type: default_manim_output_type(),
+        transparent_background: false,
+        image_size_mode: default_manim_image_size_mode(),
+        image_width: default_manim_image_width(),
+        image_height: default_manim_image_height(),
+        image_capture_mode: default_manim_image_capture_mode(),
+        image_animation_step: default_manim_image_animation_step(),
         quality: "low".into(),
         fps: 15,
         renderer: "cairo".into(),
         disable_caching: false,
     });
+    if !matches!(config.output_type.as_str(), "video" | "image") {
+        return Err("invalid Manim output type".into());
+    }
+    if !matches!(config.image_size_mode.as_str(), "preset" | "custom") {
+        return Err("invalid Manim image size mode".into());
+    }
+    if !(64..=8192).contains(&config.image_width) || !(64..=8192).contains(&config.image_height) {
+        return Err("invalid Manim image dimensions".into());
+    }
+    if !matches!(config.image_capture_mode.as_str(), "final" | "animation") {
+        return Err("invalid Manim image capture mode".into());
+    }
+    if !(1..=10_000).contains(&config.image_animation_step) {
+        return Err("invalid Manim image animation step".into());
+    }
+    let requested_output_name = sanitize_manim_output_filename(
+        output_file_name.as_deref(),
+        &format!("{scene_name}-{stamp}"),
+        &config.output_type,
+    );
     let quality_flag = match config.quality.as_str() {
         "preview" | "low" => "-ql",
         "medium" => "-qm",
@@ -4311,12 +5147,27 @@ fn render_manim(
         .current_dir(&work_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if config.quality == "preview" {
-        command.args(["--resolution", "640,360"]);
+    if let Some(resolution) = manim_resolution_override(
+        &config.output_type,
+        &config.image_size_mode,
+        config.image_width,
+        config.image_height,
+        &config.quality,
+    ) {
+        command.args(["--resolution", &resolution]);
     }
-    if config.renderer == "opengl" {
-        command.arg("--write_to_movie");
+    if let Some(animation_range) = manim_image_animation_range(
+        &config.output_type,
+        &config.image_capture_mode,
+        config.image_animation_step,
+    ) {
+        command.args(["--from_animation_number", &animation_range]);
     }
+    command.args(manim_output_flags(
+        &config.output_type,
+        &config.renderer,
+        config.transparent_background,
+    ));
     if config.disable_caching {
         command.arg("--disable_caching");
     }
@@ -4333,16 +5184,41 @@ fn render_manim(
         stopped: stopped.clone(),
     });
     drop(active);
-    if let Some(stdout) = child.stdout.take() {
-        emit_manim_reader(app.clone(), task_id, "stdout", stdout);
-    }
-    if let Some(stderr) = child.stderr.take() {
-        emit_manim_reader(app.clone(), task_id, "stderr", stderr);
-    }
+    let captured_output = Arc::new(Mutex::new(String::new()));
+    let stdout_reader = child.stdout.take().map(|stdout| {
+        emit_manim_reader(
+            app.clone(),
+            task_id,
+            "stdout",
+            stdout,
+            captured_output.clone(),
+        )
+    });
+    let stderr_reader = child.stderr.take().map(|stderr| {
+        emit_manim_reader(
+            app.clone(),
+            task_id,
+            "stderr",
+            stderr,
+            captured_output.clone(),
+        )
+    });
     let work_dir_text = work_dir.to_string_lossy().into_owned();
+    let output_type = config.output_type.clone();
+    let transparent_background = config.transparent_background;
     let active_tasks = tasks.active.clone();
     thread::spawn(move || {
         let result = child.wait();
+        if let Some(reader) = stdout_reader {
+            let _ = reader.join();
+        }
+        if let Some(reader) = stderr_reader {
+            let _ = reader.join();
+        }
+        let played_animation_count = captured_output
+            .lock()
+            .ok()
+            .and_then(|output| extract_manim_played_animation_count(&output));
         let stopped_by_user = stopped.load(Ordering::SeqCst);
         if let Ok(mut active) = active_tasks.lock() {
             if active
@@ -4358,8 +5234,13 @@ fn render_manim(
             Ok(status) => (false, Some(format!("Manim exited with status: {status}"))),
             Err(error) => (false, Some(error.to_string())),
         };
-        let video_path = if success {
-            match finalize_rendered_manim_video(&storage_dir, &work_dir, &requested_output_name) {
+        let output_path = if success {
+            match finalize_rendered_manim_output(
+                &storage_dir,
+                &work_dir,
+                &requested_output_name,
+                &output_type,
+            ) {
                 Ok(path) => Some(path.to_string_lossy().into_owned()),
                 Err(finalize_error) => {
                     success = false;
@@ -4378,7 +5259,10 @@ fn render_manim(
                 stopped: stopped_by_user,
                 scene: scene_name,
                 work_dir: work_dir_text,
-                video_path,
+                output_type,
+                transparent_background,
+                played_animation_count,
+                output_path,
                 error,
             },
         );
@@ -4409,14 +5293,14 @@ fn stop_manim_render(tasks: State<ManimTasks>, task_id: Option<u64>) -> Result<(
 
 #[tauri::command]
 fn open_system_video(path: String) -> Result<(), String> {
-    let video_path = PathBuf::from(path);
-    if !video_path.is_file() {
-        return Err("视频文件不存在".into());
+    let output_path = PathBuf::from(path);
+    if !output_path.is_file() {
+        return Err("渲染结果文件不存在".into());
     }
     #[cfg(target_os = "windows")]
     {
         let mut command = Command::new("cmd");
-        command.args(["/C", "start", ""]).arg(&video_path);
+        command.args(["/C", "start", ""]).arg(&output_path);
         command.creation_flags(0x08000000);
         command.spawn().map_err(|error| error.to_string())?;
         return Ok(());
@@ -4424,7 +5308,7 @@ fn open_system_video(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         Command::new("open")
-            .arg(&video_path)
+            .arg(&output_path)
             .spawn()
             .map_err(|error| error.to_string())?;
         return Ok(());
@@ -4432,7 +5316,7 @@ fn open_system_video(path: String) -> Result<(), String> {
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
         Command::new("xdg-open")
-            .arg(&video_path)
+            .arg(&output_path)
             .spawn()
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -4440,15 +5324,43 @@ fn open_system_video(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_manim_guide(app: AppHandle) -> Result<(), String> {
+    let bundled_path = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("无法定位应用资源目录：{error}"))?
+        .join("docs")
+        .join("manim-plugin")
+        .join("README.html");
+    if bundled_path.is_file() {
+        return open_system_video(bundled_path.to_string_lossy().into_owned());
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let development_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("docs")
+            .join("manim-plugin")
+            .join("README.html");
+        if development_path.is_file() {
+            return open_system_video(development_path.to_string_lossy().into_owned());
+        }
+    }
+
+    Err("未找到内置 Manim 使用说明，请重新安装应用或重新生成说明文档。".into())
+}
+
+#[tauri::command]
 fn reveal_video_in_folder(path: String) -> Result<(), String> {
-    let video_path = PathBuf::from(path);
-    if !video_path.is_file() {
-        return Err("视频文件不存在".into());
+    let output_path = PathBuf::from(path);
+    if !output_path.is_file() {
+        return Err("渲染结果文件不存在".into());
     }
     #[cfg(target_os = "windows")]
     {
         let mut command = Command::new("explorer.exe");
-        command.arg(format!("/select,{}", video_path.to_string_lossy()));
+        command.arg(format!("/select,{}", output_path.to_string_lossy()));
         command.creation_flags(0x08000000);
         command.spawn().map_err(|error| error.to_string())?;
         return Ok(());
@@ -4457,14 +5369,14 @@ fn reveal_video_in_folder(path: String) -> Result<(), String> {
     {
         Command::new("open")
             .args(["-R"])
-            .arg(&video_path)
+            .arg(&output_path)
             .spawn()
             .map_err(|error| error.to_string())?;
         return Ok(());
     }
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        let folder = video_path.parent().ok_or("无法定位视频所在文件夹")?;
+        let folder = output_path.parent().ok_or("无法定位渲染结果所在文件夹")?;
         Command::new("xdg-open")
             .arg(folder)
             .spawn()
@@ -4517,6 +5429,7 @@ pub fn run() {
         .manage(AiChatRequests::default())
         .manage(PyrightState::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -4565,6 +5478,7 @@ pub fn run() {
             finish_startup,
             get_startup_project,
             rename_project_file,
+            read_project_file,
             write_project_file,
             save_project_as,
             import_project_audio,
@@ -4600,9 +5514,15 @@ pub fn run() {
             open_tts_cache_folder,
             open_manim_render_folder,
             open_system_video,
+            open_manim_guide,
             reveal_video_in_folder,
             has_tts_api_key,
             clear_tts_api_key,
+            save_voice_clone_recording,
+            delete_voice_clone_recording,
+            create_cloned_voice,
+            list_cloned_voices,
+            delete_cloned_voice,
             synthesize_tts_preview,
             has_ai_api_key,
             clear_ai_api_key,
@@ -4629,6 +5549,14 @@ mod tests {
         assert!(!is_supported_python_version("3.10.14"));
         assert!(!is_supported_python_version("3.15.0a1"));
         assert!(!is_supported_python_version("2.7.18"));
+    }
+
+    #[test]
+    fn accepts_unicode_manim_scene_names() {
+        assert!(is_valid_manim_scene_name("你好Manim"));
+        assert!(is_valid_manim_scene_name("圆形动画"));
+        assert!(!is_valid_manim_scene_name("2D动画"));
+        assert!(!is_valid_manim_scene_name("动画 场景"));
     }
 
     #[test]
@@ -4668,6 +5596,14 @@ mod tests {
             bailian_speech_endpoint("https://workspace.cn-beijing.maas.aliyuncs.com"),
             "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
         );
+        assert_eq!(
+            bailian_voice_customization_endpoint("https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"),
+            "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/customization"
+        );
+        assert_eq!(
+            bailian_uploads_endpoint("https://workspace.cn-beijing.maas.aliyuncs.com/api/v1"),
+            "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/uploads"
+        );
     }
 
     #[test]
@@ -4681,6 +5617,15 @@ mod tests {
             validate_tts_url("https://example.com/").unwrap(),
             "https://example.com"
         );
+    }
+
+    #[test]
+    fn explains_short_voice_clone_samples_without_exposing_provider_json() {
+        let body = r#"{"code":"Audio.AudioShortError","message":"valid audio too short!","request_id":"test"}"#;
+        let message = voice_clone_error_body(body);
+        assert!(message.contains("有效人声不足"));
+        assert!(message.contains("12-20 秒"));
+        assert!(!message.contains("AudioShortError"));
     }
 
     #[test]
@@ -4792,6 +5737,15 @@ mod tests {
     }
 
     #[test]
+    fn requests_stream_usage_only_from_known_compatible_providers() {
+        assert!(supports_ai_stream_usage("https://api.openai.com/v1"));
+        assert!(supports_ai_stream_usage(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        ));
+        assert!(!supports_ai_stream_usage("https://example.com/v1"));
+    }
+
+    #[test]
     fn parses_openai_sse_events_across_network_chunks() {
         let mut buffer = b"data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n".to_vec();
         assert!(take_sse_events(&mut buffer).is_empty());
@@ -4861,6 +5815,11 @@ mod tests {
             voice: "longanlingxin".into(),
             speed: 1.0,
             audio_format: "wav".into(),
+            emotion: "auto".into(),
+            tone: "natural".into(),
+            intonation: "natural".into(),
+            reading_style: "natural".into(),
+            custom_instruction: String::new(),
         };
         assert_eq!(
             tts_cache_key(&config, "同一段旁白", "wav"),
@@ -4872,6 +5831,36 @@ mod tests {
             tts_cache_key(&config, "同一段旁白", "wav"),
             tts_cache_key(&changed, "同一段旁白", "wav")
         );
+        changed.speed = 1.0;
+        changed.emotion = "happy".into();
+        assert_ne!(
+            tts_cache_key(&config, "同一段旁白", "wav"),
+            tts_cache_key(&changed, "同一段旁白", "wav")
+        );
+    }
+
+    #[test]
+    fn builds_native_tts_expression_instructions() {
+        let config = TtsConfig {
+            provider: "aliyun-bailian".into(),
+            base_url: "https://example.com".into(),
+            model: BAILIAN_VOICE_CLONE_MODEL.into(),
+            voice: "longanlingxin".into(),
+            speed: 0.8,
+            audio_format: "wav".into(),
+            emotion: "happy".into(),
+            tone: "friendly".into(),
+            intonation: "expressive".into(),
+            reading_style: "teaching".into(),
+            custom_instruction: "公式部分读得更清楚".into(),
+        };
+        let instruction = tts_instruction(&config).unwrap().unwrap();
+        assert!(instruction.contains("愉快明朗"));
+        assert!(instruction.contains("亲切友好"));
+        assert!(instruction.contains("抑扬丰富"));
+        assert!(instruction.contains("课程讲解"));
+        assert!(instruction.contains("稍慢"));
+        assert!(instruction.ends_with("公式部分读得更清楚。"));
     }
 
     #[test]
@@ -4897,18 +5886,50 @@ mod tests {
             "qwen-audio-3.0-tts-plus",
             "longanlingxin"
         ));
-        assert!(is_bailian_voice_compatible(
+        assert!(!is_bailian_voice_compatible(
             "qwen-audio-3.0-tts-flash",
             "longanlingxi"
         ));
         assert!(is_bailian_voice_compatible(
-            "qwen-audio-3.0-tts-flash",
-            "longanhuan_v3.6"
+            "qwen-audio-3.0-tts-plus",
+            "longanlufeng"
         ));
         assert!(!is_bailian_voice_compatible(
             "qwen-audio-3.0-tts-plus",
             "longanlingxi"
         ));
+        assert!(is_bailian_voice_compatible(
+            BAILIAN_VOICE_CLONE_MODEL,
+            "qwen-audio-3.0-tts-plus-vpvoice-a1b2c3"
+        ));
+        assert!(!is_bailian_voice_compatible(
+            BAILIAN_VOICE_CLONE_MODEL,
+            "loongmary"
+        ));
+        assert_eq!(
+            voice_sample_mime(Path::new("sample.wav")),
+            Some("audio/wav")
+        );
+        assert_eq!(
+            voice_sample_mime(Path::new("sample.M4A")),
+            Some("audio/mp4")
+        );
+        assert_eq!(voice_sample_mime(Path::new("sample.ogg")), None);
+    }
+
+    #[test]
+    fn parses_only_supported_remote_cloned_voices() {
+        let payload = json!({
+            "output": { "voice_list": [
+                { "voice_id": "qwen-audio-3.0-tts-plus-vpvoice-a1b2c3", "target_model": BAILIAN_VOICE_CLONE_MODEL, "language": "zh", "gmt_create": "2026-07-29" },
+                { "voice": "other_voice", "target_model": "qwen3-tts-vc-realtime-2026-01-15" },
+                { "voice": "非法音色", "target_model": BAILIAN_VOICE_CLONE_MODEL }
+            ] }
+        });
+        let voices = parse_remote_cloned_voices(&payload);
+        assert_eq!(voices.len(), 1);
+        assert_eq!(voices[0].voice, "qwen-audio-3.0-tts-plus-vpvoice-a1b2c3");
+        assert_eq!(voices[0].language, "zh");
     }
 
     #[test]
@@ -4951,6 +5972,28 @@ mod tests {
             .join("audio")
             .join("voice.wav")
             .is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_vpy_projects_without_frontend_file_scope_grants() {
+        let root = std::env::temp_dir().join(format!(
+            "visual-python-read-project-test-{}",
+            transaction_stamp()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let project = root.join("lesson.vpy");
+        let contents = r#"{"version":1,"name":"lesson.vpy","workspace":{}}"#;
+        fs::write(&project, contents).unwrap();
+
+        assert_eq!(
+            read_project_file(project.to_string_lossy().into_owned()).unwrap(),
+            contents
+        );
+        assert!(read_project_file(root.join("lesson.txt").to_string_lossy().into_owned()).is_err());
+        assert!(
+            read_project_file(root.join("missing.vpy").to_string_lossy().into_owned()).is_err()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -5106,13 +6149,67 @@ mod tests {
     }
 
     #[test]
+    fn builds_output_specific_manim_flags() {
+        assert_eq!(
+            manim_output_flags("image", "cairo", true),
+            vec!["--save_last_frame", "--transparent"]
+        );
+        assert_eq!(
+            manim_output_flags("image", "opengl", false),
+            vec!["--save_last_frame"]
+        );
+        assert_eq!(
+            manim_output_flags("video", "opengl", true),
+            vec!["--write_to_movie"]
+        );
+        assert!(manim_output_flags("video", "cairo", true).is_empty());
+        assert_eq!(
+            manim_resolution_override("image", "custom", 1200, 800, "preview"),
+            Some("1200,800".into())
+        );
+        assert_eq!(
+            manim_resolution_override("image", "preset", 1200, 800, "preview"),
+            Some("640,360".into())
+        );
+        assert_eq!(
+            manim_resolution_override("video", "custom", 1200, 800, "high"),
+            None
+        );
+        assert_eq!(
+            manim_image_animation_range("image", "animation", 1),
+            Some("0,0".into())
+        );
+        assert_eq!(
+            manim_image_animation_range("image", "animation", 4),
+            Some("0,3".into())
+        );
+        assert_eq!(manim_image_animation_range("image", "final", 4), None);
+        assert_eq!(manim_image_animation_range("video", "animation", 4), None);
+    }
+
+    #[test]
+    fn reads_the_final_manim_playback_step_count() {
+        assert_eq!(
+            extract_manim_played_animation_count("INFO Rendered MainScene\nPlayed 3 animations\n"),
+            Some(3)
+        );
+        assert_eq!(
+            extract_manim_played_animation_count(
+                "Played 2 animations\nother output\nPlayed 0 animations\n"
+            ),
+            Some(0)
+        );
+        assert_eq!(extract_manim_played_animation_count("rendering"), None);
+    }
+
+    #[test]
     fn sanitizes_and_numbers_manim_output_names() {
         assert_eq!(
-            sanitize_manim_output_filename(Some("lesson: 01?.mp4"), "fallback"),
+            sanitize_manim_output_filename(Some("lesson: 01?.mp4"), "fallback", "video"),
             "lesson_ 01_.mp4"
         );
         assert_eq!(
-            sanitize_manim_output_filename(Some("CON.mp4"), "fallback"),
+            sanitize_manim_output_filename(Some("CON.mp4"), "fallback", "video"),
             "_CON.mp4"
         );
 
@@ -5126,6 +6223,11 @@ mod tests {
         assert_eq!(
             unique_manim_output_path(&root, "lesson.mp4"),
             root.join("lesson (2).mp4")
+        );
+        fs::write(root.join("cover.png"), b"existing").unwrap();
+        assert_eq!(
+            unique_manim_output_path(&root, "cover.png"),
+            root.join("cover (2).png")
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -5142,7 +6244,7 @@ mod tests {
         let source = work_dir.join("source.mp4");
         fs::write(&source, b"video").unwrap();
 
-        let output = finalize_manim_video(&root, &work_dir, &source, "lesson.mp4").unwrap();
+        let output = finalize_manim_output(&root, &work_dir, &source, "lesson.mp4").unwrap();
 
         assert_eq!(output, root.join("lesson.mp4"));
         assert_eq!(managed_manim_output_path(&root, &work_dir), Some(output));
@@ -5159,8 +6261,12 @@ mod tests {
         fs::create_dir_all(&work_dir).unwrap();
 
         assert_eq!(
-            finalize_rendered_manim_video(&root, &work_dir, "lesson.mp4").unwrap_err(),
+            finalize_rendered_manim_output(&root, &work_dir, "lesson.mp4", "video").unwrap_err(),
             "Manim completed without producing an MP4 video"
+        );
+        assert_eq!(
+            finalize_rendered_manim_output(&root, &work_dir, "lesson.png", "image").unwrap_err(),
+            "Manim completed without producing a PNG image"
         );
         fs::remove_dir_all(root).unwrap();
     }

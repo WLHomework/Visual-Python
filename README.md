@@ -16,5 +16,8 @@ npm run tauri dev
 - Read-only Monaco Python view
 - Local CPython execution and output
 - Save and open `.vpy` project files
+- Built-in Manim blocks, rendering, still-image export, audio, and voiceover support
 
-Manim support will be added later as a plugin instead of being coupled to the Python core.
+## Documentation
+
+- [Manim 插件使用说明](docs/manim-plugin/README.md)
