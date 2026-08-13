@@ -9,7 +9,7 @@ describe("Python inline syntax diagnostics", () => {
       line: 1,
       startColumn: 9,
       endColumn: 10,
-      message: "这一行少了收尾的冒号 `:`。",
+      message: "语句末尾缺少冒号 `:`。",
       suggestion: "在 if、for、while、def、class、try 等语句的末尾补上冒号。",
     });
   });
@@ -20,8 +20,9 @@ describe("Python inline syntax diagnostics", () => {
       "if ready:\nprint('go')",
     );
     expect(diagnostic?.line).toBe(2);
-    expect(diagnostic?.message).toContain("往里站一格");
+    expect(diagnostic?.message).toContain("缺少缩进代码块");
     expect(diagnostic?.suggestion).toContain("4 个空格");
+    expect(diagnostic?.message).not.toMatch(/抢跑|站整齐|卡了一下/);
   });
 
   it("ignores environment failures that are not syntax errors", () => {

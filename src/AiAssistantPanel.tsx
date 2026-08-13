@@ -1,5 +1,5 @@
 import { isValidElement, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ArrowDown, Box, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, CornerDownLeft, Eye, Files, Film, ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plug, Redo2, RefreshCw, Save, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, Volume2, X } from "lucide-react";
+import { AlertCircle, ArrowDown, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, Film, ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, RefreshCw, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -15,8 +15,10 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
-import type { AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./aiAgent";
+import { createCodeChangePreview } from "./agentV2";
+import type { AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2";
 import { getAiAgentPermissionMode, type AiAgentPermissionMode } from "./aiConfig";
+import { buildAiConversationHistory, createAiConversationScope } from "./aiConversationContext";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
 
 hljs.registerLanguage("bash", bash);
@@ -44,13 +46,13 @@ type AiAssistantPanelProps = {
   lineCount: number;
   sceneName: string;
   conversationScope: string;
+  conversationProjectId?: string;
+  workspaceEpoch: number;
   onOpenSettings: () => void;
   onClose: () => void;
   onRunAgent: (args: RunAgentArgs) => Promise<AiAgentResult>;
-  onRevealCodeChange: (diff: string, line?: number) => void;
+  onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void;
   onRevealProblem: (line: number) => void;
-  onUndoCodeChange: (change: AiCodeChangeSnapshot) => boolean;
-  onApplyCodeChange: (change: AiCodeChangeSnapshot) => boolean;
   onUndoTaskChange: (change: AiTaskChangeSnapshot) => boolean;
   onApplyTaskChange: (change: AiTaskChangeSnapshot) => boolean;
   onClearConversationConfirm: () => Promise<boolean>;
@@ -575,7 +577,7 @@ function isCodeChangeTool(toolName?: AiAgentToolName) {
   return toolName === "rename_scene" || toolName === "replace_code" || toolName === "edit_code" || toolName === "insert_statements" || toolName === "replace_function_body" || toolName === "add_import" || toolName === "add_voiceover" || toolName === "add_synchronized_voiceover";
 }
 
-export function groupAgentActivities(activities: AiAgentActivity[]): AgentActivityEntry[] {
+export function groupAgentActivities(activities: AiAgentActivity[], hiddenToolName?: AiAgentToolName): AgentActivityEntry[] {
   const entries: AgentActivityEntry[] = [];
   let compact: AiAgentActivity[] = [];
   const flushCompact = () => {
@@ -583,8 +585,24 @@ export function groupAgentActivities(activities: AiAgentActivity[]): AgentActivi
     else if (compact.length > 1) entries.push({ kind: "group", id: compact.map((activity) => activity.id).join("-"), summary: summarizeAgentActivities(compact), activities: compact });
     compact = [];
   };
-  for (const activity of activities) {
-    const isCompact = activity.kind === "tool" && activity.status === "done" && !activity.result && !activity.codeChange && !activity.execution;
+  const observedToolNames = new Set(activities
+    .filter((activity) => (activity.channel === "observation" || activity.channel === "verification") && activity.toolName)
+    .map((activity) => activity.toolName));
+  const orderedActivities = activities.filter((activity) => activity.channel !== "decision"
+    && activity.toolName !== "activate_tool_group"
+    && !(activity.kind === "tool" && activity.status === "done" && activity.toolName && observedToolNames.has(activity.toolName))
+    && !(hiddenToolName && activity.kind === "tool" && activity.status === "running" && activity.toolName === hiddenToolName));
+  for (const thinking of orderedActivities.filter((activity) => activity.channel === "thinking")) {
+    const round = thinking.id.match(/^thinking-(.+)$/)?.[1];
+    if (!round) continue;
+    const thinkingIndex = orderedActivities.indexOf(thinking);
+    const messageIndex = orderedActivities.findIndex((activity) => activity.id === `message-${round}` && (!activity.channel || activity.channel === "message"));
+    if (thinkingIndex < 0 || messageIndex < 0 || thinkingIndex < messageIndex) continue;
+    orderedActivities.splice(thinkingIndex, 1);
+    orderedActivities.splice(orderedActivities.findIndex((activity) => activity.id === `message-${round}`), 0, thinking);
+  }
+  for (const activity of orderedActivities) {
+    const isCompact = activity.kind === "tool" && activity.status === "done" && !successfulToolVerificationTitle(activity) && !formatAgentToolResult(activity) && !activity.codeChange && !activity.execution;
     if (isCompact) compact.push(activity);
     else {
       flushCompact();
@@ -593,6 +611,19 @@ export function groupAgentActivities(activities: AiAgentActivity[]): AgentActivi
   }
   flushCompact();
   return entries;
+}
+
+export function finalizeAgentRunActivities(activities: AiAgentActivity[], status: "error" | "stopped"): AiAgentActivity[] {
+  return activities.map((activity) => activity.status === "running" ? { ...activity, status } : activity);
+}
+
+export function removeFinalMessageActivity(activities: AiAgentActivity[], summary: string): AiAgentActivity[] {
+  const normalizedSummary = summary.replace(/\r\n/g, "\n").trim();
+  if (!normalizedSummary) return activities;
+  return activities.filter((activity) => {
+    const isAssistantMessage = activity.kind === "message" && (!activity.channel || activity.channel === "message");
+    return !isAssistantMessage || activity.title.replace(/\r\n/g, "\n").trim() !== normalizedSummary;
+  });
 }
 
 function agentToolCategory(toolName?: AiAgentToolName | "inspect_rendered_video"): AgentToolCategory {
@@ -652,44 +683,144 @@ function agentRunMeta(run: AgentRun): string {
   if (!result) return "";
   const elapsed = run.startedAt ? formatAgentElapsed(run.startedAt, run.finishedAt) : "";
   const tokenCount = formatAiTokenCount(result.tokenUsage?.total);
-  if (result.clarification) return ["需要确认任务方向", tokenCount].filter(Boolean).join(" · ");
-  if (result.intent === "chat") return [elapsed, tokenCount].filter(Boolean).join(" · ");
-  const operation = result.mode === "plan" || result.intent === "inspect"
-    ? `${result.toolCallCount} 次查看 · 当前 ${result.lineCount} 行`
-    : `${result.toolCallCount} 次操作 · ${result.lineCount} 行代码`;
-  return [operation, elapsed, tokenCount].filter(Boolean).join(" · ");
+  return [elapsed, tokenCount].filter(Boolean).join(" · ");
 }
 
-function ToolResult({ activity, onRevealCodeChange }: { activity: AiAgentActivity; onRevealCodeChange: (diff: string, line?: number) => void }) {
+function parseAgentToolResult(value?: string): Record<string, unknown> | null {
+  if (!value?.trim()) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeAgentDisplayText(value?: string): string | null {
+  const text = value?.trim();
+  if (!text) return null;
+  if (/[<＜][|｜]DSML[|｜]/i.test(text) || /[<＜][|｜](?:tool_calls?|invoke|parameter)[|｜]/i.test(text)) return "工具返回格式无效";
+  if ((text.startsWith("{") || text.startsWith("[")) && !parseAgentToolResult(text)) return "工具返回格式无效";
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (/^Traceback \(most recent call last\):/i.test(lines[0] || "")) {
+    const exception = [...lines].reverse().find((line) => /^[A-Za-z_][\w.]*(?:Error|Exception):\s*\S/.test(line));
+    return exception || lines.at(-1) || "执行失败";
+  }
+  if (/^用户拒绝了(?:这次)?操作[。.]?$/.test(text)) return "已取消";
+  return text;
+}
+
+function structuredAgentMessage(value: unknown): string | null {
+  if (typeof value === "string") return sanitizeAgentDisplayText(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return structuredAgentMessage(record.message) || structuredAgentMessage(record.error);
+}
+
+export function formatAgentRunError(value: string): string {
+  const text = value.trim();
+  if (/assistant message with ['"]tool_calls['"].*followed by tool messages/i.test(text)) return "模型返回的工具调用响应不完整，请重试。";
+  const parsed = parseAgentToolResult(text);
+  if (parsed) return structuredAgentMessage(parsed.error) || structuredAgentMessage(parsed.message) || "任务执行失败";
+  const jsonStart = text.indexOf("{");
+  if (jsonStart > 0) {
+    try {
+      const suffix = JSON.parse(text.slice(jsonStart)) as unknown;
+      const message = structuredAgentMessage(suffix);
+      if (message) return `${text.slice(0, jsonStart).trim()}${message}`;
+    } catch {
+      // Keep the original message when the suffix is not a complete JSON value.
+    }
+  }
+  return sanitizeAgentDisplayText(text) || "任务执行失败";
+}
+
+export function formatAgentToolResult(activity: AiAgentActivity): string | null {
+  const raw = activity.result?.trim();
+  if (!raw) return null;
+  const parsed = parseAgentToolResult(raw);
+  if (isCodeChangeTool(activity.toolName)) {
+    if (!parsed) return sanitizeAgentDisplayText(raw);
+    if (parsed.ok === false) return structuredAgentMessage(parsed.error) || "修改失败";
+    if (typeof parsed?.diff !== "string") return null;
+    return stripManagedAudioMetadataForDisplay(parsed.diff).trim() || null;
+  }
+  if (!parsed) return sanitizeAgentDisplayText(raw);
+  if (activity.toolName === "check_dependencies") {
+    const missing = Array.isArray(parsed.missing)
+      ? parsed.missing.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
+    return missing.length ? `未安装：${missing.join("、")}` : null;
+  }
+  if (parsed.ok === false) return structuredAgentMessage(parsed.error) || "执行失败";
+  if (parsed.valid === false) {
+    const diagnostic = structuredAgentMessage(parsed.diagnostic);
+    if (diagnostic) return diagnostic;
+    const error = structuredAgentMessage(parsed.error);
+    if (error) return error;
+    const warning = structuredAgentMessage(parsed.warning);
+    if (warning) return warning;
+    const issues = Array.isArray(parsed.issues) ? parsed.issues : Array.isArray(parsed.errors) ? parsed.errors : [];
+    const messages = issues.map(structuredAgentMessage).filter((message): message is string => Boolean(message));
+    return messages.join("\n") || "检查未通过";
+  }
+  return null;
+}
+
+function formatAgentFailure(activity: AiAgentActivity): string | null {
+  const result = formatAgentToolResult(activity);
+  if (result) return result;
+  const detail = sanitizeAgentDisplayText(activity.detail);
+  if (!detail || detail === "失败") return activity.status === "error" ? "执行失败" : null;
+  return detail;
+}
+
+function successfulToolVerificationTitle(activity: AiAgentActivity): string | null {
+  if (activity.kind !== "tool" || activity.status !== "done" || activity.toolName !== "validate_scene") return null;
+  const parsed = parseAgentToolResult(activity.result);
+  if (!parsed || parsed.ok === false || parsed.valid === false || formatAgentToolResult(activity)) return null;
+  return "验证场景结构通过";
+}
+
+export function formatCodeChangeStats(diff: string): { added: number; removed: number } {
+  const lines = diff.split(/\r?\n/);
+  return {
+    added: lines.filter((line) => line.startsWith("+ ")).length,
+    removed: lines.filter((line) => line.startsWith("- ")).length,
+  };
+}
+
+function codeChangeSceneName(change: AiCodeChangeSnapshot): string {
+  const name = change.sceneName?.trim() || "当前场景";
+  return name.replace(/\.py$/i, "");
+}
+
+export function CodeChangeSummary({ activity, onRevealCodeChange }: { activity: AiAgentActivity; onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void }) {
+  if (!activity.codeChange) return null;
+  const diff = formatAgentToolResult(activity) || createCodeChangePreview(activity.codeChange.before, activity.codeChange.after);
+  const startLine = codeDiffStartLine(diff);
+  const stats = formatCodeChangeStats(diff);
+  const sceneName = codeChangeSceneName(activity.codeChange);
+  return <button type="button" className={`ai-agent-code-change ${activity.status}`} disabled={!startLine} onClick={() => onRevealCodeChange(diff, startLine || undefined, activity.codeChange)}>
+    <span className="ai-agent-code-change-file" title={sceneName}><strong>{sceneName}</strong></span>
+    <span className="ai-agent-code-change-stats" aria-label={`增加 ${stats.added} 行，删除 ${stats.removed} 行`}><b className="added">+{stats.added}</b><b className="removed">-{stats.removed}</b></span>
+    <span className="ai-agent-code-change-view">查看变更</span>
+  </button>;
+}
+
+function ToolResult({ activity, onRevealCodeChange }: { activity: AiAgentActivity; onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void }) {
+  const displayedResult = formatAgentToolResult(activity);
+  if (!displayedResult) return null;
   const isCodeDiff = isCodeChangeTool(activity.toolName);
-  if (!isCodeDiff) return <pre>{activity.result}</pre>;
-  const startLine = codeDiffStartLine(activity.result);
-  const displayedResult = stripManagedAudioMetadataForDisplay(activity.result || "");
+  if (!isCodeDiff) return <pre>{displayedResult}</pre>;
+  const startLine = codeDiffStartLine(displayedResult);
   let removedOffset = 0;
   let addedOffset = 0;
   return <pre className="ai-code-diff" aria-label="代码修改差异">{displayedResult.split("\n").map((line, index) => {
     const kind = line.startsWith("+ ") ? "added" : line.startsWith("- ") ? "removed" : line.startsWith("@@") ? "location" : "context";
     const targetLine = startLine === null ? null : kind === "added" ? startLine + addedOffset++ : kind === "removed" ? startLine + removedOffset++ : kind === "location" ? startLine : null;
-    return <span className={`ai-code-diff-line ${kind} ${targetLine ? "locatable" : ""}`} key={`${index}-${line}`} onClick={targetLine && activity.result ? () => onRevealCodeChange(activity.result!, targetLine) : undefined}><span className="ai-code-diff-marker" aria-hidden="true">{kind === "added" ? "+" : kind === "removed" ? "-" : ""}</span><span>{kind === "added" || kind === "removed" ? line.slice(2) : line}</span></span>;
+    return <span className={`ai-code-diff-line ${kind} ${targetLine ? "locatable" : ""}`} key={`${index}-${line}`} onClick={targetLine ? () => onRevealCodeChange(displayedResult, targetLine) : undefined}><span className="ai-code-diff-marker" aria-hidden="true">{kind === "added" ? "+" : kind === "removed" ? "-" : ""}</span><span>{kind === "added" || kind === "removed" ? line.slice(2) : line}</span></span>;
   })}</pre>;
-}
-
-function activityIcon(toolName?: AiAgentToolName | "inspect_rendered_video"): ReactNode {
-  if (!toolName) return <Sparkles size={15}/>;
-  if (toolName === "list_scenes" || toolName === "get_scene" || toolName === "switch_scene" || toolName === "create_scene" || toolName === "rename_scene" || toolName === "delete_scene") return <Files size={15}/>;
-  if (toolName === "check_code" || toolName === "format_code" || toolName === "replace_code" || toolName === "edit_code" || toolName === "inspect_python_structure" || toolName === "insert_statements" || toolName === "replace_function_body" || toolName === "add_import") return <Code2 size={15}/>;
-  if (toolName === "validate_scene") return <Check size={15}/>;
-  if (toolName === "list_resources" || toolName === "get_resource" || toolName === "check_resources") return <Box size={15}/>;
-  if (toolName === "check_dependencies" || toolName === "install_dependencies") return <Plug size={15}/>;
-  if (toolName === "run_project" || toolName === "stop_execution") return <Play size={15}/>;
-  if (toolName === "render_manim" || toolName === "inspect_rendered_output" || toolName === "inspect_rendered_video") return <Film size={15}/>;
-  if (toolName === "get_voiceover_context" || toolName === "add_voiceover" || toolName === "add_synchronized_voiceover" || toolName === "check_voiceover") return <Volume2 size={15}/>;
-  if (toolName === "save_project") return <Save size={15}/>;
-  if (toolName === "undo_code") return <Undo2 size={15}/>;
-  if (toolName === "redo_code") return <Redo2 size={15}/>;
-  if (toolName === "wait") return <Clock3 size={15}/>;
-  if (toolName === "get_context" || toolName === "get_execution_state") return <Eye size={15}/>;
-  return <Code2 size={15}/>;
 }
 
 function AgentExecutionResult({ execution, onRevealProblem }: { execution: AiAgentExecution; onRevealProblem: (line: number) => void }) {
@@ -708,48 +839,57 @@ function AgentExecutionResult({ execution, onRevealProblem }: { execution: AiAge
   </div>;
 }
 
-function AgentActivityRow({ activity, runId, onRevealCodeChange, onRevealProblem, onUndoCodeChange, onApplyCodeChange, onUpdate }: {
+export function AgentResponseFooter({ status, meta, children }: { status: ReactNode; meta: string; children?: ReactNode }) {
+  return <div className="ai-agent-response-footer"><span>{status}</span>{meta && <small>{meta}</small>}{children && <span className="ai-agent-response-footer-actions">{children}</span>}</div>;
+}
+
+export function AgentActivityRow({ activity, onRevealCodeChange, onRevealProblem }: {
   activity: AiAgentActivity;
-  runId: number;
-  onRevealCodeChange: (diff: string, line?: number) => void;
+  onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void;
   onRevealProblem: (line: number) => void;
-  onUndoCodeChange: (change: AiCodeChangeSnapshot) => boolean;
-  onApplyCodeChange: (change: AiCodeChangeSnapshot) => boolean;
-  onUpdate: (runId: number, activity: AiAgentActivity) => void;
 }) {
-  if (activity.kind === "message") return <div className={`ai-agent-narration ${activity.status}`}>
-    {activity.status === "running" ? <LoaderCircle className="spin" size={15}/> : <Sparkles size={15}/>}<MarkdownContent>{activity.title}</MarkdownContent>
+  if (activity.channel === "thinking") return <details className={`ai-agent-thinking ${activity.status}`} open={activity.status === "running"}>
+    <summary><ChevronRight className="ai-agent-tool-chevron" size={14}/><strong>思考过程</strong>{activity.status === "running" && <LoaderCircle className="spin" size={13}/>}</summary>
+    <MarkdownContent>{activity.title || "模型正在形成下一步决策。"}</MarkdownContent>
+  </details>;
+  const verificationTitle = successfulToolVerificationTitle(activity);
+  if (verificationTitle) return <div className={`ai-agent-event verification ${activity.status}`}>
+    <div className="ai-agent-event-header"><strong>{verificationTitle}</strong></div>
   </div>;
+  const failure = activity.status === "error" ? formatAgentFailure(activity) : null;
+  if (activity.channel === "decision" || activity.channel === "observation" || activity.channel === "verification" || activity.channel === "question") return <div className={`ai-agent-event ${activity.channel} ${activity.status}`}>
+    <div className="ai-agent-event-header"><strong>{activity.channel === "question" ? "需要你的选择" : activity.title}</strong>{activity.status === "running" && <LoaderCircle className="spin" size={13}/>}</div>
+    {activity.title && activity.channel === "question" ? <MarkdownContent>{activity.title}</MarkdownContent> : null}
+    {(failure || (activity.status !== "error" && sanitizeAgentDisplayText(activity.detail))) && <small>{failure || sanitizeAgentDisplayText(activity.detail)}</small>}
+  </div>;
+  if (activity.kind === "message") {
+    if (activity.status === "running" && !activity.title.trim()) return null;
+    return <div className={`ai-agent-narration ${activity.status}`}>
+      <MarkdownContent>{activity.title}</MarkdownContent>
+    </div>;
+  }
   if (activity.execution) return <AgentExecutionResult execution={activity.execution} onRevealProblem={onRevealProblem}/>;
-  if (!activity.result) return <div className={`ai-agent-tool-line ${activity.status}`}>
-    <span className="ai-agent-tool-icon">{activity.status === "running" ? <LoaderCircle className="spin" size={15}/> : activity.status === "error" ? <AlertCircle size={15}/> : activityIcon(activity.toolName)}</span>
-    <strong>{activity.title}</strong>
+  if (activity.codeChange) return <CodeChangeSummary activity={activity} onRevealCodeChange={onRevealCodeChange}/>;
+  const displayResult = formatAgentToolResult(activity);
+  if (activity.status === "error") {
+    const denied = failure === "已取消";
+    return <div className={`ai-agent-tool-line ${denied ? "denied" : "error"}`}><strong>{activity.title}</strong><small>{failure}</small></div>;
+  }
+  if (!displayResult) return <div className={`ai-agent-tool-line ${activity.status}`}>
+    {activity.status === "running" && <LoaderCircle className="spin" size={13}/>}<strong>{activity.title}</strong>
     {activity.detail && <small>{activity.detail}</small>}
   </div>;
   return <details className={`ai-agent-tool ${activity.status}`}>
     <summary onClick={(event) => {
       if (event.target instanceof Element && event.target.closest(".ai-agent-tool-chevron")) return;
-      const line = codeDiffStartLine(activity.result);
+      const line = codeDiffStartLine(displayResult);
       if (!line || !isCodeChangeTool(activity.toolName)) return;
       event.preventDefault();
-      onRevealCodeChange(activity.result!, line);
+      onRevealCodeChange(displayResult, line);
     }}>
       <ChevronRight className="ai-agent-tool-chevron" size={14}/>
-      <span className="ai-agent-tool-icon">{activity.status === "running" ? <LoaderCircle className="spin" size={15}/> : activity.status === "error" ? <AlertCircle size={15}/> : activityIcon(activity.toolName)}</span>
       <strong>{activity.title}</strong>
       {activity.detail && <small>{activity.detail}</small>}
-      {activity.codeChange && <span className="ai-agent-change-actions">
-        <button disabled={!activity.undone} title={activity.undone ? "重新应用这次 AI 修改" : "修改已应用"} aria-label={activity.undone ? "重新应用这次 AI 修改" : "修改已应用"} onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (activity.codeChange && onApplyCodeChange(activity.codeChange)) onUpdate(runId, { ...activity, undone: false, detail: "已应用" });
-        }}><Check size={14}/></button>
-        <button disabled={activity.undone} title={activity.undone ? "已撤销" : "撤销这次 AI 修改"} aria-label={activity.undone ? "已撤销" : "撤销这次 AI 修改"} onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (activity.codeChange && onUndoCodeChange(activity.codeChange)) onUpdate(runId, { ...activity, undone: true, detail: "已撤销" });
-        }}><Undo2 size={14}/></button>
-      </span>}
     </summary>
     <ToolResult activity={activity} onRevealCodeChange={onRevealCodeChange}/>
   </details>;
@@ -758,10 +898,9 @@ function AgentActivityRow({ activity, runId, onRevealCodeChange, onRevealProblem
 function AgentTaskPlan({ steps, collapsed = false }: { steps: AiAgentPlanStep[]; collapsed?: boolean }) {
   if (!steps.length) return null;
   const completed = steps.filter(({ status }) => status === "completed").length;
-  const list = <ol>{steps.map((item, index) => <li className={item.status} key={`${index}-${item.step}`}>
+  const list = <ol>{steps.map((item, index) => <li className={item.status} aria-label={`${item.step}：${item.status === "completed" ? "完成" : item.status === "in_progress" ? "进行中" : "等待"}`} key={`${index}-${item.step}`}>
     <span className="ai-agent-task-marker" aria-hidden="true">{item.status === "completed" ? <Check size={11}/> : item.status === "in_progress" ? <LoaderCircle className="spin" size={11}/> : null}</span>
     <span>{item.step}</span>
-    <small>{item.status === "completed" ? "完成" : item.status === "in_progress" ? "进行中" : "等待"}</small>
   </li>)}</ol>;
   if (collapsed) return <details className="ai-agent-task-plan completed">
     <summary><ChevronRight size={13}/><ListChecks size={14}/><strong>{completed}/{steps.length} 步骤完成</strong></summary>
@@ -773,41 +912,40 @@ function AgentTaskPlan({ steps, collapsed = false }: { steps: AiAgentPlanStep[];
   </div>;
 }
 
-function AgentRunProgress({ progress, elapsed }: { progress?: AiAgentProgress; elapsed: string }) {
-  const tokenCount = formatAiTokenCount(progress?.tokenUsage?.total);
-  return <>
-    {progress?.taskPlan?.length ? <AgentTaskPlan steps={progress.taskPlan}/> : null}
-    <div className={`ai-agent-progress phase-${progress?.phase || "preparing"}`} role="status">
-      <LoaderCircle className="spin" size={15}/>
-      <strong>{progress?.label || "正在准备任务"}</strong>
-      {(elapsed || tokenCount) && <time aria-hidden="true">{[elapsed, tokenCount].filter(Boolean).join(" · ")}</time>}
-    </div>
-  </>;
+function AgentRunProgress({ progress }: { progress?: AiAgentProgress }) {
+  return progress?.taskPlan?.length ? <AgentTaskPlan steps={progress.taskPlan}/> : null;
 }
 
 function AgentPermissionPrompt({ request, onRespond }: { request: AiAgentPermissionRequest; onRespond: (approved: boolean) => void }) {
   return <div className="ai-agent-permission" role="group" aria-label={request.title}>
-    <ShieldQuestion size={17}/>
-    <span><strong>{request.title}</strong><small>{request.detail}</small></span>
-    <span><button type="button" className="approve" onClick={() => onRespond(true)}><Check size={14}/>允许</button><button type="button" onClick={() => onRespond(false)}><X size={14}/>拒绝</button></span>
+    <div className="ai-agent-permission-header"><ShieldQuestion size={17}/><strong>{request.title}</strong></div>
+    <p>{request.detail}</p>
+    <div className="ai-agent-permission-actions">
+      <button type="button" className="secondary" onClick={() => onRespond(false)}><X size={14}/>拒绝</button>
+      <button type="button" className="primary" onClick={() => onRespond(true)}><Check size={14}/>允许</button>
+    </div>
   </div>;
 }
 
-export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOpenSettings, onClose, onRunAgent, onRevealCodeChange, onRevealProblem, onUndoCodeChange, onApplyCodeChange, onUndoTaskChange, onApplyTaskChange, onClearConversationConfirm }: AiAssistantPanelProps) {
+export function settlePermissionResolvers(resolvers: Map<number, (approved: boolean) => void>, approved = false) {
+  for (const resolve of resolvers.values()) resolve(approved);
+  resolvers.clear();
+}
+
+export function AiAssistantPanel({ lineCount, sceneName, conversationScope, conversationProjectId, workspaceEpoch, onOpenSettings, onClose, onRunAgent, onRevealCodeChange, onRevealProblem, onUndoTaskChange, onApplyTaskChange, onClearConversationConfirm }: AiAssistantPanelProps) {
   const [prompt, setPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<AiAgentMode>("agent");
   const [agentModeMenuOpen, setAgentModeMenuOpen] = useState(false);
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
   const [conversationPersistenceFailed, setConversationPersistenceFailed] = useState(false);
-  const [clock, setClock] = useState(Date.now());
   const [conversationState, setConversationState] = useState<AiConversationState>(() => loadConversationState(conversationScope));
   const activeConversation = conversationState.conversations.find((conversation) => conversation.id === conversationState.activeId) ?? conversationState.conversations[0];
   const runs = activeConversation?.runs ?? [];
   const runId = useRef(Math.max(0, ...conversationState.conversations.flatMap((conversation) => conversation.runs.map((run) => run.id))) + 1);
   const activeController = useRef<AbortController | null>(null);
-  const redirectRef = useRef<{ request: string; prompt: string; mode: AiAgentMode; initialPlan?: AiAgentPlanStep[] } | null>(null);
   const permissionResolvers = useRef(new Map<number, (approved: boolean) => void>());
+  const mountedRef = useRef(true);
   const threadRef = useRef<HTMLDivElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const conversationMenuRef = useRef<HTMLDivElement>(null);
@@ -818,14 +956,8 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOp
   const running = runs.some((run) => run.status === "running");
   const awaitingClarification = runs.at(-1)?.status === "done" && Boolean(runs.at(-1)?.result?.clarification);
 
-  useEffect(() => {
-    if (!running) return;
-    setClock(Date.now());
-    const timer = window.setInterval(() => setClock(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [running]);
-
   const setRuns = (update: (items: AgentRun[]) => AgentRun[]) => {
+    if (!mountedRef.current) return;
     const nextRuns = update(runsRef.current);
     runsRef.current = nextRuns;
     setConversationState((state) => ({
@@ -839,6 +971,16 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOp
   useEffect(() => {
     setConversationPersistenceFailed(!storeConversationState(conversationScope, conversationState));
   }, [conversationScope, conversationState]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      activeController.current?.abort();
+      activeController.current = null;
+      settlePermissionResolvers(permissionResolvers.current);
+    };
+  }, [workspaceEpoch]);
 
   useEffect(() => {
     runsRef.current = runs;
@@ -927,9 +1069,9 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOp
     if (!normalizedPrompt || runsRef.current.some((run) => run.status === "running")) return;
     const id = existingRunId ?? runId.current++;
     const controller = new AbortController();
-    const history = trimAiConversationHistory(runsRef.current
-      .filter((run): run is AgentRun & { result: AiAgentResult } => run.id !== excludedRunId && run.status === "done" && Boolean(run.result))
-      .map((run) => ({ user: run.request || run.prompt, assistant: run.result.summary, clarification: Boolean(run.result.clarification) })));
+    const history = trimAiConversationHistory(buildAiConversationHistory(
+      runsRef.current.filter((run) => run.id !== excludedRunId),
+    ));
     activeController.current = controller;
     stickToLatestRef.current = true;
     setShowScrollToLatest(false);
@@ -984,28 +1126,31 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOp
       });
       const completedRuns: AgentRun[] = runsRef.current.map((run) => {
         if (run.id !== id) return run;
-        const last = run.activities.at(-1);
-        const activities = last?.kind === "message" && last.title.trim() === result.summary.trim()
-          ? run.activities.slice(0, -1)
-          : run.activities;
+        const activities = removeFinalMessageActivity(run.activities, result.summary);
         return { ...run, status: "done", result, activities, progress: undefined, permission: undefined, finishedAt: Date.now() };
       });
       setRuns(() => completedRuns);
       completedSuccessfully = true;
-      if (result.taskChange?.afterActiveSceneId && result.taskChange.afterActiveSceneId !== conversationScope) {
+      const transferredScope = result.taskChange?.afterActiveSceneId
+        ? conversationProjectId ? createAiConversationScope(conversationProjectId, result.taskChange.afterActiveSceneId) : result.taskChange.afterActiveSceneId
+        : "";
+      if (transferredScope && transferredScope !== conversationScope) {
         const title = activeConversation?.title === "新对话" ? conversationTitle(normalizedVisiblePrompt) : activeConversation?.title || conversationTitle(normalizedVisiblePrompt);
-        queueMicrotask(() => storeTransferredConversation(result.taskChange!.afterActiveSceneId, title, completedRuns));
+        queueMicrotask(() => storeTransferredConversation(transferredScope, title, completedRuns));
       }
     } catch (error) {
-      if (controller.signal.aborted) updateRun(id, { status: "stopped", error: undefined, permission: undefined, finishedAt: Date.now() });
-      else updateRun(id, { status: "error", error: errorMessage(error), permission: undefined, finishedAt: Date.now() });
+      const failedStatus = controller.signal.aborted ? "stopped" : "error";
+      const failedActivities = runsRef.current.find((run) => run.id === id)?.activities || [];
+      updateRun(id, {
+        status: failedStatus,
+        activities: finalizeAgentRunActivities(failedActivities, failedStatus),
+        error: controller.signal.aborted ? undefined : errorMessage(error),
+        permission: undefined,
+        finishedAt: Date.now(),
+      });
     } finally {
       if (activeController.current === controller) activeController.current = null;
-      const redirect = redirectRef.current;
-      if (redirect) {
-        redirectRef.current = null;
-        queueMicrotask(() => void runAgent(redirect.request, undefined, undefined, redirect.prompt, redirect.mode, redirect.initialPlan));
-      } else if (completedSuccessfully) {
+      if (completedSuccessfully) {
         const next = runsRef.current.find((run) => run.status === "queued");
         if (next) queueMicrotask(() => void runAgent(next.request || next.prompt, undefined, next.id, next.prompt, next.mode, next.initialPlan));
       }
@@ -1021,20 +1166,6 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOp
     }
     setRuns((items) => [...items, { id: runId.current++, prompt: normalizedPrompt, mode: agentMode, activities: [], status: "queued" }]);
     setPrompt("");
-  };
-
-  const redirectAgent = () => {
-    const correction = prompt.trim();
-    const current = runsRef.current.find((run) => run.status === "running");
-    if (!correction || !current || !activeController.current) return;
-    redirectRef.current = {
-      request: `${current.request || current.prompt}\n\n用户在任务执行过程中补充或更正：\n${correction}`,
-      prompt: correction,
-      mode: current.mode,
-      ...(current.initialPlan?.length ? { initialPlan: current.initialPlan } : {}),
-    };
-    setPrompt("");
-    activeController.current.abort();
   };
 
   const startQueuedRun = (run: AgentRun) => void runAgent(run.request || run.prompt, undefined, run.id, run.prompt, run.mode, run.initialPlan);
@@ -1054,7 +1185,6 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOp
   const respondToPermission = (id: number, approved: boolean) => permissionResolvers.current.get(id)?.(approved);
 
   const stopAgent = () => {
-    redirectRef.current = null;
     activeController.current?.abort();
   };
 
@@ -1117,14 +1247,16 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOp
       <div className="ai-assistant-title"><span className="ai-assistant-icon"><Sparkles size={16}/></span><strong>AI 编程助手</strong><small title={activeConversation?.title}>{activeConversation?.title || "新对话"}</small></div>
       <div className="ai-assistant-actions">
         {conversationPersistenceFailed && <span className="ai-conversation-persistence-warning" role="status" title="AI 对话记录未能保存，请清理部分历史记录后重试"><AlertCircle size={14}/><span>记录未保存</span></span>}
-        <button type="button" disabled={running} onClick={startConversation} title="新建对话" aria-label="新建对话"><MessageSquarePlus size={16}/></button>
         <div className="ai-conversation-menu-anchor" ref={conversationMenuRef}>
           <button type="button" className={conversationMenuOpen ? "active" : ""} disabled={running} onClick={() => setConversationMenuOpen((open) => !open)} title="会话记录" aria-label="会话记录" aria-haspopup="menu" aria-expanded={conversationMenuOpen}><MessagesSquare size={16}/></button>
           {conversationMenuOpen && <div className="ai-conversation-menu" role="menu" aria-label="AI 会话记录">
-            <div className="ai-conversation-menu-list">{conversationState.conversations.map((conversation) => {
+            <div className="ai-conversation-menu-list">
+              <button type="button" className="ai-conversation-new" role="menuitem" onClick={startConversation}><MessageSquarePlus size={14}/><span>新建对话</span></button>
+              {conversationState.conversations.map((conversation) => {
               const selected = conversation.id === conversationState.activeId;
               return <button type="button" role="menuitemradio" aria-checked={selected} className={selected ? "selected" : ""} key={conversation.id} onClick={() => switchConversation(conversation.id)}><span>{conversation.title}</span>{selected && <Check size={14}/>}</button>;
-            })}</div>
+              })}
+            </div>
             <button type="button" className="ai-conversation-clear" role="menuitem" disabled={!runs.length} onClick={clearConversation}><Trash2 size={14}/><span>清空当前对话</span></button>
           </div>}
         </div>
@@ -1135,46 +1267,44 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOp
     <div className="ai-thread-shell">
       <div ref={threadRef} className={`ai-thread ${runs.length ? "has-runs" : ""}`} aria-live="polite" onScroll={handleThreadScroll}>
         {!runs.length && <div className="ai-agent-empty" aria-label="指令示例">
-          {suggestions.map((suggestion) => <button key={suggestion} onClick={() => void runAgent(suggestion)}><Sparkles size={15}/><span>{suggestion}</span></button>)}
+          {suggestions.map((suggestion) => <button key={suggestion} onClick={() => void runAgent(suggestion)}>{suggestion}</button>)}
         </div>}
         {runs.map((run) => <article className="ai-agent-run" key={run.id}>
           <p className="ai-agent-prompt">{run.prompt}</p>
           <div className="ai-agent-activity-list">
-          {groupAgentActivities(run.activities).map((entry) => entry.kind === "group"
+          {groupAgentActivities(run.activities, run.permission?.toolName).map((entry) => entry.kind === "group"
             ? <details className="ai-agent-tool-group" key={entry.id}>
-              <summary><ChevronRight className="ai-agent-tool-chevron" size={14}/><Check size={14}/><strong>{entry.summary}</strong></summary>
-              <div>{entry.activities.map((activity) => <span key={activity.id}><span className="ai-agent-tool-icon">{activityIcon(activity.toolName)}</span><strong>{activity.title}</strong>{activity.detail && <small>{activity.detail}</small>}</span>)}</div>
+              <summary><ChevronRight className="ai-agent-tool-chevron" size={14}/><strong>{entry.summary}</strong></summary>
+              <div>{entry.activities.map((activity) => <span key={activity.id}><strong>{activity.title}</strong>{activity.detail && <small>{activity.detail}</small>}</span>)}</div>
             </details>
-            : <AgentActivityRow key={entry.activity.id} activity={entry.activity} runId={run.id} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem} onUndoCodeChange={onUndoCodeChange} onApplyCodeChange={onApplyCodeChange} onUpdate={updateActivity}/>)}
+            : <AgentActivityRow key={entry.activity.id} activity={entry.activity} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>)}
           {run.status === "done" && run.result?.taskPlan?.length ? <AgentTaskPlan steps={run.result.taskPlan} collapsed/> : null}
           {(run.status === "error" || run.status === "stopped") && run.progress?.taskPlan?.length ? <AgentTaskPlan steps={run.progress.taskPlan}/> : null}
           {run.permission && <AgentPermissionPrompt request={run.permission} onRespond={(approved) => respondToPermission(run.id, approved)}/>}
-          {run.status === "running" && <AgentRunProgress progress={run.progress} elapsed={formatAgentElapsed(run.startedAt, clock)}/>}
-          {run.status === "done" && <div className={`ai-agent-response ${run.result?.clarification ? "awaiting-user" : ""}`}>
-            <div className="ai-agent-response-header">
-              <span>{run.result?.clarification
-                ? <><MessagesSquare size={14}/>等待回复</>
-                : run.result?.mode === "plan"
-                  ? <><ListChecks size={14}/>计划完成</>
-                  : run.result?.intent === "chat"
-                    ? <><MessagesSquare size={14}/>回复</>
-                    : run.result?.intent === "inspect"
-                      ? <><Eye size={14}/>已分析</>
-                  : <><Check size={14}/>完成</>}</span>
-              <small>{agentRunMeta(run)}</small>
+          {run.status === "running" && <AgentRunProgress progress={run.progress}/>}
+          {run.status === "done" && !run.result?.clarification && <div className="ai-agent-response">
+            <MarkdownContent>{run.result?.summary || "完成"}</MarkdownContent>
+            <AgentResponseFooter status={run.result?.clarification
+              ? "等待回复"
+              : run.result?.mode === "plan"
+                ? "计划完成"
+                : run.result?.intent === "chat"
+                  ? "回复"
+                  : run.result?.intent === "inspect"
+                    ? "已分析"
+                    : "完成"} meta={agentRunMeta(run)}>
               {run.result?.taskChange && <span className="ai-task-change-actions">
                 <button disabled={!run.taskUndone} title={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} aria-label={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} onClick={() => { if (run.result?.taskChange && onApplyTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: false }); }}><Check size={13}/></button>
                 <button disabled={run.taskUndone} title={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} aria-label={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} onClick={() => { if (run.result?.taskChange && onUndoTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: true }); }}><Undo2 size={13}/></button>
               </span>}
               {run.result?.mode === "plan" && run.result.planPrompt && !run.result.clarification && <button type="button" className="ai-plan-execute" disabled={running} onClick={() => executePlan(run)} title="由 Agent 按此计划执行"><Play size={13}/><span>执行计划</span></button>}
               <AiResponseActions markdown={run.result?.summary || "完成"} disabled={running} onRetry={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)}/>
-            </div>
-            <MarkdownContent>{run.result?.summary || "完成"}</MarkdownContent>
+            </AgentResponseFooter>
           </div>}
-          {run.status === "queued" && <div className="ai-agent-queued"><Clock3 size={14}/><span>等待当前任务完成</span><span className="ai-agent-queued-actions"><button disabled={running} title="立即执行" aria-label="立即执行排队任务" onClick={() => startQueuedRun(run)}><Play size={13}/></button><button title="移出队列" aria-label="移出任务队列" onClick={() => removeQueuedRun(run.id)}><X size={14}/></button></span></div>}
-          {run.status === "stopped" && <div className="ai-agent-finished stopped"><Square size={12}/><span>已停止{run.startedAt ? ` · ${formatAgentElapsed(run.startedAt, run.finishedAt)}` : ""}</span><span className="ai-run-failure-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])} onClick={() => resumeRun(run)}><Play size={13}/></button> : <button className="ai-run-retry" disabled={running} title="重新执行此任务" aria-label="重新执行此任务" onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)}><RefreshCw size={13}/></button>}</span></div>}
+          {run.status === "queued" && <div className="ai-agent-run-state queued"><Clock3 size={14}/><span>等待当前任务完成</span><span className="ai-agent-queued-actions"><button disabled={running} title="立即执行" aria-label="立即执行排队任务" onClick={() => startQueuedRun(run)}><Play size={13}/></button><button title="移出队列" aria-label="移出任务队列" onClick={() => removeQueuedRun(run.id)}><X size={14}/></button></span></div>}
+          {run.status === "stopped" && <div className="ai-agent-run-state stopped"><Square size={12}/><span>已停止{run.startedAt ? ` · ${formatAgentElapsed(run.startedAt, run.finishedAt)}` : ""}</span><span className="ai-run-failure-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])} onClick={() => resumeRun(run)}><Play size={13}/></button> : <button className="ai-run-retry" disabled={running} title="重新执行此任务" aria-label="重新执行此任务" onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)}><RefreshCw size={13}/></button>}</span></div>}
           </div>
-          {run.error && <div className="ai-agent-error"><span>{run.error}{run.startedAt ? <small>{formatAgentElapsed(run.startedAt, run.finishedAt)}</small> : null}</span><span className="ai-agent-error-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} onClick={() => resumeRun(run)} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])}><Play size={14}/></button> : <button disabled={running} onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)} title="重新执行此任务" aria-label="重新执行此任务"><RefreshCw size={15}/></button>}<button onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={15}/></button></span></div>}
+          {run.error && <div className="ai-agent-error"><span className="ai-agent-error-content"><strong>任务未完成</strong><span>{formatAgentRunError(run.error)}</span>{run.startedAt ? <small>{formatAgentElapsed(run.startedAt, run.finishedAt)}</small> : null}</span><span className="ai-agent-error-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} onClick={() => resumeRun(run)} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])}><Play size={14}/></button> : <button disabled={running} onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)} title="重新执行此任务" aria-label="重新执行此任务"><RefreshCw size={15}/></button>}<button onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={15}/></button></span></div>}
         </article>)}
       </div>
       {showScrollToLatest && runs.length > 0 && <button type="button" className="ai-scroll-to-latest" onClick={scrollToLatest} title="回到最新消息" aria-label="回到最新消息"><ArrowDown size={16}/></button>}
@@ -1195,7 +1325,7 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, onOp
           <span className="ai-composer-scope" title={`${sceneName} · ${lineCount} 行代码`}><Code2 size={14}/><span>{sceneName}</span><small>{lineCount} 行</small></span>
           <span className="ai-composer-footer-spacer"/>
           {running
-            ? <><button className="queue" onClick={enqueuePrompt} disabled={!prompt.trim()} title="当前任务完成后执行" aria-label="将指令加入队列"><Send size={15}/></button><button className="redirect" onClick={redirectAgent} disabled={!prompt.trim()} title="停止并按此要求重新执行当前任务" aria-label="调整当前任务"><CornerDownLeft size={15}/></button><button className="stop" onClick={stopAgent} title="停止智能体" aria-label="停止智能体"><Square size={13}/></button></>
+            ? <button className="stop" onClick={stopAgent} title="停止智能体" aria-label="停止智能体"><Square size={13}/></button>
             : <button onClick={() => void runAgent()} disabled={!prompt.trim()} title="发送" aria-label="发送"><Send size={16}/></button>}
         </div>
       </div>

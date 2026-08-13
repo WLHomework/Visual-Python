@@ -35,6 +35,20 @@ describe("Python structured edits", () => {
     expect(result).not.toContain("dot = Dot()");
   });
 
+  it("resolves a unique class method when className is omitted", () => {
+    const result = insertPythonStatements(source, structure, { functionName: "construct", position: "end", statements: ["self.wait(0.1)"] });
+    expect(result).toContain("        self.add(dot)\n        self.wait(0.1)");
+  });
+
+  it("requires className when the same method exists in multiple classes", () => {
+    const secondClass: PythonStructure = {
+      ...structure,
+      classes: [...structure.classes, { ...structure.classes[0], name: "Other", startLine: 9, endLine: 13 }],
+    };
+    expect(() => insertPythonStatements(source, secondClass, { functionName: "construct", position: "end", statements: ["self.wait(0.1)"] }))
+      .toThrow("多个类");
+  });
+
   it("adds imports after existing imports and avoids duplicates", () => {
     const result = addPythonImport(source, structure, "math", ["sin", "cos"]);
     expect(result.startsWith("from manim import *\nfrom math import sin, cos\n")).toBe(true);

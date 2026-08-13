@@ -37,6 +37,7 @@ export type AiChatCompletionResult = {
   content: string;
   toolCalls: AiChatToolCall[];
   model: string;
+  truncated?: boolean;
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
@@ -56,8 +57,20 @@ export type AiToolCallStreamDelta = {
   delta: string;
 };
 
+export type AiChatToolChoice = "auto" | "required" | { type: "function"; function: { name: string } };
+
+export type AiCapabilityStatus = "unknown" | "supported" | "unsupported";
+
+export type AiModelCapabilities = {
+  functionCalling: AiCapabilityStatus;
+  toolChoice: AiCapabilityStatus;
+};
+
 const storageKey = "visual-python:ai-model-config";
 const permissionModeStorageKey = "visual-python:ai-agent-permission-mode";
+const capabilityStorageKey = "visual-python:ai-model-capabilities";
+const capabilityTtlMs = 7 * 24 * 60 * 60 * 1000;
+const defaultAiModelCapabilities: AiModelCapabilities = { functionCalling: "unknown", toolChoice: "unknown" };
 
 export const defaultAiModelConfig: AiModelConfig = {
   baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -86,6 +99,47 @@ export function saveAiModelConfig(config: AiModelConfig): AiModelConfig {
   const normalized = normalizeAiModelConfig(config);
   localStorage.setItem(storageKey, JSON.stringify(normalized));
   return normalized;
+}
+
+function aiModelCapabilityKey(config: AiModelConfig): string {
+  const normalized = normalizeAiModelConfig(config);
+  return `${normalized.baseUrl}\n${normalized.model}`;
+}
+
+type StoredAiModelCapabilities = AiModelCapabilities & { updatedAt: number };
+
+export function getAiModelCapabilities(config: AiModelConfig = getAiModelConfig()): AiModelCapabilities {
+  try {
+    const entries = JSON.parse(localStorage.getItem(capabilityStorageKey) || "{}") as Record<string, StoredAiModelCapabilities>;
+    const entry = entries[aiModelCapabilityKey(config)];
+    if (!entry || !Number.isFinite(entry.updatedAt) || Date.now() - entry.updatedAt > capabilityTtlMs) return { ...defaultAiModelCapabilities };
+    return {
+      functionCalling: ["unknown", "supported", "unsupported"].includes(entry.functionCalling) ? entry.functionCalling : "unknown",
+      toolChoice: ["unknown", "supported", "unsupported"].includes(entry.toolChoice) ? entry.toolChoice : "unknown",
+    };
+  } catch {
+    return { ...defaultAiModelCapabilities };
+  }
+}
+
+export function updateAiModelCapabilities(update: Partial<AiModelCapabilities>, config: AiModelConfig = getAiModelConfig()): AiModelCapabilities {
+  const current = getAiModelCapabilities(config);
+  const next: AiModelCapabilities = {
+    functionCalling: update.functionCalling || current.functionCalling,
+    toolChoice: update.toolChoice || current.toolChoice,
+  };
+  try {
+    const stored = JSON.parse(localStorage.getItem(capabilityStorageKey) || "{}") as Record<string, StoredAiModelCapabilities>;
+    const entries = Object.fromEntries(Object.entries(stored)
+      .filter(([, value]) => value && Number.isFinite(value.updatedAt) && Date.now() - value.updatedAt <= capabilityTtlMs)
+      .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
+      .slice(0, 31));
+    entries[aiModelCapabilityKey(config)] = { ...next, updatedAt: Date.now() };
+    localStorage.setItem(capabilityStorageKey, JSON.stringify(entries));
+  } catch {
+    // Capability caching is an optimization; an unavailable storage must not block AI requests.
+  }
+  return next;
 }
 
 export function getAiAgentPermissionMode(): AiAgentPermissionMode {
@@ -130,7 +184,7 @@ let streamRequestSequence = 1;
 export async function streamAiChat(
   messages: AiChatMessage[],
   onDelta: (delta: string) => void,
-  options: { maxTokens?: number; signal?: AbortSignal; tools?: AiChatToolDefinition[]; onReasoningDelta?: (delta: string) => void; onToolCallDelta?: (delta: AiToolCallStreamDelta) => void } = {},
+  options: { maxTokens?: number; signal?: AbortSignal; tools?: AiChatToolDefinition[]; toolChoice?: AiChatToolChoice; omitToolChoice?: boolean; onReasoningDelta?: (delta: string) => void; onToolCallDelta?: (delta: AiToolCallStreamDelta) => void } = {},
 ): Promise<AiChatCompletionResult> {
   const requestId = `${Date.now().toString(36)}-${streamRequestSequence++}`;
   if (options.signal?.aborted) throw new Error("已停止生成");
@@ -154,6 +208,8 @@ export async function streamAiChat(
       config: getAiModelConfig(),
       messages,
       tools: options.tools ?? null,
+      toolChoice: options.toolChoice ?? null,
+      omitToolChoice: options.omitToolChoice ?? false,
       maxTokens: options.maxTokens ?? null,
     });
     if (options.signal?.aborted) throw new Error("已停止生成");

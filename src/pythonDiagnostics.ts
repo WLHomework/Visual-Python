@@ -1,6 +1,12 @@
 import type * as Blockly from "blockly/core";
 
 export type PythonDiagnosis = { message: string; suggestion: string };
+export type PythonDiagnosticMode = "code" | "blocks";
+
+type PythonDiagnosticOptions = {
+  mode: PythonDiagnosticMode;
+  block?: Blockly.Block;
+};
 
 const stripTerminalFormatting = (value: string) => value
   .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
@@ -17,9 +23,8 @@ const extractException = (traceback: string) => {
   };
 };
 
-export function diagnosePythonError(traceback: string, block?: Blockly.Block): PythonDiagnosis {
+export function diagnosePythonError(traceback: string, options: PythonDiagnosticOptions): PythonDiagnosis {
   const { type, detail } = extractException(traceback);
-  const blockLabel = block?.toString(54) || "相关积木";
   const undefinedName = detail.match(/name ['"]([^'"]+)['"] is not defined/i);
   const localName = detail.match(/local variable ['"]([^'"]+)['"]/i);
   const missingModule = detail.match(/No module named ['"]([^'"]+)['"]/i);
@@ -29,6 +34,67 @@ export function diagnosePythonError(traceback: string, block?: Blockly.Block): P
   const unexpectedKeyword = detail.match(/unexpected keyword argument ['"]([^'"]+)['"]/i);
   const key = type === "KeyError" ? detail.replace(/^['"]|['"]$/g, "") : "";
 
+  if (options.mode === "code") {
+    let suggestion = "请检查错误位置附近的变量、函数调用和参数，确认代码符合对应 API 的要求。";
+    if (type === "NameError" && undefinedName) {
+      suggestion = `名称“${undefinedName[1]}”尚未定义。请先定义或赋值该变量或函数，并检查名称拼写是否一致。`;
+    } else if (type === "UnboundLocalError") {
+      suggestion = `局部变量“${localName?.[1] || "该变量"}”在赋值前被使用。请将赋值语句移到首次读取之前；如需修改外层变量，请使用 global 或 nonlocal。`;
+    } else if (type === "IndexError") {
+      suggestion = "索引超出序列范围。索引从 0 开始，请确保索引小于列表、元组或文本的长度。";
+    } else if (type === "KeyError") {
+      suggestion = `字典中不存在键“${key || "当前键"}”。请检查键名，或使用 dict.get() 并提供默认值。`;
+    } else if (type === "ZeroDivisionError") {
+      suggestion = "除数不能为 0。请在除法、整除或取余运算前检查除数。";
+    } else if (type === "ModuleNotFoundError" && missingModule) {
+      suggestion = `找不到模块“${missingModule[1]}”。请检查模块名称，并确认它已安装到当前 Python 环境。`;
+    } else if (type === "ImportError") {
+      suggestion = "模块存在，但无法导入指定名称。请检查 from ... import ... 中的名称以及当前库版本。";
+    } else if (type === "FileNotFoundError") {
+      suggestion = `找不到文件${missingFile ? `“${missingFile[1]}”` : ""}。请检查文件路径、工作目录以及文件是否被移动或删除。`;
+    } else if (type === "PermissionError") {
+      suggestion = "当前用户没有访问权限，或文件正被其他程序占用。请关闭占用程序并检查文件或目录权限。";
+    } else if (type === "IsADirectoryError") {
+      suggestion = "这里需要文件路径，但当前路径指向目录。请改为有效的文件路径。";
+    } else if (type === "NotADirectoryError") {
+      suggestion = "这里需要目录路径，但当前路径指向文件。请改为有效的目录路径。";
+    } else if (type === "FileExistsError") {
+      suggestion = "目标文件或目录已经存在。请更换名称，或在代码中明确处理已存在的目标。";
+    } else if (type === "OSError" && /directory not empty/i.test(detail)) {
+      suggestion = "目录中仍有文件或子目录。请确认是否需要递归删除，或先处理目录中的内容。";
+    } else if (type === "AttributeError") {
+      suggestion = `当前对象没有属性或方法“${attribute?.[1] || "该名称"}”。请检查对象类型以及属性或方法名称。`;
+    } else if (type === "TypeError" && missingArgument) {
+      suggestion = `函数调用缺少参数 ${missingArgument[1]}。请按照函数定义补充参数，并检查参数顺序和名称。`;
+    } else if (type === "TypeError" && unexpectedKeyword) {
+      suggestion = `函数不接受关键字参数“${unexpectedKeyword[1]}”。请修改参数名称，或按照函数签名改用位置参数。`;
+    } else if (type === "TypeError" && /not iterable/i.test(detail)) {
+      suggestion = "当前值不可迭代。循环、解包或成员判断需要列表、元组、集合、字典、文本或其他可迭代对象。";
+    } else if (type === "TypeError" && /not subscriptable/i.test(detail)) {
+      suggestion = "当前对象不支持索引或切片。请确认该值是列表、元组、字典、文本等支持下标的对象。";
+    } else if (type === "TypeError" && /unsupported operand|concatenate/i.test(detail)) {
+      suggestion = "运算两侧的值类型不兼容。请检查是否混用了文本、数字、列表或其他对象，并在需要时先进行类型转换。";
+    } else if (type === "TypeError") {
+      suggestion = "输入类型或函数参数不匹配。请检查参数数量、参数名称和每个值的类型。";
+    } else if (type === "ValueError" && /invalid literal for int|could not convert string to float/i.test(detail)) {
+      suggestion = "文本无法转换为目标数字类型。请确保输入只包含合法数字，并处理空文本和其他字符。";
+    } else if (type === "ValueError") {
+      suggestion = "值的类型正确，但内容或范围无效。请检查转换内容、解包数量、取值范围和函数参数。";
+    } else if (type === "RecursionError") {
+      suggestion = "函数递归次数过多。请添加可靠的结束条件，并确保每次调用都更接近该条件。";
+    } else if (type === "AssertionError") {
+      suggestion = "断言条件为假。请检查断言前的数据状态，或修正断言条件。";
+    } else if (type === "SyntaxError" || type === "IndentationError" || type === "TabError") {
+      if (/return.*outside function/i.test(detail)) suggestion = "return 只能位于函数或方法内部。";
+      else if (/await.*outside async/i.test(detail)) suggestion = "await 只能位于 async def 定义的异步函数内部。";
+      else if (/(break|continue).*outside loop/i.test(detail)) suggestion = "break 和 continue 只能位于 for 或 while 循环内部。";
+      else if (/expected an indented block/i.test(detail)) suggestion = "复合语句缺少缩进代码块。请在函数、条件、循环、异常处理或上下文语句内部添加代码。";
+      else suggestion = "Python 语法无效。请检查错误位置附近的名称、参数顺序、表达式和代码结构。";
+    }
+    return { message: `${type}: ${detail}`, suggestion };
+  }
+
+  const blockLabel = options.block?.toString(54) || "相关积木";
   let suggestion = `检查“${blockLabel}”的输入连接和生成代码，确认传入值符合该操作的要求。`;
   if (type === "NameError" && undefinedName) {
     suggestion = `名称“${undefinedName[1]}”尚未定义。请先创建并赋值该变量或函数，并检查名称拼写是否一致。`;

@@ -121,6 +121,7 @@ struct AiChatCompletionResult {
     content: String,
     tool_calls: Vec<AiToolCall>,
     model: String,
+    truncated: bool,
     prompt_tokens: Option<u64>,
     completion_tokens: Option<u64>,
     total_tokens: Option<u64>,
@@ -925,6 +926,25 @@ fn manim_output_flags(
     }
 }
 
+fn manim_video_needs_frame(code: &str) -> bool {
+    code.lines().any(|line| {
+        let line = line.trim_start();
+        !line.starts_with('#') && line.starts_with("def construct")
+    }) && !code.lines().any(|line| {
+        let line = line.trim_start();
+        !line.starts_with('#') && (line.contains(".play(") || line.contains(".wait("))
+    })
+}
+
+fn prepare_manim_video_code(code: &str, scene_name: &str) -> String {
+    if !manim_video_needs_frame(code) {
+        return code.to_owned();
+    }
+    format!(
+        "{code}\n\n# Visual Python keeps static scenes exportable as MP4.\n_visual_python_original_construct = {scene_name}.construct\n\ndef _visual_python_construct_with_frame(self):\n    _visual_python_original_construct(self)\n    self.wait(0.1)\n\n{scene_name}.construct = _visual_python_construct_with_frame\n"
+    )
+}
+
 fn manim_resolution_override(
     output_type: &str,
     image_size_mode: &str,
@@ -1568,16 +1588,137 @@ fn ai_message_content(payload: &Value) -> Option<String> {
     ai_text_content(content)
 }
 
+fn unique_ai_tool_call_id(id: &str, index: usize, used_ids: &mut HashSet<String>) -> String {
+    let base_id = if id.trim().is_empty() {
+        format!("call-{index}")
+    } else {
+        id.trim().to_owned()
+    };
+    let mut unique_id = base_id.clone();
+    let mut suffix = 2;
+    while used_ids.contains(&unique_id) {
+        unique_id = format!("{base_id}-{suffix}");
+        suffix += 1;
+    }
+    used_ids.insert(unique_id.clone());
+    unique_id
+}
+
 fn ai_message_tool_calls(payload: &Value) -> Vec<AiToolCall> {
-    payload
+    let Some(tool_calls) = payload
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
         .and_then(|choice| choice.get("message"))
         .and_then(|message| message.get("tool_calls"))
-        .cloned()
-        .and_then(|value| serde_json::from_value(value).ok())
-        .unwrap_or_default()
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+
+    let mut used_ids = HashSet::new();
+    tool_calls
+        .iter()
+        .enumerate()
+        .filter_map(|(index, call)| {
+            let function = call.get("function")?.as_object()?;
+            let name = function.get("name").and_then(Value::as_str)?.trim();
+            if name.is_empty() {
+                return None;
+            }
+
+            let arguments = match function.get("arguments") {
+                Some(Value::String(value)) if !value.trim().is_empty() => value.clone(),
+                Some(Value::String(_)) => "{}".into(),
+                Some(value) if !value.is_null() => {
+                    serde_json::to_string(value).unwrap_or_else(|_| "{}".into())
+                }
+                _ => "{}".into(),
+            };
+            let id = call.get("id").and_then(Value::as_str).unwrap_or_default();
+            let kind = call
+                .get("type")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("function")
+                .to_owned();
+
+            Some(AiToolCall {
+                id: unique_ai_tool_call_id(id, index, &mut used_ids),
+                kind,
+                function: AiToolFunctionCall {
+                    name: name.to_owned(),
+                    arguments,
+                },
+            })
+        })
+        .collect()
+}
+
+fn merge_stream_metadata(target: &mut String, value: &str) {
+    if value.is_empty() {
+        return;
+    }
+    if target.is_empty() {
+        *target = value.to_owned();
+        return;
+    }
+    if target == value || target.starts_with(value) {
+        return;
+    }
+    if value.starts_with(target.as_str()) {
+        *target = value.to_owned();
+    } else {
+        target.push_str(value);
+    }
+}
+
+fn merge_stream_arguments(target: &mut String, value: &str) {
+    if value.is_empty() || target == value {
+        return;
+    }
+    if target.is_empty() || value.starts_with(target.as_str()) {
+        *target = value.to_owned();
+    } else {
+        target.push_str(value);
+    }
+}
+
+fn stream_tool_call_index(
+    delta: &Value,
+    fallback_index: usize,
+    delta_count: usize,
+    calls: &[AiToolCallAccumulator],
+) -> Option<usize> {
+    if let Some(index) = delta.get("index").and_then(Value::as_u64) {
+        return Some(index as usize);
+    }
+    let id = delta.get("id").and_then(Value::as_str).unwrap_or_default();
+    if !id.trim().is_empty() {
+        if let Some(index) = calls.iter().position(|call| call.id == id) {
+            return Some(index);
+        }
+    }
+    let name = delta
+        .get("function")
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !name.trim().is_empty() {
+        if let Some(index) = calls.iter().position(|call| call.name == name) {
+            return Some(index);
+        }
+    }
+    if delta_count > 1 {
+        return Some(fallback_index);
+    }
+    if !id.trim().is_empty() || !name.trim().is_empty() {
+        return Some(calls.len());
+    }
+    match calls.len() {
+        0 | 1 => Some(0),
+        _ => None,
+    }
 }
 
 fn merge_ai_stream_tool_calls(payload: &Value, calls: &mut Vec<AiToolCallAccumulator>) {
@@ -1592,27 +1733,25 @@ fn merge_ai_stream_tool_calls(payload: &Value, calls: &mut Vec<AiToolCallAccumul
         return;
     };
     for (fallback_index, delta) in deltas.iter().enumerate() {
-        let index = delta
-            .get("index")
-            .and_then(Value::as_u64)
-            .map(|value| value as usize)
-            .unwrap_or(fallback_index);
+        let Some(index) = stream_tool_call_index(delta, fallback_index, deltas.len(), calls) else {
+            continue;
+        };
         while calls.len() <= index {
             calls.push(AiToolCallAccumulator::default());
         }
         let call = &mut calls[index];
         if let Some(value) = delta.get("id").and_then(Value::as_str) {
-            call.id.push_str(value);
+            merge_stream_metadata(&mut call.id, value);
         }
         if let Some(value) = delta.get("type").and_then(Value::as_str) {
-            call.kind.push_str(value);
+            merge_stream_metadata(&mut call.kind, value);
         }
         if let Some(function) = delta.get("function") {
             if let Some(value) = function.get("name").and_then(Value::as_str) {
-                call.name.push_str(value);
+                merge_stream_metadata(&mut call.name, value);
             }
             if let Some(value) = function.get("arguments").and_then(Value::as_str) {
-                call.arguments.push_str(value);
+                merge_stream_arguments(&mut call.arguments, value);
             }
         }
     }
@@ -1655,16 +1794,13 @@ fn ai_stream_tool_argument_deltas(payload: &Value) -> Vec<(usize, Option<String>
 }
 
 fn finish_ai_stream_tool_calls(calls: Vec<AiToolCallAccumulator>) -> Vec<AiToolCall> {
+    let mut used_ids = HashSet::new();
     calls
         .into_iter()
         .enumerate()
         .filter(|(_, call)| !call.name.trim().is_empty())
         .map(|(index, call)| AiToolCall {
-            id: if call.id.trim().is_empty() {
-                format!("call-{index}")
-            } else {
-                call.id
-            },
+            id: unique_ai_tool_call_id(&call.id, index, &mut used_ids),
             kind: if call.kind.trim().is_empty() {
                 "function".into()
             } else {
@@ -1761,6 +1897,8 @@ async fn perform_ai_chat_completion(
     config: AiModelConfig,
     messages: Vec<AiChatMessage>,
     tools: Option<Vec<Value>>,
+    tool_choice: Option<Value>,
+    omit_tool_choice: bool,
     api_key: Option<String>,
     max_tokens: u32,
     stream_target: Option<AiStreamTarget>,
@@ -1844,6 +1982,25 @@ async fn perform_ai_chat_completion(
             return Err("Function Calling 工具定义总长度不能超过 120000 个字符".into());
         }
     }
+    if tool_choice.is_some() && tools.is_none() {
+        return Err("tool_choice 需要同时提供 Function Calling 工具".into());
+    }
+    if let Some(choice) = &tool_choice {
+        let valid = match choice {
+            Value::String(value) => matches!(value.as_str(), "auto" | "required"),
+            Value::Object(value) => value.get("type").and_then(Value::as_str) == Some("function")
+                && value
+                    .get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| !name.trim().is_empty() && name.len() <= 200),
+            _ => false,
+        };
+        if !valid {
+            return Err("Function Calling tool_choice 无效".into());
+        }
+    }
     let request_messages = messages
         .iter()
         .map(|message| {
@@ -1874,7 +2031,9 @@ async fn perform_ai_chat_completion(
     }
     if let Some(definitions) = tools {
         request_body["tools"] = Value::Array(definitions);
-        request_body["tool_choice"] = Value::String("auto".into());
+        if !omit_tool_choice {
+            request_body["tool_choice"] = tool_choice.unwrap_or_else(|| Value::String("auto".into()));
+        }
     }
     let request = client
         .post(openai_chat_endpoint(&base_url))
@@ -2061,17 +2220,13 @@ async fn perform_ai_chat_completion(
                 }
             }
         }
-        if finish_reason.as_deref() == Some("length") {
-            return Err(format!(
-                "AI 响应达到 {max_tokens} token 上限，请缩小任务或提高输出限制"
-            ));
-        }
+        let truncated = finish_reason.as_deref() == Some("length");
         let content = content.trim().to_string();
         let tool_calls = finish_ai_stream_tool_calls(streamed_tool_calls);
-        if content.is_empty() && tool_calls.is_empty() && received_reasoning {
+        if !truncated && content.is_empty() && tool_calls.is_empty() && received_reasoning {
             return Err("AI 只返回了思考过程，没有生成最终内容，请关闭模型思考模式后重试".into());
         }
-        if content.is_empty() && tool_calls.is_empty() {
+        if !truncated && content.is_empty() && tool_calls.is_empty() {
             return Err("AI 流式响应中没有找到文本或工具调用".into());
         }
         if let Some(value) = supplied_key.as_deref() {
@@ -2081,6 +2236,7 @@ async fn perform_ai_chat_completion(
             content,
             tool_calls,
             model: response_model,
+            truncated,
             prompt_tokens,
             completion_tokens,
             total_tokens,
@@ -2112,6 +2268,7 @@ async fn perform_ai_chat_completion(
             .and_then(Value::as_str)
             .unwrap_or(model)
             .to_string(),
+        truncated: false,
         prompt_tokens: usage
             .and_then(|value| value.get("prompt_tokens"))
             .and_then(Value::as_u64),
@@ -2148,6 +2305,8 @@ async fn test_ai_connection(
             tool_calls: None,
         }],
         None,
+        None,
+        false,
         api_key,
         32,
         None,
@@ -2161,7 +2320,7 @@ async fn ai_chat_completion(
     messages: Vec<AiChatMessage>,
     tools: Option<Vec<Value>>,
 ) -> Result<AiChatCompletionResult, String> {
-    perform_ai_chat_completion(config, messages, tools, None, 1200, None).await
+    perform_ai_chat_completion(config, messages, tools, None, false, None, 1200, None).await
 }
 
 #[tauri::command]
@@ -2172,6 +2331,8 @@ async fn ai_chat_completion_stream(
     config: AiModelConfig,
     messages: Vec<AiChatMessage>,
     tools: Option<Vec<Value>>,
+    tool_choice: Option<Value>,
+    omit_tool_choice: Option<bool>,
     max_tokens: Option<u32>,
 ) -> Result<AiChatCompletionResult, String> {
     if request_id.trim().is_empty() || request_id.len() > 100 {
@@ -2196,6 +2357,8 @@ async fn ai_chat_completion_stream(
         config,
         messages,
         tools,
+        tool_choice,
+        omit_tool_choice.unwrap_or(false),
         None,
         max_tokens,
         Some(AiStreamTarget {
@@ -4269,12 +4432,15 @@ fn check_python_packages(
         return Ok(Vec::new());
     }
     let script = r#"
-import importlib.util, json, sys
+import importlib.metadata, importlib.util, json, sys
 packages = json.loads(sys.stdin.read())
 result = []
 for name in packages:
     candidates = [name, name.replace("-", "_")]
-    installed = any(importlib.util.find_spec(candidate) is not None for candidate in candidates)
+    try:
+        installed = importlib.metadata.version(name) is not None
+    except importlib.metadata.PackageNotFoundError:
+        installed = any(importlib.util.find_spec(candidate) is not None for candidate in candidates)
     result.append({"name": name, "installed": installed})
 print(json.dumps(result))
 "#;
@@ -5081,8 +5247,6 @@ fn render_manim(
     fs::create_dir_all(&work_dir)
         .map_err(|error| format!("cannot create Manim work directory: {error}"))?;
     let script_path = work_dir.join("scene.py");
-    fs::write(&script_path, code)
-        .map_err(|error| format!("cannot write Manim scene file: {error}"))?;
 
     let config = render_config.unwrap_or(ManimRenderConfig {
         output_type: default_manim_output_type(),
@@ -5130,6 +5294,13 @@ fn render_manim(
     if !matches!(config.renderer.as_str(), "cairo" | "opengl") {
         return Err("invalid Manim renderer".into());
     }
+    let render_code = if config.output_type == "video" {
+        prepare_manim_video_code(&code, &scene_name)
+    } else {
+        code
+    };
+    fs::write(&script_path, render_code)
+        .map_err(|error| format!("cannot write Manim scene file: {error}"))?;
 
     let task_id = tasks.next_id.fetch_add(1, Ordering::Relaxed) + 1;
     let mut command = Command::new(python_path.as_deref().unwrap_or("python"));
@@ -5701,6 +5872,72 @@ mod tests {
     }
 
     #[test]
+    fn extracts_non_stream_tool_calls_individually_when_metadata_is_incomplete() {
+        let calls = ai_message_tool_calls(&json!({
+            "choices": [{ "message": { "content": null, "tool_calls": [
+                { "function": { "name": "get_context", "arguments": "" } },
+                { "id": "same", "function": { "name": "get_scene", "arguments": {} } },
+                { "id": "same", "type": "function", "function": { "name": "check_code", "arguments": "{}" } }
+            ] } }]
+        }));
+
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].id, "call-0");
+        assert_eq!(calls[0].kind, "function");
+        assert_eq!(calls[0].function.name, "get_context");
+        assert_eq!(calls[0].function.arguments, "{}");
+        assert_eq!(calls[1].function.arguments, "{}");
+        assert_eq!(calls[2].id, "same-2");
+    }
+
+    #[test]
+    fn merges_stream_tool_fragments_by_id_when_index_is_missing() {
+        let mut streamed = Vec::new();
+        merge_ai_stream_tool_calls(
+            &json!({ "choices": [{ "delta": { "tool_calls": [
+                { "index": 0, "id": "call-1", "type": "function", "function": { "name": "get_context", "arguments": "{}" } },
+                { "index": 1, "id": "call-2", "type": "function", "function": { "name": "get_scene", "arguments": "{\"sceneId\":\"" } }
+            ] } }] }),
+            &mut streamed,
+        );
+        merge_ai_stream_tool_calls(
+            &json!({ "choices": [{ "delta": { "tool_calls": [{
+                "id": "call-2", "function": { "arguments": "demo\"}" }
+            }] } }] }),
+            &mut streamed,
+        );
+
+        let calls = finish_ai_stream_tool_calls(streamed);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].id, "call-1");
+        assert_eq!(calls[0].function.arguments, "{}");
+        assert_eq!(calls[1].id, "call-2");
+        assert_eq!(calls[1].function.arguments, "{\"sceneId\":\"demo\"}");
+    }
+
+    #[test]
+    fn ignores_repeated_stream_tool_metadata() {
+        let mut streamed = Vec::new();
+        for arguments in ["{\"include", "Resources\":true}"] {
+            merge_ai_stream_tool_calls(
+                &json!({ "choices": [{ "delta": { "tool_calls": [{
+                    "index": 0,
+                    "id": "call-1",
+                    "type": "function",
+                    "function": { "name": "get_context", "arguments": arguments }
+                }] } }] }),
+                &mut streamed,
+            );
+        }
+
+        let calls = finish_ai_stream_tool_calls(streamed);
+        assert_eq!(calls[0].id, "call-1");
+        assert_eq!(calls[0].kind, "function");
+        assert_eq!(calls[0].function.name, "get_context");
+        assert_eq!(calls[0].function.arguments, "{\"includeResources\":true}");
+    }
+
+    #[test]
     fn recognizes_reasoning_and_finish_events() {
         let reasoning = json!({ "choices": [{ "delta": { "reasoning_content": "thinking" } }] });
         let finished = json!({ "choices": [{ "delta": {}, "finish_reason": "length" }] });
@@ -6269,6 +6506,19 @@ mod tests {
             "Manim completed without producing a PNG image"
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn identifies_static_manim_scenes_that_need_a_video_frame() {
+        assert!(manim_video_needs_frame(
+            "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        self.add(Circle())\n"
+        ));
+        assert!(!manim_video_needs_frame(
+            "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        self.play(Create(Circle()))\n"
+        ));
+        assert!(!manim_video_needs_frame(
+            "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        self.wait(1)\n"
+        ));
     }
 
     #[test]

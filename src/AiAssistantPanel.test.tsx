@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { buildPlanExecutionRequest, buildTaskResumeRequest, createInitialTaskPlan, extractPlanSteps, formatAgentElapsed, formatAiTokenCount, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, normalizeAssistantMarkdown, prepareTaskPlanForResume, safeExternalMarkdownUrl, storeConversationState, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
-import type { AiAgentActivity } from "./aiAgent";
+import { AgentActivityRow, AgentResponseFooter, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, settlePermissionResolvers, storeConversationState, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
+import type { AiAgentActivity } from "./agentV2";
 
 describe("AI assistant Markdown", () => {
   it("unwraps a model-supplied Markdown fence", () => {
@@ -41,6 +41,209 @@ describe("AI assistant Markdown", () => {
     expect(html).toContain("<ol>");
     expect(html).toContain("<li>斜率与截距</li>");
     expect(html).not.toContain("<button");
+  });
+
+  it("places completion metadata in the response footer", () => {
+    const html = renderToStaticMarkup(<AgentResponseFooter status="完成" meta="2 次操作 · 9 行代码 · 9 秒"/>);
+    expect(html).toContain('class="ai-agent-response-footer"');
+    expect(html.indexOf("完成")).toBeLessThan(html.indexOf("2 次操作"));
+    expect(html).not.toContain("<svg");
+  });
+
+  it("hides successful tool JSON and keeps only a code diff", () => {
+    const codeDiff = "@@ 第 6 行 @@\n- pass\n+ self.add(Circle())";
+    expect(formatAgentToolResult({
+      id: "edit-1",
+      kind: "tool",
+      status: "done",
+      title: "定点修改代码",
+      toolName: "edit_code",
+      result: JSON.stringify({ diff: codeDiff, changed: true }),
+    })).toBe(codeDiff);
+    expect(formatAgentToolResult({
+      id: "check-1",
+      kind: "tool",
+      status: "done",
+      title: "验证场景结构",
+      toolName: "validate_scene",
+      result: JSON.stringify({ valid: true, issues: [] }),
+    })).toBeNull();
+  });
+
+  it("shows dependency findings as completed checks instead of generic failures", () => {
+    expect(formatAgentToolResult({
+      id: "dependencies-1",
+      kind: "tool",
+      status: "done",
+      title: "检查 Python 依赖",
+      toolName: "check_dependencies",
+      result: JSON.stringify({ ok: true, checked: true, allInstalled: false, packages: [{ name: "numpy", installed: true }], missing: ["manim"] }),
+    })).toBe("未安装：manim");
+    expect(formatAgentToolResult({
+      id: "dependencies-2",
+      kind: "tool",
+      status: "done",
+      title: "检查 Python 依赖",
+      toolName: "check_dependencies",
+      result: JSON.stringify({ ok: true, checked: true, allInstalled: true, packages: [{ name: "numpy", installed: true }], missing: [] }),
+    })).toBeNull();
+  });
+
+  it("keeps validation diagnostics visible when a check returns a business failure", () => {
+    expect(formatAgentToolResult({
+      id: "code-check-1",
+      kind: "tool",
+      status: "done",
+      title: "检查 Python 代码",
+      toolName: "check_code",
+      result: JSON.stringify({ valid: false, error: "SyntaxError: invalid syntax" }),
+    })).toBe("SyntaxError: invalid syntax");
+    expect(formatAgentToolResult({
+      id: "render-check-1",
+      kind: "tool",
+      status: "done",
+      title: "检查渲染结果",
+      toolName: "inspect_rendered_output",
+      result: JSON.stringify({ valid: false, warning: "输出画面疑似空白" }),
+    })).toBe("输出画面疑似空白");
+  });
+
+  it("reduces tracebacks to the final actionable exception", () => {
+    expect(formatAgentToolResult({
+      id: "code-check-traceback",
+      kind: "tool",
+      status: "error",
+      title: "检查 Python 代码",
+      toolName: "check_code",
+      result: "Traceback (most recent call last):\n  File \"scene.py\", line 6\n    self.play(Circle())\nTypeError: Unexpected argument Circle passed to Scene.play().",
+    })).toBe("TypeError: Unexpected argument Circle passed to Scene.play().");
+  });
+
+  it("does not expose malformed tool protocol or JSON fragments", () => {
+    expect(formatAgentToolResult({
+      id: "protocol-error",
+      kind: "tool",
+      status: "error",
+      title: "修改代码",
+      toolName: "edit_code",
+      result: '<｜DSML｜tool_calls><｜DSML｜invoke name="edit_code">',
+    })).toBe("工具返回格式无效");
+    expect(formatAgentToolResult({
+      id: "json-error",
+      kind: "tool",
+      status: "error",
+      title: "检查代码",
+      toolName: "check_code",
+      result: '{"ok":false,"error":"SyntaxError: invalid syntax"',
+    })).toBe("工具返回格式无效");
+  });
+
+  it("renders a failed tool once with its concise reason", () => {
+    const html = renderToStaticMarkup(<AgentActivityRow
+      activity={{
+        id: "tool-error",
+        kind: "tool",
+        status: "error",
+        title: "检查 Python 代码",
+        toolName: "check_code",
+        detail: "失败",
+        result: JSON.stringify({ ok: false, error: "SyntaxError: invalid syntax" }),
+      }}
+      onRevealCodeChange={() => undefined}
+      onRevealProblem={() => undefined}
+    />);
+    expect(html).toContain("检查 Python 代码");
+    expect(html).toContain("SyntaxError: invalid syntax");
+    expect(html).not.toContain(">失败<");
+    expect(html).not.toContain("<details");
+  });
+
+  it("renders a denied tool as a concise cancellation instead of a technical failure", () => {
+    const html = renderToStaticMarkup(<AgentActivityRow
+      activity={{
+        id: "tool-denied",
+        kind: "tool",
+        status: "error",
+        title: "渲染 Manim",
+        toolName: "render_manim",
+        detail: "用户拒绝了这次操作",
+        result: JSON.stringify({ ok: false, error: "用户拒绝了这次操作" }),
+      }}
+      onRevealCodeChange={() => undefined}
+      onRevealProblem={() => undefined}
+    />);
+    expect(html).toContain('class="ai-agent-tool-line denied"');
+    expect(html).toContain("已取消");
+    expect(html).not.toContain("用户拒绝了这次操作");
+  });
+
+  it("formats task-level protocol and structured errors for users", () => {
+    expect(formatAgentRunError("AI 请求失败（HTTP 400）：An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'. (insufficient tool messages following tool_calls message)"))
+      .toBe("模型返回的工具调用响应不完整，请重试。");
+    expect(formatAgentRunError('{"ok":false,"error":{"message":"API Key 无效"}}'))
+      .toBe("API Key 无效");
+    expect(formatAgentRunError('AI 请求失败（HTTP 400）：{"error":{"message":"API Key 无效"}}'))
+      .toBe("AI 请求失败（HTTP 400）：API Key 无效");
+  });
+
+  it("renders successful scene validation with the same verification status as code checks", () => {
+    const html = renderToStaticMarkup(<AgentActivityRow
+      activity={{
+        id: "validate-1",
+        kind: "tool",
+        status: "done",
+        title: "验证场景结构",
+        toolName: "validate_scene",
+        result: JSON.stringify({ valid: true, issues: [] }),
+      }}
+      onRevealCodeChange={() => undefined}
+      onRevealProblem={() => undefined}
+    />);
+    expect(html).toContain("ai-agent-event verification done");
+    expect(html).toContain("验证场景结构通过");
+    expect(html).not.toContain("验证场景结构</strong>");
+  });
+
+  it("renders completed Manim rendering with the same verification status", () => {
+    const html = renderToStaticMarkup(<AgentActivityRow
+      activity={{
+        id: "render-1",
+        kind: "message",
+        channel: "verification",
+        status: "done",
+        title: "渲染 Manim 通过",
+      }}
+      onRevealCodeChange={() => undefined}
+      onRevealProblem={() => undefined}
+    />);
+    expect(html).toContain("ai-agent-event verification done");
+    expect(html).toContain("渲染 Manim 通过");
+  });
+
+  it("renders code changes as a compact file summary", () => {
+    const html = renderToStaticMarkup(<CodeChangeSummary
+      activity={{
+        id: "edit-2",
+        kind: "tool",
+        status: "done",
+        title: "定点修改代码",
+        toolName: "edit_code",
+        codeChange: { before: "line 1\nline 2\n", after: "line 1\nnew 2\nnew 3\n", sceneName: "purple_circle" },
+      }}
+      onRevealCodeChange={() => undefined}
+    />);
+    expect(html).toContain("purple_circle");
+    expect(html).not.toContain("purple_circle.py");
+    expect(html).toContain(">+2<");
+    expect(html).toContain(">-1<");
+    expect(html).toContain("查看变更");
+    expect(html).toContain("ai-agent-code-change");
+    expect(html).not.toContain("ai-agent-code-change-icon");
+    expect(html.match(/<button/g)).toHaveLength(1);
+  });
+
+  it("counts added and removed lines from a code diff", () => {
+    expect(formatCodeChangeStats("@@ 第 2 行 @@\n- old\n+ new\n+ extra")).toEqual({ added: 2, removed: 1 });
   });
 
   it("labels and highlights fenced Python code", () => {
@@ -90,6 +293,52 @@ describe("AI assistant Markdown", () => {
   });
 });
 
+describe("AI assistant streaming events", () => {
+  it("does not render an extra spinner for an empty streaming response", () => {
+    const html = renderToStaticMarkup(<AgentActivityRow
+      activity={{ id: "message-1", kind: "message", status: "running", title: "" }}
+      onRevealCodeChange={() => undefined}
+      onRevealProblem={() => undefined}
+    />);
+    expect(html).toBe("");
+  });
+});
+
+describe("AI assistant failed-run cleanup", () => {
+  it("settles all pending permission requests when the panel is disposed", () => {
+    const resolvers = new Map<number, (approved: boolean) => void>();
+    const results: boolean[] = [];
+    resolvers.set(1, (approved) => results.push(approved));
+    resolvers.set(2, (approved) => results.push(approved));
+
+    settlePermissionResolvers(resolvers);
+
+    expect(results).toEqual([false, false]);
+    expect(resolvers.size).toBe(0);
+  });
+
+  it("settles streaming activities when the request fails", () => {
+    expect(finalizeAgentRunActivities([
+      { id: "thinking", kind: "message", channel: "thinking", status: "running", title: "思考中" },
+      { id: "tool", kind: "tool", status: "done", title: "已执行" },
+      { id: "reply", kind: "message", status: "running", title: "" },
+    ], "error")).toEqual([
+      { id: "thinking", kind: "message", channel: "thinking", status: "error", title: "思考中" },
+      { id: "tool", kind: "tool", status: "done", title: "已执行" },
+      { id: "reply", kind: "message", status: "error", title: "" },
+    ]);
+  });
+
+  it("removes the streamed copy when the final response is rendered", () => {
+    const activities: AiAgentActivity[] = [
+      { id: "message-1", kind: "message", channel: "message", status: "done", title: "任务已完成。" },
+      { id: "thinking-1", kind: "message", channel: "thinking", status: "done", title: "已完成判断。" },
+    ];
+    expect(removeFinalMessageActivity(activities, "任务已完成。"))
+      .toEqual([activities[1]]);
+  });
+});
+
 describe("AI assistant activity grouping", () => {
   it("groups consecutive completed routine tools but preserves important activities", () => {
     const activities: AiAgentActivity[] = [
@@ -114,6 +363,30 @@ describe("AI assistant activity grouping", () => {
     expect(groupAgentActivities([activity])).toEqual([{ kind: "activity", activity }]);
   });
 
+  it("does not show duplicate decision activities in the timeline", () => {
+    const decision: AiAgentActivity = { id: "decision-1", kind: "message", channel: "decision", status: "done", title: "决定执行：读取当前工程", toolName: "get_context" };
+    expect(groupAgentActivities([decision])).toEqual([]);
+  });
+
+  it("hides internal tool-group activation from the activity timeline", () => {
+    expect(groupAgentActivities([{
+      id: "activate-1",
+      kind: "tool",
+      status: "done",
+      title: "扩展工具能力",
+      toolName: "activate_tool_group",
+      result: JSON.stringify({ ok: true, activated: true, group: "dependencies" }),
+    }])).toEqual([]);
+  });
+
+  it("shows reasoning above the assistant message from the same round", () => {
+    const message: AiAgentActivity = { id: "message-1", kind: "message", channel: "message", status: "running", title: "正在回复" };
+    const thinking: AiAgentActivity = { id: "thinking-1", kind: "message", channel: "thinking", status: "done", title: "思考过程" };
+    const grouped = groupAgentActivities([message, thinking]);
+    expect(grouped.map((entry) => entry.kind === "activity" ? entry.activity.id : entry.id))
+      .toEqual(["thinking-1", "message-1"]);
+  });
+
   it("summarizes routine tools by stable agent stages", () => {
     const activities: AiAgentActivity[] = [
       { id: "1", kind: "tool", status: "done", title: "读取项目", toolName: "get_context" },
@@ -123,6 +396,44 @@ describe("AI assistant activity grouping", () => {
       { id: "5", kind: "tool", status: "done", title: "保存工程", toolName: "save_project" },
     ];
     expect(summarizeAgentActivities(activities)).toBe("查看 2 项 · 检查 1 项 · 执行 1 项 · 其他 1 项");
+  });
+
+  it("groups successful structured tool results without showing their JSON", () => {
+    const activities: AiAgentActivity[] = [
+      { id: "context", kind: "tool", status: "done", title: "读取工程", toolName: "get_context", result: JSON.stringify({ ok: true }) },
+      { id: "check", kind: "tool", status: "done", title: "检查代码", toolName: "check_code", result: JSON.stringify({ valid: true, issues: [] }) },
+    ];
+    expect(groupAgentActivities(activities)[0].kind).toBe("group");
+  });
+
+  it("keeps successful scene validation visible as a verification event", () => {
+    const grouped = groupAgentActivities([{
+      id: "validate-1",
+      kind: "tool",
+      status: "done",
+      title: "验证场景结构",
+      toolName: "validate_scene",
+      result: JSON.stringify({ valid: true, issues: [] }),
+    }]);
+    expect(grouped).toEqual([{ kind: "activity", activity: expect.objectContaining({ id: "validate-1" }) }]);
+  });
+
+  it("removes the completed Manim start row after the final verification", () => {
+    const grouped = groupAgentActivities([
+      { id: "render-1", kind: "tool", status: "done", title: "渲染 Manim", toolName: "render_manim", result: JSON.stringify({ ok: true, started: true }) },
+      { id: "observation-1", kind: "message", channel: "verification", status: "done", title: "渲染 Manim 通过", toolName: "render_manim" },
+    ]);
+    expect(grouped).toEqual([{ kind: "activity", activity: expect.objectContaining({ id: "observation-1" }) }]);
+  });
+
+  it("hides a pending permission tool row because the confirmation prompt represents it", () => {
+    expect(groupAgentActivities([{
+      id: "render-1",
+      kind: "tool",
+      status: "running",
+      title: "渲染 Manim",
+      toolName: "render_manim",
+    }], "render_manim")).toEqual([]);
   });
 });
 

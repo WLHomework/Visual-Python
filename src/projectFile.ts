@@ -5,6 +5,7 @@ import { validateSceneDocuments, type SceneDocument } from "./sceneDocuments";
 
 export type ProjectFile = {
   version: 1;
+  projectId?: string;
   name: string;
   workspace: object;
   plugins?: PluginProjectState;
@@ -19,7 +20,12 @@ export type ProjectFile = {
 export type DraftProject = ProjectFile & { path: string | null; savedAt: number };
 
 const resourceTypes = new Set<ProjectResourceType>(["audio", "image", "font", "other"]);
+const projectIdPattern = /^[A-Za-z0-9_-]{1,128}$/;
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+export function createProjectId(): string {
+  return `project-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+}
 
 const validRelativeResourcePath = (value: string) => {
   if (!value || value.length > 500 || /^(?:[A-Za-z]:[\\/]|[\\/])/.test(value)) return false;
@@ -59,6 +65,7 @@ const parseResources = (value: unknown): ProjectResource[] | undefined => {
 };
 
 export function validateProjectFile(value: unknown): ProjectFile {
+  if (isRecord(value) && value.projectId !== undefined && (typeof value.projectId !== "string" || !projectIdPattern.test(value.projectId))) throw new Error("工程 ID 无效");
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.workspace)) throw new Error("不支持的工程格式");
   if (typeof value.name !== "string" || !value.name.trim() || value.name.length > 260) throw new Error("工程名称无效");
   if (value.sourceCode !== undefined && typeof value.sourceCode !== "string") throw new Error("工程源代码无效");
@@ -71,6 +78,7 @@ export function validateProjectFile(value: unknown): ProjectFile {
   const resources = parseResources(value.resources);
   return {
     version: 1,
+    ...(typeof value.projectId === "string" ? { projectId: value.projectId } : {}),
     name: value.name,
     workspace: value.workspace,
     ...(plugins ? { plugins } : {}),

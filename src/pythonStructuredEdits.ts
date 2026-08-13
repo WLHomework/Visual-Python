@@ -27,13 +27,25 @@ export type PythonStructure = {
 };
 
 function findFunction(structure: PythonStructure, className: string | undefined, functionName: string) {
-  const functions = className
-    ? structure.classes.find((item) => item.name === className)?.methods
-    : structure.functions;
-  if (!functions) throw new Error(`找不到类 ${className}`);
-  const target = functions.find((item) => item.name === functionName);
-  if (!target) throw new Error(`找不到${className ? `类 ${className} 的` : "顶层"}函数 ${functionName}`);
-  return target;
+  if (className) {
+    const functions = structure.classes.find((item) => item.name === className)?.methods;
+    if (!functions) throw new Error(`找不到类 ${className}`);
+    const target = functions.find((item) => item.name === functionName);
+    if (!target) throw new Error(`找不到类 ${className} 的函数 ${functionName}`);
+    return target;
+  }
+
+  const topLevelMatches = structure.functions.filter((item) => item.name === functionName);
+  if (topLevelMatches.length === 1) return topLevelMatches[0];
+  if (topLevelMatches.length > 1) throw new Error(`顶层函数 ${functionName} 不唯一，请提供 className`);
+
+  const classMatches = structure.classes.flatMap((item) => {
+    const method = item.methods.find((candidate) => candidate.name === functionName);
+    return method ? [{ className: item.name, method }] : [];
+  });
+  if (classMatches.length === 1) return classMatches[0].method;
+  if (classMatches.length > 1) throw new Error(`函数 ${functionName} 存在于多个类，请提供 className`);
+  throw new Error(`找不到顶层函数 ${functionName}`);
 }
 
 function normalizedBodyLines(value: string, indent: string): string[] {

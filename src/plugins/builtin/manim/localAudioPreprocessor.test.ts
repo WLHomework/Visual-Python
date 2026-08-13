@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createLocalAudioBeginMarker, createLocalAudioCueMarker, createLocalAudioEndMarker } from "./localAudioMarkers";
-import { ManimLocalAudioError, prepareManimLocalAudio } from "./localAudioPreprocessor";
+import { prepareManimLocalAudio } from "./localAudioPreprocessor";
 
 describe("Manim local audio preprocessing", () => {
   it("replaces a standalone cue marker with add_sound", async () => {
@@ -25,6 +25,11 @@ describe("Manim local audio preprocessing", () => {
   it("rejects dynamic paths before rendering", async () => {
     const begin = createLocalAudioBeginMarker({ version: 1, pathExpression: "audio_path" });
     await expect(prepareManimLocalAudio(`${begin}\n${createLocalAudioEndMarker()}`, async () => ({ path: "unused", durationSeconds: 1 })))
-      .rejects.toBeInstanceOf(ManimLocalAudioError);
+      .rejects.toThrow("本地音频标记缺少静态文件路径");
+  });
+
+  it("describes malformed timelines with marker terminology", async () => {
+    await expect(prepareManimLocalAudio(createLocalAudioEndMarker(), async () => ({ path: "unused", durationSeconds: 1 })))
+      .rejects.toThrow("本地音频时间轴缺少开始标记");
   });
 });

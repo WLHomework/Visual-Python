@@ -59,7 +59,7 @@ describe("Manim voiceover preprocessing", () => {
   });
 
   it("rejects dynamic expressions that cannot be synthesized before rendering", async () => {
-    await expect(prepareManimVoiceovers(createVoiceoverMarker("cue", "answer"), async () => ({ path: "voice.wav", durationSeconds: 1 }))).rejects.toThrow("Python 文本积木");
+    await expect(prepareManimVoiceovers(createVoiceoverMarker("cue", "answer"), async () => ({ path: "voice.wav", durationSeconds: 1 }))).rejects.toThrow("配音标记缺少静态文本");
   });
 
   it("keeps identical text separate when voiceover roles differ", async () => {

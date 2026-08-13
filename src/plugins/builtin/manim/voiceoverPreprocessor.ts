@@ -188,7 +188,7 @@ export async function prepareManimVoiceovers(
     const indent = lines[index].match(/^\s*/)?.[0] ?? "";
     if (marker.kind === "end") {
       const active = stack.pop();
-      if (!active) throw new Error("配音时间轴缺少开始积木");
+      if (!active) throw new Error("配音时间轴缺少开始标记");
       synchronizedRanges.push({ startLine: active.startLine, endLine: index + 1, duration: active.duration });
       const remainingVariable = `${active.variable}_remaining`;
       lines[index] = `${indent}${remainingVariable} = ${active.duration.toFixed(3)} - (self.renderer.time - ${active.variable}); self.wait(${remainingVariable}) if ${remainingVariable} > 0 else None`;
@@ -196,7 +196,7 @@ export async function prepareManimVoiceovers(
     }
     const text = marker.payload?.text;
     const request = { text: text ?? "", roleId: marker.payload?.roleId, blockId: marker.payload?.blockId };
-    if (text === undefined) throw new ManimVoiceoverError("配音文本需要直接连接 Python 文本积木", request);
+    if (text === undefined) throw new ManimVoiceoverError("配音标记缺少静态文本", request);
     if (!text.trim()) throw new ManimVoiceoverError("配音文本不能为空", request);
     const clip = await getClip(text, marker.payload?.roleId, marker.payload?.blockId);
     if (!Number.isFinite(clip.durationSeconds) || clip.durationSeconds <= 0) throw new ManimVoiceoverError("无法读取这段配音的音频时长", request);
@@ -213,7 +213,7 @@ export async function prepareManimVoiceovers(
       lines[index] = `${indent}${variable} = self.renderer.time; self.add_sound(${path})`;
     }
   }
-  if (stack.length) throw new Error("配音时间轴缺少结束积木");
+  if (stack.length) throw new Error("配音时间轴缺少结束标记");
   let code = lines.join("\n");
   for (const range of synchronizedRanges) code = fitSynchronizedVoiceoverTiming(code, range.startLine, range.endLine - 1, range.duration);
   return { code, clipCount, segmentCount, synchronizedSegmentCount, totalDurationSeconds, segments };

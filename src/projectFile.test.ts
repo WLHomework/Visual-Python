@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDraftProject, parseProjectFile, validateProjectFile } from "./projectFile";
+import { createProjectId, parseDraftProject, parseProjectFile, validateProjectFile } from "./projectFile";
 
 const validProject = { version: 1, name: "课程.vpy", workspace: { blocks: { blocks: [] } } };
 
@@ -37,5 +37,23 @@ describe("project file validation", () => {
     const sceneDocuments = [{ id: "scene-main", name: "MainScene", code: "from manim import *" }];
     expect(validateProjectFile({ ...validProject, sceneDocuments, activeSceneId: "scene-main" }).sceneDocuments).toEqual(sceneDocuments);
     expect(() => validateProjectFile({ ...validProject, sceneDocuments, activeSceneId: "missing" })).toThrow("不存在");
+  });
+
+  it("persists a stable project id without persisting AI conversations", () => {
+    const project = validateProjectFile({ ...validProject, projectId: "project-demo" });
+    expect(project.projectId).toBe("project-demo");
+    expect(project).not.toHaveProperty("aiConversations");
+  });
+
+  it("rejects malformed project ids", () => {
+    expect(() => validateProjectFile({ ...validProject, projectId: "project/demo" })).toThrow("ID");
+  });
+
+  it("keeps legacy projects loadable before assigning a persistent id", () => {
+    const legacy = parseProjectFile(JSON.stringify(validProject));
+    expect(legacy.projectId).toBeUndefined();
+
+    const projectId = createProjectId();
+    expect(validateProjectFile({ ...legacy, projectId }).projectId).toBe(projectId);
   });
 });

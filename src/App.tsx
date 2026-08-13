@@ -12,15 +12,14 @@ import type { CancellationToken as MonacoCancellationToken, editor as MonacoEdit
 import { AlertCircle, AlignLeft, ArrowLeft, Blocks, BookOpen, Box, Braces, Check, ChevronDown, ChevronRight, ChevronUp, ClipboardPaste, Cloud, Code2, Columns2, Copy, Download, ExternalLink, FileCode2, FilePlus2, Film, FolderOpen, Image as ImageIcon, Link2, ListOrdered, ListTree, Mic2, Minus, PanelBottomClose, PanelBottomOpen, Pause, Play, Plug, Plus, Power, RefreshCw, Replace, Save, SaveAll, Scissors, Search, Send, Settings, SlidersHorizontal, Sparkles, Square, Terminal, TextSelect, Trash2, Undo2, Redo2, Unlink2, Upload, Volume2, X } from "lucide-react";
 import { AiAssistantPanel } from "./AiAssistantPanel";
 import { AiModelSettings } from "./AiModelSettings";
-import { applyExactCodeEdits, createCodeChangePreview, runAiCodeAgent, type AiAgentActivity, type AiAgentMode, type AiAgentPermissionRequest, type AiAgentPlanStep, type AiAgentProgress, type AiAgentResult, type AiAgentToolName, type AiCodeChangeSnapshot, type AiCodeEdit, type AiConversationTurn, type AiTaskChangeSnapshot } from "./aiAgent";
+import { createVisualPythonHostAdapter, runVisualPythonAgent, type AgentActivityEvent, type AgentTokenUsage, type AiAgentActivity, type AiAgentMode, type AiAgentPermissionRequest, type AiAgentPlanStep, type AiAgentProgress, type AiAgentResult, type AiAgentToolName, type AiCodeChangeSnapshot, type AiConversationTurn, type AiTaskChangeSnapshot } from "./agentV2";
 import type { AiAgentPermissionMode } from "./aiConfig";
-import { countFakeVoiceoverApis, inspectVoiceovers, insertStandaloneVoiceover, insertSynchronizedVoiceover } from "./aiVoiceover";
-import { addPythonImport, insertPythonStatements, replacePythonFunctionBody, type PythonStructure } from "./pythonStructuredEdits";
+import { createAiConversationScope } from "./aiConversationContext";
+import { inspectVoiceovers } from "./aiVoiceover";
 import { defaultVisualThemeId, findWorkspaceBlockCodeRange, generateWorkspacePython, generateWorkspacePythonWithBlockMap, registerUsedVariablesToolbox, starterState, toolbox, visualPythonThemes, type VisualThemeId } from "./pythonBlocks";
 import { validatePythonBlockContexts, type PythonContextIssue } from "./pythonSyntaxBlocks";
 import { diagnosePythonError } from "./pythonDiagnostics";
 import { findPythonCallContext, findPythonIdentifierOccurrences, getPythonCompletions, getPythonOutline, getPythonSignatures, isPythonCompletionContext, isValidPythonIdentifier, type PythonCompletionKind, type PythonOutlineItem } from "./pythonCompletions";
-import { isPythonIdentifier } from "./pythonIdentifiers";
 import { parsePythonRuntimeDiagnostic } from "./pythonRuntimeDiagnostics";
 import { parsePythonSyntaxDiagnostic, type PythonCodeDiagnostic } from "./pythonSyntaxDiagnostics";
 import { formatPythonSource } from "./pythonFormatter";
@@ -41,19 +40,19 @@ import { buildManimOutputFilename } from "./plugins/builtin/manim/outputNaming";
 import { formatRenderElapsed, initialManimRenderProgress, parseManimRenderProgress, type ManimRenderProgress } from "./plugins/builtin/manim/renderProgress";
 import { prepareManimStillImage } from "./plugins/builtin/manim/stillImagePreprocessor";
 import { extractManimSceneNames } from "./plugins/builtin/manim/sceneNames";
-import { createSceneDocument, legacySceneDocument, renameSceneDocument, sceneDocumentName, type SceneDocument } from "./sceneDocuments";
-import { validateStandaloneSceneSource } from "./sceneValidation";
+import { createSceneDocument, legacySceneDocument, sceneDocumentName, type SceneDocument } from "./sceneDocuments";
 import { isBlockWorkspaceMode, normalizeWorkspaceMode, type WorkspaceMode } from "./workspaceMode";
 import { getWorkbenchShortcutAction } from "./workbenchShortcuts";
 import { blockSearchFlyout, createBlockSearchIndex, searchBlockIndex } from "./blockSearch";
 import { buildBlockOutline, compactBlockOutline, filterBlockOutline, type BlockOutlineNode } from "./blockOutline";
+import { installFunctionCallLinks } from "./functionCallLinks";
 import { subscribeFormulaEditor, type FormulaEditorRequest } from "./formulaEditorBridge";
 import { normalizeProjectFileName, projectFileBaseName } from "./projectNaming";
 import { projectRelativePath, setFileBlockPickerHandler, setLocalAudioPreviewHandler, type FileBlockPickerMode } from "./fileBlockPicker";
 import { projectResourceReference, resolveProjectResourceReference, type ProjectResource } from "./projectResources";
-import { parseDraftProject, parseProjectFile, type DraftProject, type ProjectFile } from "./projectFile";
+import { createProjectId, parseDraftProject, parseProjectFile, type DraftProject, type ProjectFile } from "./projectFile";
 import { ManimRenderAttempt, ManimRenderCancelledError } from "./manimRenderCancellation";
-import { isManimLatexFailure } from "./manimErrorClassification";
+import { diagnoseManimError, diagnoseManimStartupError, localAudioErrorSuggestion } from "./manimDiagnostics";
 import { findManagedAudioMetadataRanges } from "./managedAudioMetadata";
 import { readStoredPythonEnvironment, supportedPythonRangeLabel, type PythonEnvironment } from "./pythonEnvironment";
 import { VoiceSampleTrimmer } from "./VoiceSampleTrimmer";
@@ -781,37 +780,6 @@ const formatStorageSize = (bytes: number) => {
 };
 type ExampleLibrary = typeof import("./examples");
 
-const stripTerminalFormatting = (value: string) => value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[│╭╮╰╯─]+/g, " ").trim();
-
-const diagnoseManimError = (traceback: string, block?: Blockly.Block) => {
-  const cleanTraceback = stripTerminalFormatting(traceback);
-  const exception = [...cleanTraceback.matchAll(/(?:^|\n)([A-Za-z]+(?:Error|Exception)):\s*([^\n]+)/g)].at(-1);
-  const errorType = exception?.[1] || "ManimError";
-  const detail = exception?.[2]?.trim() || cleanTraceback.split("\n").map((line) => line.trim()).filter(Boolean).at(-1) || "未知错误";
-  const blockLabel = block?.toString(54) || "当前积木";
-  const named = detail.match(/name ['"]([^'"]+)['"] is not defined/i);
-  const missingFile = detail.match(/(?:No such file or directory|cannot find)[^'"]*['"]([^'"]+)['"]/i);
-  const attribute = detail.match(/object has no attribute ['"]([^'"]+)['"]/i);
-  const keyword = detail.match(/keyword argument ['"]([^'"]+)['"]/i);
-  const missingArgument = detail.match(/missing \d+ required positional argument[s]?: (.+)$/i);
-
-  let suggestion = `检查高亮的“${blockLabel}”积木：确认所有输入已连接，并且输入值类型符合该积木要求。`;
-  if (named) suggestion = `名称“${named[1]}”尚未创建。请先创建该 Manim 对象或 Python 变量，再在高亮积木中选择/填写相同名称。`;
-  else if (missingFile) suggestion = `找不到文件“${missingFile[1]}”。请改为存在的文件路径，并确认文件没有被移动或删除。`;
-  else if (attribute) suggestion = `当前对象不支持“${attribute[1]}”方法。请把高亮积木连接到支持该方法的 Manim 对象，或改用对应对象的方法积木。`;
-  else if (keyword && /multiple values/i.test(detail)) suggestion = `参数“${keyword[1]}”被重复传入。这通常是积木与当前 Manim 版本不兼容，请不要继续调整数值，记录该积木并反馈此错误。`;
-  else if (keyword) suggestion = `当前 Manim 版本不支持参数“${keyword[1]}”。请检查高亮积木的参数选择；如果该参数由积木固定生成，请反馈该积木的兼容性问题。`;
-  else if (missingArgument) suggestion = `缺少必填参数 ${missingArgument[1]}。请给高亮积木对应的空输入槽连接合适的数值或对象。`;
-  else if (errorType === "AttributeError") suggestion = `当前对象调用了不存在的属性或方法。请检查报错位置的方法名；配音必须通过 AI 专用配音工具插入，不能在 Scene 中调用 self.add_voiceover 或 self.add_synchronized_voiceover。`;
-  else if (errorType === "ZeroDivisionError") suggestion = `除数不能为 0。请检查高亮积木中的数值、比例或范围步长，并改为非零值。`;
-  else if (errorType === "FileNotFoundError") suggestion = `高亮积木引用的文件不存在。请重新选择有效文件，并避免使用已移动的绝对路径。`;
-  else if (isManimLatexFailure(cleanTraceback)) suggestion = `LaTeX 渲染失败。请检查公式语法、反斜杠和成对括号；如果语法正确，再确认本机已安装 LaTeX。`;
-  else if (errorType === "ValueError") suggestion = `输入值不在允许范围内。请检查高亮积木中的半径、尺寸、范围起止值和列表结构。`;
-  else if (errorType === "TypeError") suggestion = `输入类型不匹配。请检查高亮积木的连接：对象槽连接 Manim 对象，数值槽连接数字，列表槽连接 Python 列表。`;
-
-  return { message: `${errorType}: ${detail}`, suggestion };
-};
-
 const extractLegacyAngleValue = (input: unknown) => {
   const candidate = (input as { block?: unknown; shadow?: unknown } | null)?.block
     ?? (input as { block?: unknown; shadow?: unknown } | null)?.shadow;
@@ -883,6 +851,7 @@ export default function App() {
   const [sceneDocuments, setSceneDocuments] = useState<SceneDocument[]>([]);
   const [activeSceneId, setActiveSceneId] = useState("");
   const [aiAgentBusy, setAiAgentBusy] = useState(false);
+  const [aiCodeReview, setAiCodeReview] = useState<AiCodeChangeSnapshot | null>(null);
   const [sceneAiStatuses, setSceneAiStatuses] = useState<Record<string, SceneAiStatus>>({});
   const [sourceCodeInitialized, setSourceCodeInitialized] = useState(false);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => normalizeWorkspaceMode(localStorage.getItem("visual-python:workspace-mode")));
@@ -902,6 +871,8 @@ export default function App() {
   const managedAudioMetadataDecorations = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
   const aiCodeChangeDecorations = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
   const aiCodeChangeViewZone = useRef<string | null>(null);
+  const aiCodeReviewAnchor = useRef<{ lineNumber: number; offset: number } | null>(null);
+  const [aiCodeReviewTop, setAiCodeReviewTop] = useState<number | null>(null);
   const selectedBlockIdRef = useRef<string | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const codeCompletionProvider = useRef<{ dispose: () => void } | null>(null);
@@ -930,6 +901,7 @@ export default function App() {
   const sceneDocumentsRef = useRef<SceneDocument[]>([]);
   const activeSceneIdRef = useRef("");
   const aiAgentSceneIdRef = useRef<string | null>(null);
+  const aiAgentRunTokenRef = useRef<object | null>(null);
   const aiCodePreviewing = useRef(false);
   const pythonRunUsesCodeSource = useRef(false);
   const pythonRunSourceCode = useRef("");
@@ -1014,6 +986,8 @@ export default function App() {
   const taskId = useRef<number | null>(null);
   const outputId = useRef(1);
   const [projectName, setProjectName] = useState("hello-python.vpy");
+  const [projectId, setProjectId] = useState(() => createProjectId());
+  const projectIdRef = useRef(projectId);
   const [projectNameDraft, setProjectNameDraft] = useState("hello-python");
   const [renamingProject, setRenamingProject] = useState(false);
   const [projectPath, setProjectPath] = useState<string | null>(null);
@@ -1042,6 +1016,7 @@ export default function App() {
   const packageInstallStopping = useRef(false);
   const [activePanel, setActivePanel] = useState<ConsolePanel>("output");
   const [aiAssistantOpen, setAiAssistantOpen] = useState(() => localStorage.getItem("visual-python:ai-assistant-open") === "true");
+  const [aiWorkspaceEpoch, setAiWorkspaceEpoch] = useState(0);
   const aiAssistantVisible = workspaceMode === "code" && aiAssistantOpen;
   const [aiPanelWidth, setAiPanelWidth] = useState(() => {
     const saved = Number(localStorage.getItem("visual-python:ai-panel-width"));
@@ -1680,6 +1655,7 @@ export default function App() {
       zoom: { controls: true, wheel: true, startScale: .88, maxScale: 1.4, minScale: .45, scaleSpeed: 1.1 },
       move: { scrollbars: true, drag: true, wheel: true },
     });
+    const functionCallLinks = installFunctionCallLinks(ws);
     const workspaceWithResizeHandler = ws as unknown as { resizeHandlerWrapper: Blockly.browserEvents.Data | null };
     if (workspaceWithResizeHandler.resizeHandlerWrapper) {
       Blockly.browserEvents.unbind(workspaceWithResizeHandler.resizeHandlerWrapper);
@@ -1768,7 +1744,7 @@ export default function App() {
     pruneUnusedVariables();
     setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
     ws.clearUndo();
-    if (draft) { setProjectName(draft.name); projectPathRef.current = draft.path; setProjectPath(draft.path); projectResourcesRef.current = draft.resources ?? []; setProjectResources(draft.resources ?? []); setDirty(true); }
+    if (draft) { const restoredProjectId = draft.projectId || createProjectId(); projectIdRef.current = restoredProjectId; setProjectId(restoredProjectId); setProjectName(draft.name); projectPathRef.current = draft.path; setProjectPath(draft.path); projectResourcesRef.current = draft.resources ?? []; setProjectResources(draft.resources ?? []); setDirty(true); }
     requestAnimationFrame(() => {
       ws.clearUndo();
       setDirty(Boolean(draft));
@@ -1851,7 +1827,7 @@ export default function App() {
       });
     });
     observer.observe(host.current);
-    return () => { unsubscribePlugins(); toolboxElement?.removeEventListener("pointerdown", clearSearchForCategory); injectionDiv.removeEventListener("pointerdown", handleDirectFieldPointerDown, true); document.removeEventListener("focusout", finishDirectFieldEdit, true); observer.disconnect(); if (resizeFrame !== null) cancelAnimationFrame(resizeFrame); ws.dispose(); };
+    return () => { unsubscribePlugins(); functionCallLinks.dispose(); toolboxElement?.removeEventListener("pointerdown", clearSearchForCategory); injectionDiv.removeEventListener("pointerdown", handleDirectFieldPointerDown, true); document.removeEventListener("focusout", finishDirectFieldEdit, true); observer.disconnect(); if (resizeFrame !== null) cancelAnimationFrame(resizeFrame); ws.dispose(); };
   }, [applyBlockInputLayout, showBlockSearchResults]);
 
   useEffect(() => {
@@ -2000,8 +1976,11 @@ export default function App() {
     };
   }, [openConsolePanel]);
 
+  const invalidateAiWorkspace = useCallback(() => setAiWorkspaceEpoch((value) => value + 1), []);
+
   const changeWorkspaceMode = useCallback((nextMode: WorkspaceMode) => {
     if (nextMode === workspaceMode || running || renderingManim) return;
+    if (aiAgentBusy) return showBlockingAlert({ title: "暂时无法切换工作区", message: "AI 正在处理当前代码。请先停止或等待任务完成，再切换工作区。" });
     if (isBlockWorkspaceMode(workspaceMode) && nextMode === "code" && workspace.current) {
       blockViewport.current = {
         x: workspace.current.scrollX,
@@ -2027,7 +2006,7 @@ export default function App() {
     }
     setDirty(true);
     if (nextMode === "code") requestAnimationFrame(() => codeEditor.current?.focus());
-  }, [code, renderingManim, running, sourceCodeInitialized, workspaceMode]);
+  }, [aiAgentBusy, code, renderingManim, running, showBlockingAlert, sourceCodeInitialized, workspaceMode]);
 
   const updateSourceCode = useCallback((value: string | undefined) => {
     if (workspaceMode !== "code") return;
@@ -2134,6 +2113,19 @@ export default function App() {
     });
   }, []);
 
+  const updateAiCodeReviewPosition = useCallback(() => {
+    const editor = codeEditor.current;
+    const anchor = aiCodeReviewAnchor.current;
+    if (!editor || !anchor) {
+      setAiCodeReviewTop(null);
+      return;
+    }
+    const position = editor.getScrolledVisiblePosition({ lineNumber: anchor.lineNumber, column: 1 });
+    const top = position ? position.top - anchor.offset : null;
+    const editorHeight = editor.getLayoutInfo().height;
+    setAiCodeReviewTop(top === null || top < -30 || top > editorHeight ? null : Math.max(4, top));
+  }, []);
+
   const clearAiCodeChange = useCallback(() => {
     aiCodeChangeDecorations.current?.clear();
     aiCodeChangeDecorations.current = null;
@@ -2141,6 +2133,9 @@ export default function App() {
     const viewZoneId = aiCodeChangeViewZone.current;
     if (editor && viewZoneId) editor.changeViewZones((accessor) => accessor.removeZone(viewZoneId));
     aiCodeChangeViewZone.current = null;
+    aiCodeReviewAnchor.current = null;
+    setAiCodeReviewTop(null);
+    setAiCodeReview(null);
   }, []);
 
   const mountCodeEditor = useCallback<OnMount>((editor, monaco) => {
@@ -2187,6 +2182,8 @@ export default function App() {
       editor.onDidChangeCursorPosition(({ position: nextPosition }) => setCodeCursorPosition({ lineNumber: nextPosition.lineNumber, column: nextPosition.column })),
       ...(model ? [model.onDidChangeOptions(() => setCodeIndentSize(model.getOptions().tabSize))] : []),
       ...(model ? [model.onDidChangeContent(() => { clearAiCodeChange(); renderManagedAudioMetadata(); })] : []),
+      editor.onDidScrollChange(() => updateAiCodeReviewPosition()),
+      editor.onDidLayoutChange(() => updateAiCodeReviewPosition()),
       editor.onKeyDown((event) => {
         if (event.keyCode !== monaco.KeyCode.Escape || (!aiCodeChangeDecorations.current && !aiCodeChangeViewZone.current)) return;
         event.preventDefault();
@@ -2204,7 +2201,7 @@ export default function App() {
       selectedBlockCodeDecorations.current.set([{ range, options: { isWholeLine: true, className: "selected-block-code-line" } }]);
       editor.revealRangeInCenterIfOutsideViewport(range, monaco.editor.ScrollType.Smooth);
     }
-  }, [clearAiCodeChange, codeRuntimeDiagnostic, codeSyntaxDiagnostic, editorFontFamily, editorFontSize, editorIndentSize, pyrightDiagnostics, workspaceMode]);
+  }, [clearAiCodeChange, codeRuntimeDiagnostic, codeSyntaxDiagnostic, editorFontFamily, editorFontSize, editorIndentSize, pyrightDiagnostics, updateAiCodeReviewPosition, workspaceMode]);
 
   useEffect(() => {
     sourceCodeRef.current = sourceCode;
@@ -3264,7 +3261,7 @@ export default function App() {
         return;
       }
       const persistedDocuments = sceneDocuments.map((document) => document.id === activeSceneId ? { ...document, code: sourceCode, name: sceneDocumentName(sourceCode, document.name) } : document);
-      const draft: DraftProject = { version: 1, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: activeSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
+      const draft: DraftProject = { version: 1, projectId: projectIdRef.current, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: activeSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
       localStorage.setItem("visual-python:draft", JSON.stringify(draft));
       autosaveTimer.current = null;
     };
@@ -3495,7 +3492,10 @@ export default function App() {
           const line = Number([...stderrBuffer.current.matchAll(/File "<string>", line (\d+)/g)].at(-1)?.[1] || 0);
           const blockId = line ? pythonBlockIdByLine.current.get(line) : undefined;
           const block = blockId ? workspace.current?.getBlockById(blockId) : undefined;
-          const diagnosis = diagnosePythonError(stderrBuffer.current || `PythonError: Python 进程退出代码 ${payload.exit_code}`, block || undefined);
+          const diagnosis = diagnosePythonError(stderrBuffer.current || `PythonError: Python 进程退出代码 ${payload.exit_code}`, {
+            mode: pythonRunUsesCodeSource.current ? "code" : "blocks",
+            block: block || undefined,
+          });
           const parsedCodeDiagnostic = pythonRunUsesCodeSource.current
             ? parsePythonRuntimeDiagnostic(stderrBuffer.current, pythonRunSourceCode.current)
             : null;
@@ -3595,7 +3595,10 @@ export default function App() {
         const line = Number([...traceback.matchAll(/File "[^"]*scene\.py", line (\d+)/g)].at(-1)?.[1] || 0);
         const blockId = line ? manimBlockIdByLine.current.get(line) : undefined;
         const block = blockId ? workspace.current?.getBlockById(blockId) : undefined;
-        const diagnosis = diagnoseManimError(traceback || String(payload.error || ""), block || undefined);
+        const diagnosis = diagnoseManimError(traceback || String(payload.error || ""), {
+          mode: isBlockWorkspaceMode(workspaceModeRef.current) ? "blocks" : "code",
+          block: block || undefined,
+        });
         const message = `Manim 渲染失败：${diagnosis.message}`;
         void notifyWhenAppIsInBackground("problems", "Manim 渲染失败", diagnosis.message);
         setProblems([{ id: problemId.current++, kind: "runtime", line, message, blockId, suggestion: diagnosis.suggestion }]);
@@ -3612,7 +3615,7 @@ export default function App() {
     const currentSceneId = activeSceneIdRef.current;
     const savedSource = sourceOverride ?? sourceCodeRef.current;
     const persistedDocuments = sceneDocumentsRef.current.map((document) => document.id === currentSceneId ? { ...document, code: savedSource, name: sceneDocumentName(savedSource, document.name) } : document);
-    const data: ProjectFile = { version: 1, name: path.split(/[\\/]/).pop() || projectName, workspace: Blockly.serialization.workspaces.save(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: currentSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
+    const data: ProjectFile = { version: 1, projectId: projectIdRef.current, name: path.split(/[\\/]/).pop() || projectName, workspace: Blockly.serialization.workspaces.save(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: currentSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
     const contents = JSON.stringify(data, null, 2);
     if (saveAs) {
       await invoke("save_project_as", { sourceProjectPath: projectPathRef.current, destinationProjectPath: path, contents });
@@ -3747,6 +3750,7 @@ export default function App() {
 
   const loadProject = useCallback(async (path: string, options: { skipDirtyCheck?: boolean } = {}) => {
     if (!workspace.current) return;
+    invalidateAiWorkspace();
     if (!options.skipDirtyCheck && !(await confirmProjectReplacement())) return;
     let projectFileExists = false;
     try {
@@ -3778,6 +3782,9 @@ export default function App() {
       const loadedDocuments = data.sceneDocuments?.length ? data.sceneDocuments : loadedMode === "code" ? [legacySceneDocument(loadedSourceCode)] : [];
       const loadedActiveSceneId = loadedDocuments.some((document) => document.id === data.activeSceneId) ? data.activeSceneId! : loadedDocuments[0]?.id || "";
       const loadedActiveCode = loadedDocuments.find((document) => document.id === loadedActiveSceneId)?.code ?? loadedSourceCode;
+      const loadedProjectId = data.projectId || createProjectId();
+      projectIdRef.current = loadedProjectId;
+      setProjectId(loadedProjectId);
       projectPathRef.current = path;
       projectResourcesRef.current = data.resources ?? [];
       setProjectResources(data.resources ?? []);
@@ -3794,7 +3801,7 @@ export default function App() {
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `无法打开工程：${String(error)}\n` }]);
       if (!projectFileExists) setRecentProjects((items) => { const next = items.filter((item) => item.path !== path); localStorage.setItem("visual-python:recent", JSON.stringify(next)); return next; });
     }
-  }, [cancelAutosave, confirmProjectReplacement, rememberRecent]);
+  }, [cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, rememberRecent]);
 
   useEffect(() => {
     let disposed = false;
@@ -3820,6 +3827,7 @@ export default function App() {
 
   const newProject = useCallback(async () => {
     if (!workspace.current) return;
+    invalidateAiWorkspace();
     if (!(await confirmProjectReplacement())) return;
     cancelAutosave();
     pluginRegistry.clearProjectData();
@@ -3827,6 +3835,9 @@ export default function App() {
     loadingWorkspace.current = true; Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [] } }, workspace.current);
     workspace.current.clearUndo();
     projectPathRef.current = null;
+    const nextProjectId = createProjectId();
+    projectIdRef.current = nextProjectId;
+    setProjectId(nextProjectId);
     projectResourcesRef.current = [];
     setProjectResources([]);
     const initialDocument = workspaceMode === "code" ? createSceneDocument([], "MainScene") : null;
@@ -3837,10 +3848,11 @@ export default function App() {
       setDirty(false);
       loadingWorkspace.current = false;
     });
-  }, [cancelAutosave, confirmProjectReplacement, workspaceMode]);
+  }, [cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, workspaceMode]);
 
   const loadExample = useCallback(async (example: ExampleProject) => {
     if (!workspace.current) return;
+    invalidateAiWorkspace();
     if (!(await confirmProjectReplacement())) return;
     try {
       for (const pluginId of example.requiredPlugins ?? []) await setPluginEnabled(pluginId, true);
@@ -3860,6 +3872,9 @@ export default function App() {
     Blockly.serialization.workspaces.load(migrateWorkspaceState(example.workspace), currentWorkspace);
     currentWorkspace.clearUndo();
     setProjectName(example.projectName);
+    const nextProjectId = createProjectId();
+    projectIdRef.current = nextProjectId;
+    setProjectId(nextProjectId);
     projectPathRef.current = null;
     projectResourcesRef.current = [];
     setProjectResources([]);
@@ -3881,7 +3896,7 @@ export default function App() {
       if (workspace.current === currentWorkspace) { currentWorkspace.clearUndo(); currentWorkspace.zoomToFit(); }
       loadingWorkspace.current = false;
     });
-  }, [cancelAutosave, confirmProjectReplacement, openConsolePanel]);
+  }, [cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, openConsolePanel]);
 
   const exportPython = useCallback(async () => {
     const currentScene = sceneDocuments.find((document) => document.id === activeSceneId);
@@ -3948,7 +3963,10 @@ export default function App() {
       const line = Number(traceback.match(/line (\d+)/)?.[1] || 0);
       const blockId = line ? runSource.blockIdByLine.get(line) : undefined;
       const block = blockId ? workspace.current?.getBlockById(blockId) : undefined;
-      const diagnosis = diagnosePythonError(traceback || "SyntaxError: Python 语法错误", block || undefined);
+      const diagnosis = diagnosePythonError(traceback || "SyntaxError: Python 语法错误", {
+        mode: workspaceMode === "code" ? "code" : "blocks",
+        block: block || undefined,
+      });
       const inlineDiagnostic = workspaceMode === "code" ? parsePythonSyntaxDiagnostic(traceback, runSource.code) : null;
       if (inlineDiagnostic) setCodeSyntaxDiagnostic(inlineDiagnostic);
       setProblems([{ id: problemId.current++, kind: "syntax", line, message: inlineDiagnostic?.message || diagnosis.message, blockId, suggestion: inlineDiagnostic?.suggestion || diagnosis.suggestion }]);
@@ -4057,7 +4075,15 @@ export default function App() {
       const message = String(error);
       const line = Number(message.match(/line (\d+)/)?.[1] || 0);
       const blockId = line ? renderSource.blockIdByLine.get(line) : undefined;
-      setProblems([{ id: problemId.current++, kind: "syntax", line, message: message.trim() || "Python 语法错误", blockId }]);
+      const syntaxDiagnostic = parsePythonSyntaxDiagnostic(message, renderSource.code);
+      setProblems([{
+        id: problemId.current++,
+        kind: "syntax",
+        line: syntaxDiagnostic?.line || line,
+        message: syntaxDiagnostic?.message || message.trim() || "Python 语法错误",
+        blockId,
+        suggestion: syntaxDiagnostic?.suggestion,
+      }]);
       setActivePanel("problems");
       if (blockId) requestAnimationFrame(() => focusBlock(blockId));
       setOutput([{ id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
@@ -4186,7 +4212,7 @@ export default function App() {
       if (error instanceof ManimLocalAudioError) {
         const blockId = error.request.blockId;
         const line = blockId ? [...renderSource.blockIdByLine.entries()].find(([, id]) => id === blockId)?.[0] || 0 : 0;
-        const suggestion = "请点击该积木上的文件夹图标重新选择本地音频文件，并确认文件仍然存在且可以正常播放。";
+        const suggestion = localAudioErrorSuggestion(isBlockWorkspaceMode(workspaceMode) ? "blocks" : "code");
         setProblems([{ id: problemId.current++, kind: "plugin", line, message: error.message, blockId, suggestion }]);
         setActivePanel("problems");
         if (blockId) requestAnimationFrame(() => focusBlock(blockId));
@@ -4203,10 +4229,11 @@ export default function App() {
         setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${error.message}\n${suggestion}\n` }]);
         return;
       }
-      const message = `Manim 渲染启动失败：${String(error)}`;
-      setProblems([{ id: problemId.current++, kind: "runtime", line: 0, message }]);
+      const startupDiagnosis = diagnoseManimStartupError(error);
+      const message = `Manim 渲染启动失败：${startupDiagnosis.message}`;
+      setProblems([{ id: problemId.current++, kind: "runtime", line: 0, message, suggestion: startupDiagnosis.suggestion }]);
       setActivePanel("problems");
-      setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
+      setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n${startupDiagnosis.suggestion}\n${String(error)}\n` }]);
     }
   }, [activeCode, ensureDesktopNotificationPermission, focusBlock, manimRenderConfig, manimStoragePath, projectName, pythonEnvironment, recordVoiceoverBlockDuration, renderingManim, showBlockingAlert, ttsApiKey, ttsConfig, ttsStoragePath, updateManimRenderConfig, validateBeforeExecution, voiceoverRoles, workspaceMode]);
 
@@ -4914,7 +4941,6 @@ export default function App() {
     prompt,
     history,
     agentMode,
-    initialPlan,
     onActivity,
     onProgress,
     permissionMode,
@@ -4933,6 +4959,8 @@ export default function App() {
   }): Promise<AiAgentResult> => {
     if (workspaceModeRef.current !== "code") throw new Error("AI 编程助手仅在纯代码模式下可用");
     const agentSceneId = activeSceneIdRef.current;
+    const agentRunToken = {};
+    aiAgentRunTokenRef.current = agentRunToken;
     aiAgentSceneIdRef.current = agentSceneId;
     setAiAgentBusy(true);
     setSceneAiStatuses((statuses) => ({ ...statuses, [agentSceneId]: "working" }));
@@ -4951,590 +4979,100 @@ export default function App() {
       : { ...document });
     const taskBeforeActiveSceneId = agentSceneId;
     let projectDirty = dirty;
-    let checkpointDocuments = taskBeforeDocuments;
-    let checkpointActiveSceneId = taskBeforeActiveSceneId;
-    let checkpointDirty = dirty;
-    let checkpointCompletedSteps = initialPlan?.filter(({ status }) => status === "completed").length ?? 0;
-    const snapshotCurrentDocuments = () => sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current
-      ? { ...document, code: sourceCodeRef.current, name: sceneDocumentName(sourceCodeRef.current, document.name) }
-      : { ...document });
-    const reportProgressWithCheckpoint = (progress: AiAgentProgress) => {
-      const completedSteps = progress.taskPlan?.filter(({ status }) => status === "completed").length ?? 0;
-      if (completedSteps > checkpointCompletedSteps) {
-        checkpointDocuments = snapshotCurrentDocuments();
-        checkpointActiveSceneId = checkpointDocuments.some(({ id }) => id === agentSceneId) ? agentSceneId : activeSceneIdRef.current;
-        checkpointDirty = projectDirty;
-        checkpointCompletedSteps = completedSteps;
-      }
-      onProgress(progress);
-    };
-    let codePreviewOriginal: string | null = null;
 
-    const waitWithSignal = (milliseconds: number) => new Promise<void>((resolve, reject) => {
-      if (signal.aborted) { reject(new Error("已停止生成")); return; }
-      const timer = window.setTimeout(finish, milliseconds);
-      function finish() { signal.removeEventListener("abort", cancel); resolve(); }
-      function cancel() { window.clearTimeout(timer); signal.removeEventListener("abort", cancel); reject(new Error("已停止生成")); }
-      signal.addEventListener("abort", cancel, { once: true });
-    });
 
-    const writeEditorCode = (nextCode: string, syncState = true) => {
-      const editor = codeEditor.current;
-      const model = editor?.getModel();
-      if (editor && model && model.getValue() !== nextCode) {
-        editor.executeEdits("ai-code-agent", [{ range: model.getFullModelRange(), text: nextCode, forceMoveMarkers: true }]);
-      }
-      sourceCodeRef.current = nextCode;
-      if (syncState) {
-        setSourceCode(nextCode);
-        setSourceCodeInitialized(true);
-      }
-    };
-
-    const previewCode = (nextCode: string) => {
-      if (workspaceModeRef.current !== "code") return;
-      if (codePreviewOriginal === null) {
-        codePreviewOriginal = sourceCodeRef.current;
-        aiCodePreviewing.current = true;
-        codeEditor.current?.pushUndoStop();
-      }
-      writeEditorCode(nextCode, false);
-    };
-
-    const cancelCodePreview = () => {
-      if (codePreviewOriginal === null) return;
-      const original = codePreviewOriginal;
-      codePreviewOriginal = null;
-      aiCodePreviewing.current = false;
-      writeEditorCode(original);
-      codeEditor.current?.pushUndoStop();
-      setDirty(projectDirty);
-    };
-
-    const commitCode = (nextCode: string) => {
-      if (workspaceModeRef.current !== "code") throw new Error("工作区已经离开纯代码模式");
-      const previousCode = codePreviewOriginal ?? sourceCodeRef.current;
-      const editor = codeEditor.current;
-      const model = editor?.getModel();
-      if (codePreviewOriginal === null && editor && model && model.getValue() !== nextCode) {
-        editor.pushUndoStop();
-      }
-      aiCodePreviewing.current = false;
-      writeEditorCode(nextCode);
-      codePreviewOriginal = null;
-      editor?.pushUndoStop();
-      codeValidationVersion.current += 1;
-      setCodeSyntaxDiagnostic(null);
-      setCodeRuntimeDiagnostic(null);
-      setProblems((items) => items.filter((problem) => !["syntax", "runtime", "timeout"].includes(problem.kind)));
-      setDirty(true);
-      projectDirty = true;
-      return {
-        changed: previousCode !== nextCode,
-        diff: createCodeChangePreview(previousCode, nextCode),
-        lineCount: nextCode ? nextCode.split("\n").length : 0,
-        __codeChange: previousCode !== nextCode ? { before: previousCode, after: nextCode, sceneId: activeSceneIdRef.current, sceneName: sceneDocumentsRef.current.find((document) => document.id === activeSceneIdRef.current)?.name } : undefined,
+    const reportAgentV2Event = (event: AgentActivityEvent) => {
+      const activity: AiAgentActivity = {
+        id: event.id,
+        kind: event.kind === "tool" ? "tool" : "message",
+        channel: event.kind,
+        status: event.status,
+        title: event.markdown ?? event.title,
+        detail: event.detail,
+        toolName: event.toolName as AiAgentToolName | undefined,
+        result: event.resultText,
+        codeChange: event.codeChange,
       };
+      reportActivity(activity);
     };
 
-    const checkedString = (args: Record<string, unknown>, key: string, allowEmpty = false) => {
-      const value = args[key];
-      if (typeof value !== "string" || (!allowEmpty && !value.trim())) throw new Error(`参数 ${key} 必须是${allowEmpty ? "" : "非空"}字符串`);
-      return value;
+    const reportAgentV2Progress = (progress: { phase: "preparing" | "thinking" | "executing" | "observing" | "responding" | "completed"; label: string; tokenUsage?: AgentTokenUsage }) => {
+      const phase: AiAgentProgress["phase"] = progress.phase === "executing" ? "executingTool" : progress.phase === "observing" ? "executingTool" : progress.phase === "responding" || progress.phase === "completed" ? "responding" : progress.phase;
+      onProgress({ phase, label: progress.label, tokenUsage: progress.tokenUsage });
     };
 
-    const toolSummary = (args: Record<string, unknown>, fallback: string) => typeof args.summary === "string" && args.summary.trim() ? args.summary.trim() : fallback;
-
-    const validateCandidateCode = async (candidateCode: string) => {
-      try {
-        await invoke("validate_python_code", { code: candidateCode, pythonPath: pythonEnvironment?.path || null });
-      } catch (error) {
-        throw new Error(`候选代码存在语法或缩进错误，未应用到编辑器：${String(error)}`);
-      }
-    };
-
-    const executeTool = async (name: AiAgentToolName, args: Record<string, unknown>, toolSignal: AbortSignal): Promise<Record<string, unknown>> => {
-      if (toolSignal.aborted) throw new Error("已停止生成");
-      if (workspaceModeRef.current !== "code") throw new Error("工作区已经离开纯代码模式");
-
-      if (name === "list_scenes") {
-        const documents = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current ? { ...document, code: sourceCodeRef.current, name: sceneDocumentName(sourceCodeRef.current, document.name) } : document);
-        return { activeSceneId: activeSceneIdRef.current, scenes: documents.map((document) => ({ id: document.id, name: document.name, lineCount: document.code ? document.code.split("\n").length : 0, active: document.id === activeSceneIdRef.current })) };
-      }
-
-      if (name === "get_scene") {
-        const sceneId = checkedString(args, "sceneId");
-        const document = sceneDocumentsRef.current.find((item) => item.id === sceneId);
-        if (!document) throw new Error(`场景不存在：${sceneId}。请重新调用 list_scenes。`);
-        const code = document.id === activeSceneIdRef.current ? sourceCodeRef.current : document.code;
-        return { id: document.id, name: sceneDocumentName(code, document.name), code, lineCount: code ? code.split("\n").length : 0, active: document.id === activeSceneIdRef.current };
-      }
-
-      if (name === "switch_scene") {
-        const sceneId = checkedString(args, "sceneId");
-        const documents = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current ? { ...document, code: sourceCodeRef.current, name: sceneDocumentName(sourceCodeRef.current, document.name) } : document);
-        const document = documents.find((item) => item.id === sceneId);
-        if (!document) throw new Error(`场景不存在：${sceneId}。请重新调用 list_scenes。`);
-        if (taskId.current !== null || manimTaskId.current !== null || manimRenderAttempt.current) throw new Error("请先等待或停止当前运行/渲染任务，再切换场景");
-        switchSceneConsoleState(activeSceneIdRef.current, document.id);
-        sceneDocumentsRef.current = documents;
-        activeSceneIdRef.current = document.id;
-        sourceCodeRef.current = document.code;
-        setSceneDocuments(documents);
-        setActiveSceneId(document.id);
-        setSourceCode(document.code);
-        updateManimRenderConfig({ selectedScene: extractManimSceneNames(document.code)[0] || document.name });
-        await waitWithSignal(0);
-        return { switched: true, id: document.id, name: document.name, code: document.code, lineCount: document.code ? document.code.split("\n").length : 0 };
-      }
-
-      if (name === "create_scene") {
-        const requestedName = typeof args.name === "string" && args.name.trim() ? args.name.trim() : "NewScene";
-        if (!isPythonIdentifier(requestedName)) throw new Error("场景名称必须是有效的 Python 类名");
-        const documents = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current ? { ...document, code: sourceCodeRef.current, name: sceneDocumentName(sourceCodeRef.current, document.name) } : document);
-        const document = createSceneDocument(documents.map((item) => item.name), requestedName);
-        const nextDocuments = [...documents, document];
-        switchSceneConsoleState(activeSceneIdRef.current, document.id);
-        sceneDocumentsRef.current = nextDocuments;
-        activeSceneIdRef.current = document.id;
-        sourceCodeRef.current = document.code;
-        setSceneDocuments(nextDocuments);
-        setActiveSceneId(document.id);
-        setSourceCode(document.code);
-        setSourceCodeInitialized(true);
-        setDirty(true);
-        projectDirty = true;
-        updateManimRenderConfig({ selectedScene: document.name });
-        await waitWithSignal(0);
-        return { created: true, changed: true, id: document.id, name: document.name, code: document.code };
-      }
-
-      if (name === "rename_scene") {
-        const sceneId = checkedString(args, "sceneId");
-        const nextName = checkedString(args, "name");
-        if (sceneDocumentsRef.current.some((document) => document.id !== sceneId && document.name === nextName)) throw new Error(`场景名称已存在：${nextName}`);
-        const currentDocuments = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current ? { ...document, code: sourceCodeRef.current } : document);
-        const target = currentDocuments.find((document) => document.id === sceneId);
-        if (!target) throw new Error(`场景不存在：${sceneId}。请重新调用 list_scenes。`);
-        const renamed = renameSceneDocument(target, nextName);
-        await validateCandidateCode(renamed.code);
-        const documents = currentDocuments.map((document) => document.id === sceneId ? renamed : document);
-        sceneDocumentsRef.current = documents;
-        setSceneDocuments(documents);
-        if (sceneId === activeSceneIdRef.current) {
-          sourceCodeRef.current = renamed.code;
-          setSourceCode(renamed.code);
-          updateManimRenderConfig({ selectedScene: nextName });
-        }
-        setDirty(true);
-        projectDirty = true;
-        return {
-          renamed: true,
-          changed: target.name !== renamed.name || target.code !== renamed.code,
-          id: sceneId,
-          name: nextName,
-          diff: createCodeChangePreview(target.code, renamed.code),
-          __codeChange: target.code !== renamed.code ? { before: target.code, after: renamed.code, sceneId, sceneName: nextName } : undefined,
-        };
-      }
-
-      if (name === "delete_scene") {
-        const sceneId = checkedString(args, "sceneId");
-        const documents = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current ? { ...document, code: sourceCodeRef.current } : document);
-        const index = documents.findIndex((document) => document.id === sceneId);
-        const target = documents[index];
-        if (!target) throw new Error(`场景不存在：${sceneId}。请重新调用 list_scenes。`);
-        if (documents.length === 1) throw new Error("工程至少需要保留一个场景");
-        const remaining = documents.filter((document) => document.id !== sceneId);
-        sceneDocumentsRef.current = remaining;
-        setSceneDocuments(remaining);
-        if (sceneId === activeSceneIdRef.current) {
-          const next = remaining[Math.min(index, remaining.length - 1)];
-          switchSceneConsoleState(activeSceneIdRef.current, next.id);
-          activeSceneIdRef.current = next.id;
-          sourceCodeRef.current = next.code;
-          setActiveSceneId(next.id);
-          setSourceCode(next.code);
-          updateManimRenderConfig({ selectedScene: extractManimSceneNames(next.code)[0] || next.name });
-          await waitWithSignal(0);
-        }
-        setDirty(true);
-        projectDirty = true;
-        return { deleted: true, changed: true, id: sceneId, name: target.name, activeSceneId: activeSceneIdRef.current };
-      }
-
-      if (name === "get_context") {
-        const currentDocument = sceneDocumentsRef.current.find((document) => document.id === activeSceneIdRef.current);
-        return {
-          project: { name: projectName, path: projectPathRef.current, dirty: projectDirty, scene: { id: activeSceneIdRef.current, name: currentDocument?.name || "当前场景" }, sceneCount: sceneDocumentsRef.current.length },
-          code: sourceCodeRef.current,
-          lineCount: sourceCodeRef.current ? sourceCodeRef.current.split("\n").length : 0,
-          pythonEnvironment: pythonEnvironment ? { version: pythonEnvironment.version, path: pythonEnvironment.path } : null,
-          running: taskId.current !== null || runningRef.current,
-          rendering: manimTaskId.current !== null || renderingManimRef.current,
-          ...(args.includeResources === true ? {
-            resources: projectResourcesRef.current.map(({ id, type, path, originalName, size }) => ({ id, type, path, originalName, size })),
-          } : {}),
-        };
-      }
-
-      if (name === "validate_scene") {
-        const document = sceneDocumentsRef.current.find((item) => item.id === activeSceneIdRef.current);
-        if (!document) throw new Error("当前场景不存在");
-        const code = sourceCodeRef.current;
-        const base = validateStandaloneSceneSource(code, document.name, projectResourcesRef.current, voiceoverRoles.map((role) => role.id));
-        const issues = [...base.issues];
-        try {
-          await invoke("validate_python_code", { code, pythonPath: pythonEnvironment?.path || null });
-        } catch (error) {
-          issues.push({ code: "python-syntax", severity: "error" as const, message: String(error) });
-        }
-        if (base.kind === "manim" && base.sceneNames.length === 1 && !issues.some((issue) => issue.code === "python-syntax")) {
-          const structure = await invoke<PythonStructure>("inspect_python_structure", { code, pythonPath: pythonEnvironment?.path || null });
-          const sceneClass = structure.classes.find((item) => item.name === base.sceneNames[0]);
-          const constructCount = sceneClass?.methods.filter((method) => method.name === "construct").length ?? 0;
-          if (constructCount === 0) issues.push({ code: "missing-construct", severity: "error", message: `场景类 ${base.sceneNames[0]} 缺少 construct 方法` });
-          else if (constructCount > 1) issues.push({ code: "duplicate-construct", severity: "error", message: `场景类 ${base.sceneNames[0]} 包含多个 construct 方法` });
-        }
-        const referencedResources = [...code.matchAll(/resource:\/\/([A-Za-z0-9_-]+)/g)]
-          .map((match) => projectResourcesRef.current.find((resource) => resource.id === match[1]))
-          .filter((resource): resource is ProjectResource => Boolean(resource));
-        if (projectPathRef.current && referencedResources.length) {
-          const statuses = await invoke<ProjectResourceStatus[]>("inspect_project_resources", { projectPath: projectPathRef.current, resourcePaths: referencedResources.map((resource) => resource.path) });
-          for (const status of statuses.filter((item) => !item.exists)) issues.push({ code: "missing-resource-file", severity: "error", message: `工程资源文件不存在：${status.path}` });
-        }
-        const valid = !issues.some((issue) => issue.severity === "error");
-        return { valid, kind: base.kind, sceneId: document.id, sceneName: document.name, issues };
-      }
-
-      if (name === "list_resources") {
-        const requestedType = typeof args.type === "string" ? args.type : "";
-        const query = typeof args.query === "string" ? args.query.trim().toLocaleLowerCase() : "";
-        let statuses: ProjectResourceStatus[] = [];
-        if (projectPathRef.current && projectResourcesRef.current.length) {
-          statuses = await invoke<ProjectResourceStatus[]>("inspect_project_resources", { projectPath: projectPathRef.current, resourcePaths: projectResourcesRef.current.map((resource) => resource.path) });
-        }
-        const byPath = new Map(statuses.map((status) => [status.path, status]));
-        return { resources: projectResourcesRef.current
-          .filter((resource) => (!requestedType || resource.type === requestedType) && (!query || resource.originalName.toLocaleLowerCase().includes(query) || resource.id.toLocaleLowerCase().includes(query)))
-          .map((resource) => ({ ...resource, resolvedPath: resolveProjectResourceReference(projectResourceReference(resource.id), projectResourcesRef.current, projectPathRef.current), exists: byPath.get(resource.path)?.exists ?? null, actualSize: byPath.get(resource.path)?.size ?? resource.size })) };
-      }
-
-      if (name === "get_resource") {
-        const resourceId = checkedString(args, "resourceId");
-        const resource = projectResourcesRef.current.find((item) => item.id === resourceId);
-        if (!resource) throw new Error(`工程资源不存在：${resourceId}`);
-        let status: ProjectResourceStatus | undefined;
-        if (projectPathRef.current) [status] = await invoke<ProjectResourceStatus[]>("inspect_project_resources", { projectPath: projectPathRef.current, resourcePaths: [resource.path] });
-        return { ...resource, resolvedPath: resolveProjectResourceReference(projectResourceReference(resource.id), projectResourcesRef.current, projectPathRef.current), exists: status?.exists ?? null, actualSize: status?.size ?? resource.size };
-      }
-
-      if (name === "check_resources") {
-        const references = [...sourceCodeRef.current.matchAll(/resource:\/\/([A-Za-z0-9_-]+)/g)].map((match) => match[1]);
-        const uniqueIds = [...new Set(references)];
-        const resources = uniqueIds.map((id) => projectResourcesRef.current.find((resource) => resource.id === id));
-        const missingRecords = uniqueIds.filter((_, index) => !resources[index]);
-        let statuses: ProjectResourceStatus[] = [];
-        const existing = resources.filter((resource): resource is ProjectResource => Boolean(resource));
-        if (projectPathRef.current && existing.length) statuses = await invoke<ProjectResourceStatus[]>("inspect_project_resources", { projectPath: projectPathRef.current, resourcePaths: existing.map((resource) => resource.path) });
-        const missingFiles = statuses.filter((status) => !status.exists).map((status) => status.path);
-        return { valid: !missingRecords.length && !missingFiles.length, references: uniqueIds, missingRecords, missingFiles };
-      }
-
-      if (name === "check_dependencies") {
-        if (!pythonEnvironment) throw new Error("尚未选择 Python 环境");
-        const packages = args.packages;
-        if (!Array.isArray(packages) || !packages.length || packages.some((item) => typeof item !== "string" || !/^[A-Za-z0-9_.-]+$/.test(item))) throw new Error("packages 包含无效包名");
-        const statuses = await invoke<PythonPackageStatus[]>("check_python_packages", { pythonPath: pythonEnvironment.path, packages });
-        return { valid: statuses.every((status) => status.installed), packages: statuses, missing: statuses.filter((status) => !status.installed).map((status) => status.name) };
-      }
-
-      if (name === "install_dependencies") {
-        if (!pythonEnvironment) throw new Error("尚未选择 Python 环境");
-        const packages = args.packages;
-        if (!Array.isArray(packages) || !packages.length || packages.some((item) => typeof item !== "string" || !/^[A-Za-z0-9_.-]+$/.test(item))) throw new Error("packages 包含无效包名");
-        const statuses = await invoke<PythonPackageStatus[]>("check_python_packages", { pythonPath: pythonEnvironment.path, packages });
-        const missing = statuses.filter((status) => !status.installed).map((status) => status.name);
-        if (!missing.length) return { installed: true, packages: [], detail: "依赖已经安装" };
-        setInstallingPackages(true);
-        let resolveFinished!: (payload: PackageInstallFinishedEvent) => void;
-        let rejectFinished!: (error: unknown) => void;
-        const finished = new Promise<PackageInstallFinishedEvent>((resolve, reject) => { resolveFinished = resolve; rejectFinished = reject; });
-        const unlisten = await listen<PackageInstallFinishedEvent>("package-install-finished", ({ payload }) => resolveFinished(payload));
-        const abort = () => {
-          void invoke("stop_package_install");
-          rejectFinished(new DOMException("已停止依赖安装", "AbortError"));
-        };
-        signal.addEventListener("abort", abort, { once: true });
-        try {
-          await invoke("install_python_packages", { pythonPath: pythonEnvironment.path, packages: missing, indexUrl: usePipMirror ? pipMirrorUrl : null });
-          const result = await finished;
-          if (!result.success) throw new Error(result.stopped ? "依赖安装已停止" : result.error || "依赖安装失败");
-          const verified = await invoke<PythonPackageStatus[]>("check_python_packages", { pythonPath: pythonEnvironment.path, packages });
-          const stillMissing = verified.filter((status) => !status.installed).map((status) => status.name);
-          if (stillMissing.length) throw new Error(`安装完成后仍缺少依赖：${stillMissing.join(", ")}`);
-          return { installed: true, packages: missing, verified: true };
-        } finally {
-          unlisten();
-          signal.removeEventListener("abort", abort);
-          setInstallingPackages(false);
-        }
-      }
-
-      if (name === "inspect_rendered_output") {
-        const renderOutput = manimRenderOutputRef.current;
-        if (!renderOutput) throw new Error("当前场景还没有渲染结果");
-        if (renderOutput.type === "image") {
-          const result = await inspectImageQuality(renderOutput.url);
-          const valid = result.width > 0 && result.height > 0 && result.blankImageLikely !== true;
-          return { valid, type: renderOutput.type, scene: renderOutput.scene, path: renderOutput.path, ...result, ...(result.blankImageLikely === true ? { warning: "图片亮度几乎没有变化，疑似空白画面" } : {}) };
-        }
-        const result = await inspectVideoQuality(renderOutput.url);
-        const valid = result.durationSeconds > 0 && result.width > 0 && result.height > 0 && result.blankFrameLikely !== true;
-        return { valid, type: renderOutput.type, scene: renderOutput.scene, path: renderOutput.path, ...result, ...(result.blankFrameLikely === true ? { warning: "视频中点画面亮度几乎没有变化，疑似空白画面" } : {}) };
-      }
-
-      if (name === "replace_code") {
-        const code = checkedString(args, "code", true);
-        const existingCode = codePreviewOriginal ?? sourceCodeRef.current;
-        if (countFakeVoiceoverApis(code) > countFakeVoiceoverApis(existingCode)) throw new Error("不能在 Python 代码中调用 self.add_voiceover 或 self.add_synchronized_voiceover；请使用 AI 专用配音工具。");
-        await validateCandidateCode(code);
-        return { summary: toolSummary(args, "重写代码"), ...commitCode(code) };
-      }
-
-      if (name === "edit_code") {
-        if (!Array.isArray(args.edits) || !args.edits.length) throw new Error("参数 edits 必须是非空数组");
-        const edits = args.edits.map((candidate, index): AiCodeEdit => {
-          if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new Error(`第 ${index + 1} 个编辑格式无效`);
-          const edit = candidate as Record<string, unknown>;
-          if (typeof edit.oldText !== "string" || typeof edit.newText !== "string") throw new Error(`第 ${index + 1} 个编辑必须包含字符串 oldText 和 newText`);
-          return { oldText: edit.oldText, newText: edit.newText, replaceAll: edit.replaceAll === true };
-        });
-        const nextCode = applyExactCodeEdits(sourceCodeRef.current, edits);
-        if (countFakeVoiceoverApis(nextCode) > countFakeVoiceoverApis(sourceCodeRef.current)) throw new Error("不能在 Python 代码中调用 self.add_voiceover 或 self.add_synchronized_voiceover；请使用 AI 专用配音工具。");
-        await validateCandidateCode(nextCode);
-        return { summary: toolSummary(args, "修改代码"), editCount: args.edits.length, ...commitCode(nextCode) };
-      }
-
-      if (name === "inspect_python_structure") {
-        return invoke<PythonStructure>("inspect_python_structure", { code: sourceCodeRef.current, pythonPath: pythonEnvironment?.path || null });
-      }
-
-      if (name === "insert_statements" || name === "replace_function_body" || name === "add_import") {
-        const currentCode = sourceCodeRef.current;
-        const structure = await invoke<PythonStructure>("inspect_python_structure", { code: currentCode, pythonPath: pythonEnvironment?.path || null });
-        let nextCode: string;
-        if (name === "insert_statements") {
-          if (!Array.isArray(args.statements) || !args.statements.length || args.statements.some((item) => typeof item !== "string" || !item.trim())) throw new Error("statements 必须是非空 Python 语句字符串数组");
-          nextCode = insertPythonStatements(currentCode, structure, {
-            ...(typeof args.className === "string" && args.className.trim() ? { className: args.className.trim() } : {}),
-            functionName: checkedString(args, "functionName"),
-            position: args.position === "start" ? "start" : args.position === "end" ? "end" : (() => { throw new Error("position 必须是 start 或 end"); })(),
-            statements: args.statements as string[],
-          });
-        } else if (name === "replace_function_body") {
-          nextCode = replacePythonFunctionBody(currentCode, structure, {
-            ...(typeof args.className === "string" && args.className.trim() ? { className: args.className.trim() } : {}),
-            functionName: checkedString(args, "functionName"),
-            body: checkedString(args, "body"),
-          });
-        } else {
-          const names = args.names === undefined ? [] : args.names;
-          if (!Array.isArray(names) || names.some((item) => typeof item !== "string")) throw new Error("names 必须是字符串数组");
-          nextCode = addPythonImport(currentCode, structure, checkedString(args, "module"), names as string[]);
-        }
-        if (countFakeVoiceoverApis(nextCode) > countFakeVoiceoverApis(currentCode)) throw new Error("不能在 Python 代码中调用 self.add_voiceover 或 self.add_synchronized_voiceover；请使用 AI 专用配音工具。");
-        await validateCandidateCode(nextCode);
-        return { summary: toolSummary(args, name === "insert_statements" ? "插入语句" : name === "replace_function_body" ? "重建函数" : "添加导入"), ...commitCode(nextCode) };
-      }
-
-      if (name === "get_voiceover_context") {
-        const hasApiKey = await invoke<boolean>("has_tts_api_key", { config: ttsConfig });
-        return {
-          configured: Boolean(ttsConfig.baseUrl.trim() && hasApiKey),
-          hasApiKey,
-          provider: ttsConfig.provider,
-          defaultVoice: { model: ttsConfig.model, voice: ttsConfig.voice, speed: ttsConfig.speed, ...ttsExpressionFrom(ttsConfig) },
-          roles: [
-            { id: "default", name: "默认旁白", model: ttsConfig.model, voice: ttsConfig.voice, speed: ttsConfig.speed, ...ttsExpressionFrom(ttsConfig) },
-            ...voiceoverRoles.map((role) => ({ id: role.id, name: role.name, model: role.model, voice: role.voice, speed: role.speed, ...ttsExpressionFrom(role) })),
-          ],
-        };
-      }
-
-      if (name === "add_voiceover" || name === "add_synchronized_voiceover") {
-        const hasApiKey = Boolean(ttsApiKey.trim()) || await invoke<boolean>("has_tts_api_key", { config: ttsConfig }).catch(() => false);
-        if (!ttsConfig.baseUrl.trim() || !hasApiKey) {
-          throw new Error("配音服务尚未配置完成。请让用户先在 Manim 设置的视频配音中填写百炼接口地址和 API Key。不要继续添加配音或尝试渲染。");
-        }
-        const summary = toolSummary(args, name === "add_synchronized_voiceover" ? "添加同步配音" : "添加配音");
-        const text = checkedString(args, "text");
-        const roleId = typeof args.roleId === "string" && args.roleId.trim() ? args.roleId.trim() : "default";
-        if (roleId !== "default" && !voiceoverRoles.some((role) => role.id === roleId)) throw new Error(`配音角色不存在：${roleId}。请重新调用 get_voiceover_context。`);
-        const currentCode = sourceCodeRef.current;
-        const nextCode = name === "add_voiceover"
-          ? insertStandaloneVoiceover(
-            currentCode,
-            checkedString(args, "anchorText"),
-            text,
-            roleId,
-            args.placement === "after" ? "after" : "before",
-          )
-          : insertSynchronizedVoiceover(currentCode, checkedString(args, "targetText"), text, roleId);
-        await validateCandidateCode(nextCode);
-        return { summary, roleId, synchronized: name === "add_synchronized_voiceover", ...commitCode(nextCode) };
-      }
-
-      if (name === "check_voiceover") {
-        const inspection = inspectVoiceovers(sourceCodeRef.current, voiceoverRoles.map((role) => role.id));
-        setProblems((items) => [
-          ...items.filter((problem) => problem.kind !== "plugin" || !problem.message.startsWith("配音：")),
-          ...inspection.issues.map((message) => ({ id: problemId.current++, kind: "plugin" as const, line: Number(message.match(/^第 (\d+) 行/)?.[1] || 0), message: `配音：${message}` })),
-        ]);
-        if (!inspection.valid) setActivePanel("problems");
-        return inspection;
-      }
-
-      if (name === "check_code") {
-        const code = sourceCodeRef.current;
-        try {
-          await invoke("validate_python_code", { code, pythonPath: pythonEnvironment?.path || null });
-          setCodeSyntaxDiagnostic(null);
-          setProblems((items) => items.filter((problem) => problem.kind !== "syntax"));
-          return { valid: true, lineCount: code ? code.split("\n").length : 0 };
-        } catch (error) {
-          const traceback = String(error);
-          const diagnostic = parsePythonSyntaxDiagnostic(traceback, code);
-          if (diagnostic) setCodeSyntaxDiagnostic(diagnostic);
-          setProblems((items) => [
-            ...items.filter((problem) => problem.kind !== "syntax"),
-            { id: problemId.current++, kind: "syntax", line: diagnostic?.line ?? 0, message: diagnostic?.message || traceback, suggestion: diagnostic?.suggestion },
-          ]);
-          setActivePanel("problems");
-          return { valid: false, error: traceback, diagnostic };
-        }
-      }
-
-      if (name === "format_code") {
-        const previousCode = sourceCodeRef.current;
-        const formatted = await formatCurrentPythonCode(false);
-        if (formatted === null) throw new Error("代码格式化失败，请先检查语法问题");
-        sourceCodeRef.current = formatted;
-        const changed = previousCode !== formatted;
-        return {
-          formatted: true,
-          changed,
-          diff: changed ? createCodeChangePreview(previousCode, formatted) : "",
-          lineCount: formatted ? formatted.split("\n").length : 0,
-          __codeChange: changed ? { before: previousCode, after: formatted, sceneId: activeSceneIdRef.current, sceneName: sceneDocumentsRef.current.find((document) => document.id === activeSceneIdRef.current)?.name } : undefined,
-        };
-      }
-
-      if (name === "undo_code" || name === "redo_code") {
-        const editor = codeEditor.current;
-        if (!editor) throw new Error("代码编辑器尚未就绪");
-        const previousCode = editor.getValue();
-        editor.trigger("ai-code-agent", name === "undo_code" ? "undo" : "redo", null);
-        await waitWithSignal(0);
-        const code = editor.getValue();
-        const changed = previousCode !== code;
-        sourceCodeRef.current = code;
-        setSourceCode(code);
-        if (changed) setDirty(true);
-        return {
-          changed,
-          diff: changed ? createCodeChangePreview(previousCode, code) : "",
-          lineCount: code ? code.split("\n").length : 0,
-          __codeChange: changed ? { before: previousCode, after: code, sceneId: activeSceneIdRef.current, sceneName: sceneDocumentsRef.current.find((document) => document.id === activeSceneIdRef.current)?.name } : undefined,
-        };
-      }
-
-      if (name === "run_project") {
-        await runCode();
-        return { started: taskId.current !== null, next: "使用 wait 后调用 get_execution_state" };
-      }
-
-      if (name === "render_manim") {
-        const outputType = args.outputType === undefined ? manimRenderConfig.outputType : args.outputType;
-        if (outputType !== "video" && outputType !== "image") throw new Error("outputType 必须是 video 或 image");
-        if (args.transparentBackground !== undefined && typeof args.transparentBackground !== "boolean") throw new Error("transparentBackground 必须是布尔值");
-        const transparentBackground = typeof args.transparentBackground === "boolean" ? args.transparentBackground : manimRenderConfig.transparentBackground;
-        const hasImageWidth = args.imageWidth !== undefined;
-        const hasImageHeight = args.imageHeight !== undefined;
-        if (hasImageWidth !== hasImageHeight) throw new Error("自定义图片尺寸必须同时提供 imageWidth 和 imageHeight");
-        if (hasImageWidth && (typeof args.imageWidth !== "number" || !Number.isInteger(args.imageWidth) || args.imageWidth < 64 || args.imageWidth > 8192 || typeof args.imageHeight !== "number" || !Number.isInteger(args.imageHeight) || args.imageHeight < 64 || args.imageHeight > 8192)) throw new Error("图片宽高必须是 64 到 8192 之间的整数");
-        const imageWidth = hasImageWidth ? args.imageWidth as number : undefined;
-        const imageHeight = hasImageHeight ? args.imageHeight as number : undefined;
-        if (args.imageCaptureMode !== undefined && args.imageCaptureMode !== "final" && args.imageCaptureMode !== "animation") throw new Error("imageCaptureMode 必须是 final 或 animation");
-        if (args.imageAnimationStep !== undefined && (typeof args.imageAnimationStep !== "number" || !Number.isInteger(args.imageAnimationStep) || args.imageAnimationStep < 1 || args.imageAnimationStep > 10_000)) throw new Error("imageAnimationStep 必须是 1 到 10000 之间的整数");
-        const imageAnimationStep = typeof args.imageAnimationStep === "number" ? args.imageAnimationStep : manimRenderConfig.imageAnimationStep;
-        const imageCaptureMode = args.imageCaptureMode === "final" || args.imageCaptureMode === "animation" ? args.imageCaptureMode : args.imageAnimationStep !== undefined ? "animation" : manimRenderConfig.imageCaptureMode;
-        await renderManim({ outputType, transparentBackground, imageWidth, imageHeight, imageCaptureMode, imageAnimationStep });
-        const started = manimTaskId.current !== null || manimRenderAttempt.current !== null;
-        if (!started) throw new Error(problemsRef.current.at(-1)?.message || "Manim 渲染未能启动");
-        return { started, outputType, ...(outputType === "image" ? { transparentBackground, imageCaptureMode, ...(imageCaptureMode === "animation" ? { imageAnimationStep } : {}), ...(imageWidth && imageHeight ? { imageWidth, imageHeight } : {}) } : {}), next: "使用 wait 后调用 get_execution_state" };
-      }
-
-      if (name === "get_execution_state") {
-        const runningPython = taskId.current !== null;
-        const rendering = manimTaskId.current !== null || manimRenderAttempt.current !== null;
-        const pythonElapsedSeconds = runningPython && pythonRunStartedAt.current
-          ? Math.max(0, Math.floor((Date.now() - pythonRunStartedAt.current) / 1000))
-          : pythonRunElapsed.current;
-        const renderElapsedSeconds = rendering && manimRenderStartedAt.current
-          ? Math.max(0, Math.floor((Date.now() - manimRenderStartedAt.current) / 1000))
-          : manimRenderElapsedRef.current;
-        return {
-          running: runningPython,
-          rendering,
-          pythonElapsedSeconds,
-          renderElapsedSeconds,
-          renderProgress: manimRenderProgressRef.current,
-          output: outputRef.current.slice(-120).map(({ stream, data }) => ({ stream, data })),
-          problems: problemsRef.current.map(({ kind, line, message, suggestion }) => ({ kind, line, message, suggestion })),
-          renderOutput: manimRenderOutputRef.current ? { type: manimRenderOutputRef.current.type, scene: manimRenderOutputRef.current.scene, path: manimRenderOutputRef.current.path, transparentBackground: manimRenderOutputRef.current.transparentBackground } : null,
-        };
-      }
-
-      if (name === "wait") {
-        const requested = typeof args.milliseconds === "number" ? args.milliseconds : 1000;
-        const milliseconds = Math.max(100, Math.min(10_000, Math.round(requested)));
-        await waitWithSignal(milliseconds);
-        return { waitedMilliseconds: milliseconds, running: taskId.current !== null, rendering: manimTaskId.current !== null || manimRenderAttempt.current !== null };
-      }
-
-      if (name === "stop_execution") {
-        if (manimTaskId.current !== null || manimRenderAttempt.current) await stopManimRender();
-        if (taskId.current !== null) await stopCode();
-        return { stopped: true };
-      }
-
-      if (name === "save_project") {
-        const path = projectPathRef.current;
-        if (!path) throw new Error("当前工程还没有保存路径，请先使用“另存为”选择位置");
-        const saved = await writeProject(path, sourceCodeRef.current);
-        if (saved) projectDirty = false;
-        return { saved, path };
-      }
-
-      throw new Error(`未实现工具 ${name}`);
-    };
 
     try {
-      const result = await runAiCodeAgent({
+      const agentResult = await runVisualPythonAgent({
         prompt,
         history,
-        agentMode,
-        initialPlan,
-        onActivity: reportActivity,
-        onProgress: reportProgressWithCheckpoint,
+        mode: agentMode,
+        onEvent: reportAgentV2Event,
+        onProgress: reportAgentV2Progress,
         permissionMode,
-        onPermissionRequest,
+        onPermissionRequest: (request) => onPermissionRequest({ ...request, toolName: request.toolName as AiAgentToolName }),
         signal,
-        host: {
-          executeTool,
-          previewCode,
-          cancelCodePreview,
+        host: createVisualPythonHostAdapter({
+          workspaceModeRef,
+          sceneDocumentsRef,
+          activeSceneIdRef,
+          sourceCodeRef,
+          projectPathRef,
+          projectResourcesRef,
+          taskId,
+          manimTaskId,
+          manimRenderAttempt,
+          runningRef,
+          renderingManimRef,
+          pythonRunStartedAt,
+          pythonRunElapsed,
+          manimRenderStartedAt,
+          manimRenderElapsedRef,
+          manimRenderProgressRef,
+          outputRef,
+          problemsRef,
+          problemIdRef: problemId,
+          manimRenderOutputRef,
+          codeEditor,
+          aiCodePreviewing,
+          codeValidationVersion,
+          projectName,
+          pythonEnvironment,
+          voiceoverRoles,
+          ttsConfig,
+          ttsApiKey,
+          usePipMirror,
+          pipMirrorUrl,
+          manimRenderConfig,
+          getProjectDirty: () => projectDirty,
+          setProjectDirty: (value) => { projectDirty = value; },
+          setSceneDocuments,
+          setActiveSceneId,
+          setSourceCode,
+          setSourceCodeInitialized,
+          setDirty,
+          setProblems,
+          setCodeSyntaxDiagnostic,
+          setCodeRuntimeDiagnostic: () => setCodeRuntimeDiagnostic(null),
+          setActivePanel,
+          setInstallingPackages,
+          switchSceneConsoleState,
+          updateManimRenderConfig,
+          formatCurrentPythonCode,
+          runCode,
+          renderManim,
+          stopManimRender,
+          stopCode,
+          writeProject,
+          saveProject,
+          inspectImageQuality,
+          inspectVideoQuality,
+          invoke,
+          listen,
+          assertActive: (toolSignal) => {
+            if (toolSignal.aborted || aiAgentRunTokenRef.current !== agentRunToken) throw new Error("已停止生成");
+            if (workspaceModeRef.current !== "code") throw new Error("工作区已经离开纯代码模式");
+          },
           getSnapshot: () => {
             const document = sceneDocumentsRef.current.find((item) => item.id === activeSceneIdRef.current);
             return {
@@ -5548,9 +5086,18 @@ export default function App() {
               renderOutput: manimRenderOutputRef.current ? { type: manimRenderOutputRef.current.type, scene: manimRenderOutputRef.current.scene, path: manimRenderOutputRef.current.path, transparentBackground: manimRenderOutputRef.current.transparentBackground } : null,
             };
           },
-          getLineCount: () => sourceCodeRef.current ? sourceCodeRef.current.split("\n").length : 0,
-        },
+        }),
       });
+      if (signal.aborted || aiAgentRunTokenRef.current !== agentRunToken) throw new Error("已停止生成");
+      const result: AiAgentResult = {
+        summary: agentResult.summary,
+        toolCallCount: agentResult.toolCallCount,
+        lineCount: sourceCodeRef.current ? sourceCodeRef.current.split("\n").length : 0,
+        tokenUsage: agentResult.tokenUsage,
+        mode: agentMode,
+        intent: agentMode === "plan" ? "inspect" : "execute",
+        clarification: agentResult.clarification,
+      };
       const taskAfterDocuments = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current
         ? { ...document, code: sourceCodeRef.current, name: sceneDocumentName(sourceCodeRef.current, document.name) }
         : { ...document });
@@ -5569,26 +5116,19 @@ export default function App() {
         ...(changed ? { taskChange: { before: taskBeforeDocuments, after: taskAfterDocuments, beforeActiveSceneId: taskBeforeActiveSceneId, afterActiveSceneId: activeSceneIdRef.current } } : {}),
       };
     } catch (error) {
-      setSceneAiStatuses((statuses) => ({ ...statuses, [activeSceneIdRef.current || agentSceneId]: "error" }));
-      const restored = checkpointDocuments.map((document) => ({ ...document }));
-      const active = restored.find((document) => document.id === checkpointActiveSceneId) ?? restored[0];
-      if (active) switchSceneConsoleState(activeSceneIdRef.current, active.id);
-      sceneDocumentsRef.current = restored;
-      activeSceneIdRef.current = active?.id || "";
-      sourceCodeRef.current = active?.code || "";
-      setSceneDocuments(restored);
-      setActiveSceneId(active?.id || "");
-      setSourceCode(active?.code || "");
-      setDirty(checkpointDirty);
-      if (active) updateManimRenderConfig({ selectedScene: extractManimSceneNames(active.code)[0] || active.name });
+      if (aiAgentRunTokenRef.current === agentRunToken) {
+        setSceneAiStatuses((statuses) => ({ ...statuses, [activeSceneIdRef.current || agentSceneId]: "error" }));
+      }
       throw error;
     } finally {
       window.setTimeout(() => {
+        if (aiAgentRunTokenRef.current !== agentRunToken) return;
+        aiAgentRunTokenRef.current = null;
         aiAgentSceneIdRef.current = null;
         setAiAgentBusy(false);
       }, 0);
     }
-  }, [dirty, formatCurrentPythonCode, manimRenderConfig.imageAnimationStep, manimRenderConfig.imageCaptureMode, manimRenderConfig.imageHeight, manimRenderConfig.imageSizeMode, manimRenderConfig.imageWidth, manimRenderConfig.outputType, manimRenderConfig.transparentBackground, projectName, pythonEnvironment, renderManim, runCode, stopCode, stopManimRender, ttsConfig, voiceoverRoles, writeProject]);
+  }, [dirty, formatCurrentPythonCode, manimRenderConfig.imageAnimationStep, manimRenderConfig.imageCaptureMode, manimRenderConfig.imageHeight, manimRenderConfig.imageSizeMode, manimRenderConfig.imageWidth, manimRenderConfig.outputType, manimRenderConfig.transparentBackground, projectName, pythonEnvironment, renderManim, runCode, saveProject, stopCode, stopManimRender, switchSceneConsoleState, ttsApiKey, ttsConfig, usePipMirror, voiceoverRoles, writeProject]);
 
   const applyAiTaskSnapshot = useCallback((change: AiTaskChangeSnapshot, direction: "undo" | "apply") => {
     if (aiAgentSceneIdRef.current) return false;
@@ -5617,7 +5157,7 @@ export default function App() {
     return true;
   }, [showBlockingAlert]);
 
-  const revealAiCodeChange = useCallback((diff: string, requestedLine?: number) => {
+  const revealAiCodeChange = useCallback((diff: string, requestedLine?: number, change?: AiCodeChangeSnapshot) => {
     const editor = codeEditor.current;
     const monaco = codeEditorMonaco.current;
     const model = editor?.getModel();
@@ -5627,6 +5167,7 @@ export default function App() {
     const lines = diff.split("\n").slice(1);
     const removedLines = lines.filter((line) => line.startsWith("- ")).map((line) => line.slice(2));
     const addedLines = lines.filter((line) => line.startsWith("+ ")).map((line) => line.slice(2));
+    const lineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight);
     clearAiCodeChange();
     if (addedLines.length) {
       const lastAddedLine = Math.min(model.getLineCount(), startLine + addedLines.length - 1);
@@ -5638,7 +5179,6 @@ export default function App() {
       }
     }
     if (removedLines.length) {
-      const lineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight);
       const codeNode = document.createElement("div");
       codeNode.className = "ai-code-diff-removed-zone";
       codeNode.style.lineHeight = `${lineHeight}px`;
@@ -5666,9 +5206,55 @@ export default function App() {
       });
     }
     const line = Math.max(1, Math.min(model.getLineCount(), Math.round(requestedLine ?? startLine)));
+    aiCodeReviewAnchor.current = { lineNumber: startLine, offset: removedLines.length * lineHeight };
+    if (change) setAiCodeReview(change);
     editor.revealLineInCenter(line);
+    requestAnimationFrame(updateAiCodeReviewPosition);
     editor.focus();
-  }, [clearAiCodeChange]);
+  }, [clearAiCodeChange, updateAiCodeReviewPosition]);
+
+  const undoAiCodeReview = useCallback(() => {
+    if (!aiCodeReview) return;
+    if (aiCodeReview.sceneId && aiCodeReview.sceneId !== activeSceneIdRef.current) {
+      showBlockingAlert({ title: "无法撤销修改", message: `请先切换到场景“${aiCodeReview.sceneName || aiCodeReview.sceneId}”后再撤销。` });
+      return;
+    }
+    const editor = codeEditor.current;
+    const model = editor?.getModel();
+    if (!editor || !model) return;
+    if (model.getValue() !== aiCodeReview.after) {
+      showBlockingAlert({ title: "无法撤销修改", message: "当前代码在这次 AI 修改后又发生了变化。为避免覆盖后续修改，无法直接撤销。" });
+      return;
+    }
+    clearAiCodeChange();
+    editor.pushUndoStop();
+    editor.executeEdits("ai-code-review-undo", [{ range: model.getFullModelRange(), text: aiCodeReview.before, forceMoveMarkers: true }]);
+    editor.pushUndoStop();
+    sourceCodeRef.current = aiCodeReview.before;
+    setSourceCode(aiCodeReview.before);
+    setSourceCodeInitialized(true);
+    codeValidationVersion.current += 1;
+    setCodeSyntaxDiagnostic(null);
+    setCodeRuntimeDiagnostic(null);
+    setProblems((items) => items.filter((problem) => !["syntax", "runtime", "timeout"].includes(problem.kind)));
+    setDirty(true);
+    editor.focus();
+  }, [aiCodeReview, clearAiCodeChange, showBlockingAlert]);
+
+  useEffect(() => {
+    if (!aiCodeReview) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const key = event.key.toLowerCase();
+      if (key !== "n" && key !== "y") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (key === "n") undoAiCodeReview();
+      else clearAiCodeChange();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [aiCodeReview, clearAiCodeChange, undoAiCodeReview]);
 
   const revealAiProblem = useCallback((line: number) => {
     if (!Number.isInteger(line) || line < 1) return;
@@ -5770,95 +5356,6 @@ export default function App() {
     items[nextIndex]?.focus();
   };
 
-  const undoAiCodeChange = useCallback((change: AiCodeChangeSnapshot): boolean => {
-    if (change.sceneId && change.sceneId !== activeSceneIdRef.current) {
-      const documents = persistActiveSceneDocument();
-      const target = documents.find((document) => document.id === change.sceneId);
-      if (!target || target.code !== change.after) {
-        showBlockingAlert({ title: "无法撤销修改", message: `场景“${change.sceneName || change.sceneId}”在这次 AI 修改后又发生了变化，无法直接撤销此记录。` });
-        return false;
-      }
-      const updated = { ...target, code: change.before, name: sceneDocumentName(change.before, target.name) };
-      const nextDocuments = documents.map((document) => document.id === target.id ? updated : document);
-      sceneDocumentsRef.current = nextDocuments;
-      activeSceneIdRef.current = updated.id;
-      sourceCodeRef.current = updated.code;
-      setSceneDocuments(nextDocuments);
-      setActiveSceneId(updated.id);
-      setSourceCode(updated.code);
-      updateManimRenderConfig({ selectedScene: extractManimSceneNames(updated.code)[0] || updated.name });
-      setDirty(true);
-      return true;
-    }
-    const editor = codeEditor.current;
-    const model = editor?.getModel();
-    if (!editor || !model) return false;
-    if (model.getValue() !== change.after) {
-      showBlockingAlert({
-        title: "无法撤销修改",
-        message: "当前代码在这次 AI 修改后又发生了变化。为避免覆盖后续修改，无法直接撤销此记录。",
-        detail: "请使用编辑器的撤销功能逐步回退。",
-      });
-      return false;
-    }
-    clearAiCodeChange();
-    editor.pushUndoStop();
-    editor.executeEdits("ai-code-change-undo", [{ range: model.getFullModelRange(), text: change.before, forceMoveMarkers: true }]);
-    editor.pushUndoStop();
-    sourceCodeRef.current = change.before;
-    setSourceCode(change.before);
-    setSourceCodeInitialized(true);
-    codeValidationVersion.current += 1;
-    setCodeSyntaxDiagnostic(null);
-    setCodeRuntimeDiagnostic(null);
-    setProblems((items) => items.filter((problem) => !["syntax", "runtime", "timeout"].includes(problem.kind)));
-    setDirty(true);
-    editor.focus();
-    return true;
-  }, [clearAiCodeChange, showBlockingAlert]);
-
-  const applyAiCodeChange = useCallback((change: AiCodeChangeSnapshot): boolean => {
-    if (change.sceneId && change.sceneId !== activeSceneIdRef.current) {
-      const documents = persistActiveSceneDocument();
-      const target = documents.find((document) => document.id === change.sceneId);
-      if (!target || target.code !== change.before) {
-        showBlockingAlert({ title: "无法重新应用修改", message: `场景“${change.sceneName || change.sceneId}”在撤销后又发生了变化，无法重新应用此记录。` });
-        return false;
-      }
-      const updated = { ...target, code: change.after, name: sceneDocumentName(change.after, target.name) };
-      const nextDocuments = documents.map((document) => document.id === target.id ? updated : document);
-      sceneDocumentsRef.current = nextDocuments;
-      activeSceneIdRef.current = updated.id;
-      sourceCodeRef.current = updated.code;
-      setSceneDocuments(nextDocuments);
-      setActiveSceneId(updated.id);
-      setSourceCode(updated.code);
-      updateManimRenderConfig({ selectedScene: extractManimSceneNames(updated.code)[0] || updated.name });
-      setDirty(true);
-      return true;
-    }
-    const editor = codeEditor.current;
-    const model = editor?.getModel();
-    if (!editor || !model) return false;
-    if (model.getValue() !== change.before) {
-      showBlockingAlert({ title: "无法重新应用修改", message: "当前代码在撤销后又发生了变化。为避免覆盖后续修改，无法重新应用此记录。" });
-      return false;
-    }
-    clearAiCodeChange();
-    editor.pushUndoStop();
-    editor.executeEdits("ai-code-change-apply", [{ range: model.getFullModelRange(), text: change.after, forceMoveMarkers: true }]);
-    editor.pushUndoStop();
-    sourceCodeRef.current = change.after;
-    setSourceCode(change.after);
-    setSourceCodeInitialized(true);
-    codeValidationVersion.current += 1;
-    setCodeSyntaxDiagnostic(null);
-    setCodeRuntimeDiagnostic(null);
-    setProblems((items) => items.filter((problem) => !["syntax", "runtime", "timeout"].includes(problem.kind)));
-    setDirty(true);
-    editor.focus();
-    return true;
-  }, [clearAiCodeChange, showBlockingAlert]);
   const startAiPanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!aiAssistantVisible) return;
     event.preventDefault();
@@ -6032,7 +5529,13 @@ export default function App() {
       <div className="panel-resizer" onPointerDown={startRightPanelResize} role="separator" aria-label="调整辅助面板宽度" aria-orientation="vertical"/>
       <aside className="right-panel">
         <div className="panel-head"><div className="code-scene-tabs" role="tablist" aria-label="Python 场景">{workspaceMode === "code" ? sceneDocuments.map((scene) => { const aiStatus = sceneAiStatuses[scene.id]; const aiStatusLabel = aiStatus ? ({ working: "AI 正在处理", changed: "AI 已修改", error: "AI 处理出错", validated: "AI 已校验", rendered: "AI 已检查渲染" } as const)[aiStatus] : ""; return <div key={scene.id} className={`scene-tab ${scene.id === activeSceneId ? "active" : ""}`} role="tab" aria-selected={scene.id === activeSceneId}><button className="scene-tab-label" onClick={() => focusManimSceneTab(scene.id)} title={`打开场景 ${scene.name}`}><Film size={13}/><span>{scene.name}</span>{aiStatus && <i className={`scene-ai-status ${aiStatus}`} title={aiStatusLabel} aria-label={aiStatusLabel}/>}</button><button className="scene-tab-close" onClick={() => closeManimSceneTab(scene.id)} title={`删除场景 ${scene.name}`} aria-label={`删除场景 ${scene.name}`}><X size={12}/></button></div>; }) : <div className="panel-tab active"><Braces size={14}/> Python</div>}{workspaceMode === "code" && <button className="scene-tab-add" onClick={addManimSceneTab} title="新建独立 Manim 场景" aria-label="新建独立 Manim 场景"><Plus size={14}/></button>}</div><div className="panel-head-actions"><span className="read-only">{workspaceMode === "code" ? "独立场景" : "实时生成"}</span>{workspaceMode === "code" && <div className="code-outline-wrap" ref={codeOutlineRef}><button ref={codeOutlineTriggerRef} className="code-outline-trigger" disabled={!codeOutline.length} aria-label="代码结构大纲" title="代码结构大纲" aria-haspopup="menu" aria-expanded={codeOutlineOpen} onClick={() => setCodeOutlineOpen((open) => !open)}><ListTree size={15}/></button>{codeOutlineOpen && <div className="code-outline-menu" role="menu" aria-label="代码结构">{codeOutline.map((item) => <button key={`${item.kind}-${item.lineNumber}-${item.label}`} role="menuitem" onClick={() => focusCodeOutlineItem(item)} title={`第 ${item.lineNumber} 行`}><span className={`code-outline-icon outline-${item.kind}`}>{item.kind === "function" ? <Braces size={14}/> : <Box size={14}/>}</span><span className="code-outline-label"><strong>{item.label}</strong><small>{item.kind === "function" ? item.signature : `class ${item.label}`}</small></span><span className="code-outline-line">{item.lineNumber}</span></button>)}</div>}</div>}</div></div>
-        <div className="editor-wrap" onContextMenu={openCodeEditorContextMenu}><Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `scene-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", contextmenu: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense></div>
+        <div className="editor-wrap" onContextMenu={openCodeEditorContextMenu}>
+          <Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `scene-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", contextmenu: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense>
+          {aiCodeReview && aiCodeReviewTop !== null && <div className="ai-code-review-actions" style={{ top: aiCodeReviewTop }} role="toolbar" aria-label="AI 代码修改操作">
+            <button type="button" className="undo" onClick={undoAiCodeReview} aria-label="撤销 AI 修改，快捷键 Alt+N"><kbd>Alt+N</kbd><span>撤销</span></button>
+            <button type="button" className="keep" onClick={clearAiCodeChange} aria-label="保留 AI 修改，快捷键 Alt+Y"><kbd>Alt+Y</kbd><span>保留</span></button>
+          </div>}
+        </div>
       </aside>
         </div>
         <div className={`console-resizer ${!effectiveBottomPanelOpen ? "collapsed" : ""}`} onPointerDown={startBottomPanelResize} role="separator" aria-label="调整输出面板高度" aria-orientation="horizontal" aria-valuemin={160} aria-valuemax={600} aria-valuenow={bottomPanelHeight}/>
@@ -6051,7 +5554,7 @@ export default function App() {
       </section>
       <div className={`ai-panel-resizer ${aiAssistantVisible ? "" : "collapsed"}`} onPointerDown={startAiPanelResize} role="separator" aria-label="调整 AI 智能体宽度" aria-orientation="vertical" aria-valuemin={340} aria-valuemax={520} aria-valuenow={aiPanelWidth}/>
       <aside className={`ai-drawer ${aiAssistantVisible ? "open" : ""}`} aria-hidden={!aiAssistantVisible}>
-        <AiAssistantPanel key={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} conversationScope={(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene"} lineCount={sourceCode ? sourceCode.split("\n").length : 0} sceneName={sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前场景"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onRevealProblem={revealAiProblem} onUndoCodeChange={undoAiCodeChange} onApplyCodeChange={applyAiCodeChange} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")} onClearConversationConfirm={() => requestConfirmation({ title: "清空当前 AI 对话？", message: "当前对话中的全部消息和任务记录都将被永久删除。", confirmLabel: "清空对话", tone: "danger" })}/>
+        <AiAssistantPanel key={createAiConversationScope(projectId, (aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene")} conversationScope={createAiConversationScope(projectId, (aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene")} conversationProjectId={projectId} workspaceEpoch={aiWorkspaceEpoch} lineCount={sourceCode ? sourceCode.split("\n").length : 0} sceneName={sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前场景"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onRevealProblem={revealAiProblem} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")} onClearConversationConfirm={() => requestConfirmation({ title: "清空当前 AI 对话？", message: "当前对话中的全部消息和任务记录都将被永久删除。", confirmLabel: "清空对话", tone: "danger" })}/>
       </aside>
     </section>
     <footer className="statusbar" onContextMenu={(event) => event.preventDefault()}><div className="python-environment-switcher" ref={pythonEnvironmentMenuRef}><button className="environment-status" aria-haspopup="menu" aria-expanded={pythonEnvironmentMenuOpen} disabled={running || renderingManim} onClick={() => { const next = !pythonEnvironmentMenuOpen; setPythonEnvironmentMenuOpen(next); if (next) void detectPythonEnvironments(); }}><span>{pythonEnvironment ? `Python ${pythonEnvironment.version}` : "未选择 Python"}</span></button>{pythonEnvironmentMenuOpen && <div className="python-environment-menu" role="menu" aria-label="切换 Python 解释器"><header><span><strong>Python 解释器</strong><small>{supportedPythonRangeLabel}</small></span><button className="python-environment-refresh" onClick={() => void detectPythonEnvironments()} disabled={detectingPython} title="重新检测" aria-label="重新检测 Python 解释器"><RefreshCw size={13} className={detectingPython ? "spin" : ""}/></button></header><div className="python-environment-options">{pythonEnvironments.length ? pythonEnvironments.map((environment) => { const selected = pythonEnvironment?.path.toLowerCase() === environment.path.toLowerCase(); return <button key={environment.path} className={`python-environment-option ${selected ? "selected" : ""}`} role="menuitemradio" aria-checked={selected} title={environment.path} onClick={() => selectPythonEnvironment(environment)}><span className="python-environment-option-check">{selected && <Check size={12}/>}</span><span><strong>Python {environment.version}</strong><small>{environment.implementation}{environment.virtual_env ? " · 虚拟环境" : ""}</small><code>{environment.path}</code></span></button>; }) : <div className="python-environment-empty"><Braces size={18}/><span>{detectingPython ? "正在检测 Python..." : `未检测到${supportedPythonRangeLabel}`}</span></div>}</div></div>}</div><span className="status-spacer"/>{workspaceMode === "code" && <div className="editor-status-items"><button onClick={() => runCodeEditorAction("editor.action.gotoLine")} title="跳转到行">行 {codeCursorPosition.lineNumber}，列 {codeCursorPosition.column}</button><span title="Python 缩进宽度">空格: {codeIndentSize}</span><span title="文件编码">UTF-8</span></div>}<span>{running ? "正在运行" : renderingManim ? "正在渲染" : "就绪"}</span></footer>

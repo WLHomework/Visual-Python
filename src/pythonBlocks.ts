@@ -1419,6 +1419,17 @@ const callToolboxBlock = (type: string, target: string, arguments_: ArgumentSpec
   return { kind: "block", type, fields, extraState: { arguments: arguments_ } } as Blockly.utils.toolbox.BlockInfo;
 };
 
+const callableFunctionDefinitionTypes = new Set([...structuredDefinitionTypes].filter((type) => type !== "python_method_structured"));
+
+export function buildFunctionCallBlockInfo(
+  definition: Blockly.Block,
+  type: "python_call_structured" | "python_call_statement_structured" = "python_call_statement_structured",
+): Blockly.utils.toolbox.BlockInfo | null {
+  if (!callableFunctionDefinitionTypes.has(definition.type) && definition.type !== "python_function_def") return null;
+  const name = safeIdentifier(definition.getFieldValue("NAME") || "", "");
+  return name ? callToolboxBlock(type, name, requiredCallArguments(readDefinitionParameters(definition))) : null;
+}
+
 export function buildDefinedFunctionCallToolbox(workspace: Blockly.Workspace): Blockly.utils.toolbox.FlyoutItemInfoArray {
   const names = new Set<string>();
   const calls: Blockly.utils.toolbox.FlyoutItemInfoArray = [
@@ -1426,16 +1437,16 @@ export function buildDefinedFunctionCallToolbox(workspace: Blockly.Workspace): B
     { kind: "block", type: "python_call_statement_structured" },
   ];
   const definedCalls: Blockly.utils.toolbox.FlyoutItemInfoArray = [];
-  const structuredFunctionTypes = new Set([...structuredDefinitionTypes].filter((type) => type !== "python_method_structured"));
   for (const block of workspace.getAllBlocks(false)) {
-    if (!structuredFunctionTypes.has(block.type) && block.type !== "python_function_def") continue;
+    if (!callableFunctionDefinitionTypes.has(block.type) && block.type !== "python_function_def") continue;
     const surroundParent = block.getSurroundParent();
     if (surroundParent && (surroundParent.type !== "python_decorated_definition" || surroundParent.getSurroundParent())) continue;
-    const name = safeIdentifier(block.getFieldValue("NAME") || "", "");
+    const callInfo = buildFunctionCallBlockInfo(block, "python_call_structured");
+    const name = callInfo?.fields?.TARGET;
     if (!name || names.has(name)) continue;
     names.add(name);
 
-    definedCalls.push(callToolboxBlock("python_call_structured", name, requiredCallArguments(readDefinitionParameters(block))));
+    definedCalls.push(callInfo);
   }
   if (definedCalls.length) calls.push({ kind: "sep", gap: 20 }, ...definedCalls);
   return calls;

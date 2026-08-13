@@ -20,8 +20,23 @@ describe("Python inline runtime diagnostics", () => {
       `Traceback (most recent call last):\n  File "<string>", line 1, in <module>\nIndexError: list index out of range`,
       "print(items[9])",
     );
-    expect(division?.message).toContain("除数变成 0");
+    expect(division?.message).toContain("除数为 0");
     expect(index?.message).toContain("边界");
+  });
+
+  it("uses code-oriented guidance for file and directory mismatches", () => {
+    const directory = parsePythonRuntimeDiagnostic(
+      `  File "<string>", line 1, in <module>\nIsADirectoryError: [Errno 21] Is a directory: 'data'`,
+      "open('data')",
+    );
+    const file = parsePythonRuntimeDiagnostic(
+      `  File "<string>", line 1, in <module>\nNotADirectoryError: [Errno 20] Not a directory: 'data.txt'`,
+      "list(Path('data.txt').iterdir())",
+    );
+
+    expect(`${directory?.suggestion}\n${file?.suggestion}`).not.toMatch(/积木|输入槽|高亮/);
+    expect(directory?.suggestion).toContain("文件路径");
+    expect(file?.suggestion).toContain("目录路径");
   });
 
   it("explains common file system errors", () => {
