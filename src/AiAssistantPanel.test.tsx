@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AgentActivityRow, AgentResponseFooter, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, settlePermissionResolvers, storeConversationState, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
+import { AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, storeConversationState, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
 import type { AiAgentActivity } from "./agentV2";
 
 describe("AI assistant Markdown", () => {
@@ -44,10 +44,24 @@ describe("AI assistant Markdown", () => {
   });
 
   it("places completion metadata in the response footer", () => {
-    const html = renderToStaticMarkup(<AgentResponseFooter status="完成" meta="2 次操作 · 9 行代码 · 9 秒"/>);
+    const html = renderToStaticMarkup(<AgentResponseFooter status="完成" meta="2 次操作 · 9 行代码 · 9 秒" metaTitle="缓存详情"/>);
     expect(html).toContain('class="ai-agent-response-footer"');
     expect(html.indexOf("完成")).toBeLessThan(html.indexOf("2 次操作"));
     expect(html).not.toContain("<svg");
+    expect(html).toContain('title="缓存详情"');
+  });
+
+  it("explains provider cache usage without adding permanent footer text", () => {
+    expect(agentTokenUsageTitle({
+      prompt: 10_000, completion: 500, total: 10_500, requests: 2, rounds: 2,
+      inputCharacters: 0, toolSchemaCharacters: 0, toolResultCharacters: 0,
+      cached: 8_000, uncachedPrompt: 2_000, cacheCreation: 0, cacheReportedRequests: 2, cacheHitRate: 0.8,
+    })).toBe("输入 10,000 Token · 缓存命中 8,000 Token（80%） · 未缓存 2,000 Token · 输出 500 Token · 2 次请求");
+    expect(agentTokenUsageTitle({
+      prompt: 100, completion: 20, total: 120, requests: 1, rounds: 1,
+      inputCharacters: 0, toolSchemaCharacters: 0, toolResultCharacters: 0,
+      cached: 0, uncachedPrompt: 0, cacheCreation: 0, cacheReportedRequests: 0,
+    })).toContain("供应商未提供缓存统计");
   });
 
   it("hides successful tool JSON and keeps only a code diff", () => {
@@ -445,6 +459,18 @@ describe("AI assistant scroll position", () => {
 
   it("treats content shorter than the viewport as latest", () => {
     expect(isNearLatestScroll(0, 300, 200)).toBe(true);
+  });
+
+  it("does not run a queued auto-scroll after the user leaves the latest message", () => {
+    const thread = { scrollTop: 180, scrollHeight: 900 };
+    expect(scrollThreadToLatest(thread, false)).toBe(false);
+    expect(thread.scrollTop).toBe(180);
+  });
+
+  it("keeps following new content while the user remains at the latest message", () => {
+    const thread = { scrollTop: 650, scrollHeight: 900 };
+    expect(scrollThreadToLatest(thread, true)).toBe(true);
+    expect(thread.scrollTop).toBe(900);
   });
 });
 

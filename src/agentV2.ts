@@ -1,7 +1,7 @@
 import { streamAiChat, type AiChatMessage, type AiChatToolCall } from "./aiConfig";
-import { agentToolGroups, changesAgentState, isCacheableTool, isLongRunningTool, requiresPermission, toolLabel, toolsForAgentRound, type AgentToolGroup } from "./agentV2/toolRegistry";
+import { changesAgentState, isCacheableTool, isLongRunningTool, requiresPermission, toolLabel, toolsForAgentMode } from "./agentV2/toolRegistry";
 import { createAgentMemory, rememberAgentDecision, rememberAgentEvidence, serializeAgentMemory } from "./agentV2/memory";
-import { buildAgentRequestMessages, compactAgentToolResult, createAgentRequestContext } from "./agentV2/context";
+import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext } from "./agentV2/context";
 import { createAgentTokenUsage, mergeProviderTokenUsage, recordAgentRequest, recordAgentToolResult } from "./agentV2/tokenLedger";
 import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, RunVisualPythonAgentArgs } from "./agentV2/types";
 
@@ -32,7 +32,24 @@ const systemRules = `你是 Visual Python 的专业软件智能体。你通过�
 8. 普通回复使用清晰的 Markdown。工具调用前可以用一句简短说明，避免重复规划和冗长解释。
 9. 需要用户决定时调用 ask_user，并提供 2 到 4 个简洁编号选项；不确定的关键选择不要擅自执行。
 10. run_project、render_manim、install_dependencies、delete_scene 和 save_project 都由宿主提供唯一的执行确认。不要再用 ask_user 询问“是否执行”或“是否渲染”；用户已经明确提出操作时直接调用对应工具，只有场景、输出类型等真正影响结果的选择存在歧义时才询问。
-11. 不要输出 XML、DSML、伪工具标签或原始 JSON 作为用户可见回复。`;
+11. 不要输出 XML、DSML、伪工具标签或原始 JSON 作为用户可见回复。
+
+平台工作方式：
+- 每个场景是完整、独立的 Python 文件，通常包含 from manim import * 和一个 Scene 子类；不要假定存在公共代码文件。
+- 当前编辑器状态由宿主管理。get_context 用于读取当前场景摘要，get_scene 用于按 ID 读取其他场景；场景切换前先用 list_scenes 取得真实 ID。
+- 代码修改首选 edit_code、insert_statements、replace_function_body 和 add_import。oldText 必须来自当前真实代码且精确匹配；修改失败后重新读取相关代码，不要猜测缩进或文本。
+- replace_code 只适用于空场景、全新场景或用户明确要求整体重写。已有代码的局部需求不得整文件替换。
+- 修改工具由宿主自动执行 Python 语法检查；仍需根据任务调用 validate_scene 检查 Manim 场景结构。检查成功后不要重复检查同一版本。
+- Manim 对象不能直接传给 Scene.play。对象使用 self.add，动画使用 Create、Write、FadeIn 等 Animation。渲染失败时依据真实问题修复，不要把纯代码错误描述为积木连接错误。
+- 工程资源通过 list_resources 和 get_resource 获取可用路径；不要虚构图片、音频、字体或资源 ID。资源引用后调用 check_resources。
+- 配音前调用 get_voiceover_context 获取真实配置和角色。使用 add_voiceover 或 add_synchronized_voiceover 后调用 check_voiceover；配置缺失时说明需要用户配置，不要伪造音频。
+- 依赖操作先用 check_dependencies。missing 为空表示已经安装；只有确实缺失且用户允许时才调用 install_dependencies。
+- run_project 和 render_manim 是长任务，宿主会等待并返回真实观察结果。不要轮询，不要在成功观察后重复执行。
+- render_manim 支持视频和图片。用户未指定输出类型且选择会显著影响结果时才询问；用户明确要求时直接调用，由宿主负责唯一确认。
+- save_project 只在用户当前请求明确包含保存要求时执行。代码修改成功不等于需要保存工程。
+- 删除场景、安装依赖、运行、渲染和保存由宿主确认。用户拒绝后视为已取消，不要重复请求相同操作。
+- ask_user 只用于会显著改变结果的真实歧义。颜色、布局、动画节奏等普通实现细节由你专业判断，避免不必要的往返。
+- 最终回复只总结实际完成内容、验证结果和需要用户决定的事项。不要复述全部工具调用或输出未经处理的内部数据。`;
 
 function createId(prefix: string, index: number): string {
   return `${prefix}-${Date.now().toString(36)}-${index}`;
@@ -211,8 +228,6 @@ function failureDetail(result: Record<string, unknown>): string | undefined {
 
 export async function runVisualPythonAgent({ prompt, history = [], mode = "agent", host, onEvent, onProgress, onPermissionRequest, signal }: RunVisualPythonAgentArgs): Promise<AgentRunResult> {
   if (!prompt.trim()) throw new Error("请输入任务");
-  const usedToolNames = new Set<string>();
-  const activatedToolGroups = new Set<AgentToolGroup>();
   const memory = createAgentMemory(history);
   const requestContext = createAgentRequestContext({
     system: `${systemRules}\n\n当前模式：${mode === "plan" ? "计划模式，只能读取和分析，不得修改工程" : "智能体模式，可以执行必要的工程操作"}`,
@@ -222,7 +237,8 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
     memory: serializeAgentMemory(memory),
   });
   const usage = createAgentTokenUsage();
-  let latestMessages: AiChatMessage[] = [];
+  let requestMessages = buildAgentRequestMessages(requestContext);
+  const taskTools = toolsForAgentMode(mode);
   let toolCallCount = 0;
   let sequence = 0;
   let truncatedContinuations = 0;
@@ -258,11 +274,7 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
     let content = "";
     let reasoning = "";
     let thinkingEmitted = false;
-    const tools = toolsForAgentRound(mode, usedToolNames, activatedToolGroups)
-      .filter((tool) => tool.function.name !== "save_project" || explicitlyRequestsProjectSave(prompt));
-    requestContext.memory = serializeAgentMemory(memory);
-    const requestMessages = buildAgentRequestMessages(requestContext, latestMessages, round === 1);
-    recordAgentRequest(usage, requestMessages, tools, round);
+    recordAgentRequest(usage, requestMessages, taskTools, round);
     reportProgress({ phase: "thinking", label: round === 1 ? "分析当前请求和工程状态" : "根据执行结果决定下一步" });
     emit({ id: messageId, kind: "message", status: "running", title: "", markdown: "" });
     const completion = await streamAiChat(requestMessages, (delta) => {
@@ -271,7 +283,7 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
     }, {
       maxTokens: maxTokensPerRequest,
       signal,
-      tools,
+      tools: taskTools,
       toolChoice: "auto",
       onReasoningDelta: (delta) => {
         reasoning += delta;
@@ -287,14 +299,14 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
     reportProgress({ phase: "thinking", label: "已收到模型决策" });
     if (reasoning) emit({ id: `thinking-${round}`, kind: "thinking", status: "done", title: "思考过程", markdown: reasoning });
     const parsedCalls = completion.toolCalls.length ? completion.toolCalls : parseTextToolCalls(content);
-    const calls = normalizeAiToolCalls(parsedCalls).filter((call) => tools.some((tool) => tool.function.name === call.function.name));
+    const calls = normalizeAiToolCalls(parsedCalls).filter((call) => taskTools.some((tool) => tool.function.name === call.function.name));
     if (completion.truncated && (!calls.length || !hasCompleteToolCalls(calls))) {
       truncatedContinuations += 1;
       if (truncatedContinuations > 3) throw new Error("模型连续多轮达到输出上限，已停止重复生成");
-      latestMessages = [
+      requestMessages = appendAgentTurn(requestMessages, [
         { role: "assistant", content: content.trim() || "本轮响应尚未完成。" },
         { role: "user", content: "上一轮响应达到本轮输出上限。请从中断位置继续，不要重复已经完成的内容；如果需要调用工具，请输出完整的工具调用。" },
-      ];
+      ]);
       reportProgress({ phase: "thinking", label: "继续整理响应" });
       continue;
     }
@@ -305,10 +317,10 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
           .slice(-4)
           .map((failure) => `${toolLabel(failure.toolName)}：${failure.message}`)
           .join("\n");
-        latestMessages = [
+        requestMessages = appendAgentTurn(requestMessages, [
           { role: "assistant", content: content.trim() || "上一轮响应未完成。" },
           { role: "user", content: `工具结果中仍有未解决的问题，不能结束任务。请读取以下失败原因，调整参数或方案并继续执行；只有取得成功验证后才能回复完成：\n${unresolved}` },
-        ];
+        ]);
         reportProgress({ phase: "thinking", label: "根据失败结果继续处理" });
         continue;
       }
@@ -319,12 +331,11 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
       return { summary: finalSummary, toolCallCount, tokenUsage: usage };
     }
     emit({ id: messageId, kind: "message", status: "done", title: content.trim(), markdown: content.trim() });
-    const turnMessages: AiChatMessage[] = [{ role: "assistant", content: content.trim(), toolCalls: calls }];
+    const turnMessages: AiChatMessage[] = [{ role: "assistant", content: compactAgentAssistantMessage(content), toolCalls: calls }];
 
     for (const call of calls) {
       if (signal.aborted) throw new Error(stopError);
       toolCallCount += 1;
-      usedToolNames.add(call.function.name);
       let args: Record<string, unknown>;
       try {
         const parsed: unknown = JSON.parse(call.function.arguments.trim() || "{}");
@@ -349,6 +360,12 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
         if (consecutiveNoProgress >= 3) throw new Error("智能体连续重复无效工具调用，任务已停止");
         continue;
       }
+      if (call.function.name === "save_project" && !explicitlyRequestsProjectSave(prompt)) {
+        const message = "用户没有明确要求保存工程，本次未执行保存";
+        emit({ id: toolId, kind: "tool", status: "done", title: toolLabel(call.function.name), detail: "未执行", toolName: call.function.name, result: { ok: true, skipped: true, reason: message }, resultText: message });
+        pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: true, skipped: true, reason: message }));
+        continue;
+      }
       const cachedRead = isCacheableTool(call.function.name) ? successfulReadCache.get(fingerprint) : undefined;
       if (cachedRead?.stateVersion === stateVersion) {
         const cachedResponse = `${cachedRead.modelResult}\n\n状态未变化，已复用最近一次读取结果；不要重复读取，请继续下一步。`;
@@ -371,14 +388,7 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
       try {
         let result: Record<string, unknown>;
         if (call.function.name === "ask_user") result = { ok: true, question: args.question, options: args.options };
-        else if (call.function.name === "activate_tool_group") {
-          const group = typeof args.group === "string" && agentToolGroups.includes(args.group as AgentToolGroup) ? args.group as AgentToolGroup : null;
-          if (!group) result = { ok: false, error: "未知工具组" };
-          else {
-            activatedToolGroups.add(group);
-            result = { ok: true, activated: true, group };
-          }
-        } else result = await host.executeTool(call.function.name, args, signal);
+        else result = await host.executeTool(call.function.name, args, signal);
         const resultText = serializeResult(result);
         let combinedToolResponse = compactAgentToolResult(call.function.name, result);
         rememberAgentEvidence(memory, toolLabel(call.function.name), combinedToolResponse);
@@ -442,7 +452,7 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
         pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: false, error: message }));
       }
     }
-    latestMessages = turnMessages;
+    requestMessages = appendAgentTurn(requestMessages, turnMessages);
   }
   throw new Error(`任务在 ${maxRounds} 个决策回合内没有完成`);
 }

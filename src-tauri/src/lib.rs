@@ -125,6 +125,8 @@ struct AiChatCompletionResult {
     prompt_tokens: Option<u64>,
     completion_tokens: Option<u64>,
     total_tokens: Option<u64>,
+    cached_tokens: Option<u64>,
+    cache_creation_tokens: Option<u64>,
 }
 
 #[derive(Default)]
@@ -1861,6 +1863,53 @@ fn supports_ai_stream_usage(base_url: &str) -> bool {
         })
 }
 
+fn ai_usage_u64(usage: &Value, paths: &[&[&str]]) -> Option<u64> {
+    paths.iter().find_map(|path| {
+        path.iter()
+            .try_fold(usage, |value, key| value.get(*key))
+            .and_then(Value::as_u64)
+    })
+}
+
+fn ai_cache_usage(usage: &Value) -> (Option<u64>, Option<u64>) {
+    let cached = ai_usage_u64(
+        usage,
+        &[
+            &["prompt_tokens_details", "cached_tokens"],
+            &["input_tokens_details", "cached_tokens"],
+            &["cached_tokens"],
+            &["cache_read_input_tokens"],
+        ],
+    );
+    let created = ai_usage_u64(
+        usage,
+        &[
+            &["prompt_tokens_details", "cache_creation_tokens"],
+            &["input_tokens_details", "cache_creation_tokens"],
+            &["cache_creation_tokens"],
+            &["cache_creation_input_tokens"],
+        ],
+    );
+    (cached, created)
+}
+
+fn ai_token_usage(
+    usage: &Value,
+) -> (
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+) {
+    let prompt = ai_usage_u64(usage, &[&["prompt_tokens"], &["input_tokens"]]);
+    let completion = ai_usage_u64(usage, &[&["completion_tokens"], &["output_tokens"]]);
+    let total = ai_usage_u64(usage, &[&["total_tokens"]])
+        .or_else(|| prompt.zip(completion).map(|(input, output)| input + output));
+    let (cached, created) = ai_cache_usage(usage);
+    (prompt, completion, total, cached, created)
+}
+
 fn sse_event_boundary(buffer: &[u8]) -> Option<(usize, usize)> {
     let lf = buffer.windows(2).position(|window| window == b"\n\n");
     let crlf = buffer.windows(4).position(|window| window == b"\r\n\r\n");
@@ -1988,13 +2037,15 @@ async fn perform_ai_chat_completion(
     if let Some(choice) = &tool_choice {
         let valid = match choice {
             Value::String(value) => matches!(value.as_str(), "auto" | "required"),
-            Value::Object(value) => value.get("type").and_then(Value::as_str) == Some("function")
-                && value
-                    .get("function")
-                    .and_then(Value::as_object)
-                    .and_then(|function| function.get("name"))
-                    .and_then(Value::as_str)
-                    .is_some_and(|name| !name.trim().is_empty() && name.len() <= 200),
+            Value::Object(value) => {
+                value.get("type").and_then(Value::as_str) == Some("function")
+                    && value
+                        .get("function")
+                        .and_then(Value::as_object)
+                        .and_then(|function| function.get("name"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| !name.trim().is_empty() && name.len() <= 200)
+            }
             _ => false,
         };
         if !valid {
@@ -2032,7 +2083,8 @@ async fn perform_ai_chat_completion(
     if let Some(definitions) = tools {
         request_body["tools"] = Value::Array(definitions);
         if !omit_tool_choice {
-            request_body["tool_choice"] = tool_choice.unwrap_or_else(|| Value::String("auto".into()));
+            request_body["tool_choice"] =
+                tool_choice.unwrap_or_else(|| Value::String("auto".into()));
         }
     }
     let request = client
@@ -2071,6 +2123,8 @@ async fn perform_ai_chat_completion(
         let mut prompt_tokens = None;
         let mut completion_tokens = None;
         let mut total_tokens = None;
+        let mut cached_tokens = None;
+        let mut cache_creation_tokens = None;
         let mut finish_reason = None::<String>;
         let mut received_reasoning = false;
         let mut streamed_tool_calls = Vec::<AiToolCallAccumulator>::new();
@@ -2154,9 +2208,13 @@ async fn perform_ai_chat_completion(
                         .map_err(|error| format!("无法发送 AI 流式内容：{error}"))?;
                 }
                 if let Some(usage) = payload.get("usage") {
-                    prompt_tokens = usage.get("prompt_tokens").and_then(Value::as_u64);
-                    completion_tokens = usage.get("completion_tokens").and_then(Value::as_u64);
-                    total_tokens = usage.get("total_tokens").and_then(Value::as_u64);
+                    (
+                        prompt_tokens,
+                        completion_tokens,
+                        total_tokens,
+                        cached_tokens,
+                        cache_creation_tokens,
+                    ) = ai_token_usage(usage);
                 }
             }
         }
@@ -2218,6 +2276,15 @@ async fn perform_ai_chat_completion(
                         )
                         .map_err(|error| format!("无法发送 AI 流式内容：{error}"))?;
                 }
+                if let Some(usage) = payload.get("usage") {
+                    (
+                        prompt_tokens,
+                        completion_tokens,
+                        total_tokens,
+                        cached_tokens,
+                        cache_creation_tokens,
+                    ) = ai_token_usage(usage);
+                }
             }
         }
         let truncated = finish_reason.as_deref() == Some("length");
@@ -2240,6 +2307,8 @@ async fn perform_ai_chat_completion(
             prompt_tokens,
             completion_tokens,
             total_tokens,
+            cached_tokens,
+            cache_creation_tokens,
         });
     }
     let body = response
@@ -2260,6 +2329,8 @@ async fn perform_ai_chat_completion(
         store_ai_api_key(&base_url, value)?;
     }
     let usage = payload.get("usage");
+    let (prompt_tokens, completion_tokens, total_tokens, cached_tokens, cache_creation_tokens) =
+        usage.map(ai_token_usage).unwrap_or_default();
     Ok(AiChatCompletionResult {
         content,
         tool_calls,
@@ -2269,15 +2340,11 @@ async fn perform_ai_chat_completion(
             .unwrap_or(model)
             .to_string(),
         truncated: false,
-        prompt_tokens: usage
-            .and_then(|value| value.get("prompt_tokens"))
-            .and_then(Value::as_u64),
-        completion_tokens: usage
-            .and_then(|value| value.get("completion_tokens"))
-            .and_then(Value::as_u64),
-        total_tokens: usage
-            .and_then(|value| value.get("total_tokens"))
-            .and_then(Value::as_u64),
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cached_tokens,
+        cache_creation_tokens,
     })
 }
 
@@ -5980,6 +6047,35 @@ mod tests {
             "https://dashscope.aliyuncs.com/compatible-mode/v1"
         ));
         assert!(!supports_ai_stream_usage("https://example.com/v1"));
+    }
+
+    #[test]
+    fn reads_cache_usage_from_openai_and_compatible_shapes() {
+        let openai = serde_json::json!({
+            "prompt_tokens_details": { "cached_tokens": 768, "cache_creation_tokens": 128 }
+        });
+        assert_eq!(ai_cache_usage(&openai), (Some(768), Some(128)));
+
+        let responses = serde_json::json!({
+            "input_tokens_details": { "cached_tokens": 1536 }
+        });
+        assert_eq!(ai_cache_usage(&responses), (Some(1536), None));
+
+        let compatible = serde_json::json!({
+            "cache_read_input_tokens": 2048,
+            "cache_creation_input_tokens": 256
+        });
+        assert_eq!(ai_cache_usage(&compatible), (Some(2048), Some(256)));
+
+        let responses_usage = serde_json::json!({
+            "input_tokens": 3000,
+            "output_tokens": 200,
+            "input_tokens_details": { "cached_tokens": 2800 }
+        });
+        assert_eq!(
+            ai_token_usage(&responses_usage),
+            (Some(3000), Some(200), Some(3200), Some(2800), None)
+        );
     }
 
     #[test]

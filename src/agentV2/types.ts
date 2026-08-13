@@ -75,6 +75,11 @@ export type AgentTokenUsage = {
   inputCharacters: number;
   toolSchemaCharacters: number;
   toolResultCharacters: number;
+  cached: number;
+  uncachedPrompt: number;
+  cacheCreation: number;
+  cacheReportedRequests: number;
+  cacheHitRate?: number;
 };
 export type AiAgentTokenUsage = AgentTokenUsage;
 

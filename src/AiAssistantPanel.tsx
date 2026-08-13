@@ -16,7 +16,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { createCodeChangePreview } from "./agentV2";
-import type { AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2";
+import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2";
 import { getAiAgentPermissionMode, type AiAgentPermissionMode } from "./aiConfig";
 import { buildAiConversationHistory, createAiConversationScope } from "./aiConversationContext";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
@@ -660,6 +660,12 @@ export function isNearLatestScroll(scrollTop: number, clientHeight: number, scro
   return scrollHeight - scrollTop - clientHeight <= threshold;
 }
 
+export function scrollThreadToLatest(thread: Pick<HTMLElement, "scrollTop" | "scrollHeight">, enabled: boolean): boolean {
+  if (!enabled) return false;
+  thread.scrollTop = thread.scrollHeight;
+  return true;
+}
+
 export function formatAgentElapsed(startedAt?: number, finishedAt = Date.now()): string {
   if (typeof startedAt !== "number" || !Number.isFinite(startedAt)) return "";
   const elapsedSeconds = Math.max(0, Math.floor((finishedAt - startedAt) / 1000));
@@ -684,6 +690,19 @@ function agentRunMeta(run: AgentRun): string {
   const elapsed = run.startedAt ? formatAgentElapsed(run.startedAt, run.finishedAt) : "";
   const tokenCount = formatAiTokenCount(result.tokenUsage?.total);
   return [elapsed, tokenCount].filter(Boolean).join(" · ");
+}
+
+export function agentTokenUsageTitle(usage?: AgentTokenUsage): string {
+  if (!usage) return "";
+  const parts = [
+    `输入 ${Math.max(0, Math.floor(usage.prompt)).toLocaleString("zh-CN")} Token`,
+    usage.cacheReportedRequests > 0
+      ? `缓存命中 ${Math.max(0, Math.floor(usage.cached)).toLocaleString("zh-CN")} Token（${Math.round((usage.cacheHitRate || 0) * 100)}%）`
+      : "供应商未提供缓存统计",
+  ];
+  if (usage.cacheReportedRequests > 0) parts.push(`未缓存 ${Math.max(0, Math.floor(usage.uncachedPrompt)).toLocaleString("zh-CN")} Token`);
+  parts.push(`输出 ${Math.max(0, Math.floor(usage.completion)).toLocaleString("zh-CN")} Token`, `${usage.requests} 次请求`);
+  return parts.join(" · ");
 }
 
 function parseAgentToolResult(value?: string): Record<string, unknown> | null {
@@ -839,8 +858,8 @@ function AgentExecutionResult({ execution, onRevealProblem }: { execution: AiAge
   </div>;
 }
 
-export function AgentResponseFooter({ status, meta, children }: { status: ReactNode; meta: string; children?: ReactNode }) {
-  return <div className="ai-agent-response-footer"><span>{status}</span>{meta && <small>{meta}</small>}{children && <span className="ai-agent-response-footer-actions">{children}</span>}</div>;
+export function AgentResponseFooter({ status, meta, metaTitle, children }: { status: ReactNode; meta: string; metaTitle?: string; children?: ReactNode }) {
+  return <div className="ai-agent-response-footer"><span>{status}</span>{meta && <small title={metaTitle}>{meta}</small>}{children && <span className="ai-agent-response-footer-actions">{children}</span>}</div>;
 }
 
 export function AgentActivityRow({ activity, onRevealCodeChange, onRevealProblem }: {
@@ -995,7 +1014,7 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, conv
     }
     const frame = requestAnimationFrame(() => {
       if (!threadRef.current) return;
-      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+      if (!scrollThreadToLatest(threadRef.current, stickToLatestRef.current)) return;
       setShowScrollToLatest(false);
     });
     return () => cancelAnimationFrame(frame);
@@ -1196,6 +1215,12 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, conv
     setShowScrollToLatest(!atLatest);
   };
 
+  const handleThreadWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (event.deltaY >= 0) return;
+    stickToLatestRef.current = false;
+    setShowScrollToLatest(true);
+  };
+
   const scrollToLatest = () => {
     const thread = threadRef.current;
     if (!thread) return;
@@ -1265,7 +1290,7 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, conv
       </div>
     </header>
     <div className="ai-thread-shell">
-      <div ref={threadRef} className={`ai-thread ${runs.length ? "has-runs" : ""}`} aria-live="polite" onScroll={handleThreadScroll}>
+      <div ref={threadRef} className={`ai-thread ${runs.length ? "has-runs" : ""}`} aria-live="polite" onScroll={handleThreadScroll} onWheel={handleThreadWheel}>
         {!runs.length && <div className="ai-agent-empty" aria-label="指令示例">
           {suggestions.map((suggestion) => <button key={suggestion} onClick={() => void runAgent(suggestion)}>{suggestion}</button>)}
         </div>}
@@ -1292,7 +1317,7 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, conv
                   ? "回复"
                   : run.result?.intent === "inspect"
                     ? "已分析"
-                    : "完成"} meta={agentRunMeta(run)}>
+                    : "完成"} meta={agentRunMeta(run)} metaTitle={agentTokenUsageTitle(run.result?.tokenUsage)}>
               {run.result?.taskChange && <span className="ai-task-change-actions">
                 <button disabled={!run.taskUndone} title={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} aria-label={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} onClick={() => { if (run.result?.taskChange && onApplyTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: false }); }}><Check size={13}/></button>
                 <button disabled={run.taskUndone} title={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} aria-label={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} onClick={() => { if (run.result?.taskChange && onUndoTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: true }); }}><Undo2 size={13}/></button>

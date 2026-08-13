@@ -16,7 +16,6 @@ function tool(name: string, description: string, parameters: Record<string, unkn
 
 export const visualPythonTools: AiChatToolDefinition[] = [
   tool("ask_user", "当任务存在会显著影响结果的歧义时向用户提问。普通视觉细节和实现细节由 Agent 自行判断。", objectSchema({ question: { type: "string", minLength: 1, maxLength: 500 }, options: { type: "array", minItems: 2, maxItems: 4, items: text } }, ["question", "options"])),
-  tool("activate_tool_group", "当前工具集中缺少完成任务所需能力时，激活一个工具组后继续任务。", objectSchema({ group: { type: "string", enum: ["code", "scene", "resources", "voiceover", "dependencies", "execution", "project"] } }, ["group"])),
   tool("get_context", "读取当前工程、场景、代码、运行状态和环境摘要。修改前或状态不确定时使用。", objectSchema({ includeResources: { type: "boolean" } })),
   tool("list_scenes", "列出工程中的独立场景文件及当前场景。", objectSchema()),
   tool("get_scene", "读取指定场景的完整独立 Python 源码。", objectSchema({ sceneId: text }, ["sceneId"])),
@@ -51,7 +50,6 @@ export const visualPythonTools: AiChatToolDefinition[] = [
 
 const labels: Record<string, string> = {
   ask_user: "询问用户",
-  activate_tool_group: "扩展工具能力",
   get_context: "读取当前工程",
   list_scenes: "查看场景列表",
   get_scene: "读取场景代码",
@@ -97,51 +95,8 @@ const stateChangingTools = new Set([
   "run_project", "render_manim", "save_project", "stop_execution",
 ]);
 
-export const agentToolGroups = ["code", "scene", "resources", "voiceover", "dependencies", "execution", "project"] as const;
-export type AgentToolGroup = typeof agentToolGroups[number];
-
-const coreToolNames = new Set([
-  "ask_user", "activate_tool_group", "get_context", "list_scenes", "get_scene",
-  "inspect_python_structure", "check_code", "validate_scene",
-]);
-
-const codeTools = [
-  "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "format_code",
-  "get_voiceover_context", "add_voiceover", "add_synchronized_voiceover", "check_voiceover",
-  "run_project", "render_manim", "inspect_rendered_output", "stop_execution", "save_project",
-];
-
-const toolGroups: Record<AgentToolGroup, string[]> = {
-  code: codeTools,
-  scene: ["switch_scene", "create_scene", "rename_scene", "delete_scene", ...codeTools],
-  resources: ["list_resources", "get_resource", "check_resources", ...codeTools],
-  voiceover: ["get_voiceover_context", "add_voiceover", "add_synchronized_voiceover", "check_voiceover", ...codeTools],
-  dependencies: ["check_dependencies", "install_dependencies", "run_project", "render_manim", "stop_execution"],
-  execution: ["run_project", "render_manim", "inspect_rendered_output", "stop_execution", "check_resources", "check_voiceover"],
-  project: ["save_project", "list_scenes", "get_scene"],
-};
-
-const specializedToolGroup = new Map<string, AgentToolGroup>();
-for (const group of agentToolGroups) {
-  for (const name of toolGroups[group]) if (!specializedToolGroup.has(name)) specializedToolGroup.set(name, group);
-}
-
 export function toolsForAgentMode(mode: "agent" | "plan"): AiChatToolDefinition[] {
   return mode === "plan" ? visualPythonTools.filter((item) => readOnlyTools.has(item.function.name)) : visualPythonTools;
-}
-
-export function toolsForAgentRound(mode: "agent" | "plan", usedToolNames: Iterable<string>, activatedGroups: Iterable<AgentToolGroup>): AiChatToolDefinition[] {
-  const tools = toolsForAgentMode(mode);
-  if (mode === "plan") return tools;
-  const groups = new Set<AgentToolGroup>(activatedGroups);
-  for (const name of usedToolNames) {
-    const group = specializedToolGroup.get(name);
-    if (group) groups.add(group);
-  }
-  if (!groups.size) return tools;
-  const names = new Set(coreToolNames);
-  for (const group of groups) for (const name of toolGroups[group]) names.add(name);
-  return tools.filter((item) => names.has(item.function.name));
 }
 
 export function isCacheableTool(name: string): boolean {

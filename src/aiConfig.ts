@@ -41,6 +41,8 @@ export type AiChatCompletionResult = {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  cachedTokens?: number;
+  cacheCreationTokens?: number;
 };
 
 type AiChatStreamEvent = {

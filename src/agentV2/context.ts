@@ -13,14 +13,9 @@ export type AgentRequestContext = AgentRequestContextInput;
 
 const truncate = (value: string, max: number) => value.length > max ? `${value.slice(0, max)}\n[内容已截断]` : value;
 
-function snapshotText(snapshot: Record<string, unknown>, includeCode: boolean): string {
+function snapshotText(snapshot: Record<string, unknown>): string {
   const compact = { ...snapshot };
-  if (!includeCode) {
-    const code = typeof compact.code === "string" ? compact.code : "";
-    delete compact.code;
-    if (code) compact.codeSummary = { label: "代码行数", lineCount: code.split(/\r?\n/).length };
-  }
-  return truncate(JSON.stringify(compact), includeCode ? 12_000 : 4_000);
+  return truncate(JSON.stringify(compact), 12_000);
 }
 
 function historyMessages(history: AgentConversationTurn[]): AiChatMessage[] {
@@ -34,16 +29,23 @@ export function createAgentRequestContext(input: AgentRequestContextInput): Agen
   return input;
 }
 
-export function buildAgentRequestMessages(context: AgentRequestContext, latest: AiChatMessage[], includeCode: boolean): AiChatMessage[] {
+export function buildAgentRequestMessages(context: AgentRequestContext): AiChatMessage[] {
   return [
     { role: "system", content: context.system },
     ...historyMessages(context.history),
     {
       role: "user",
-      content: `用户任务：\n${context.prompt.trim()}\n\n当前工程快照：\n${snapshotText(context.snapshot, includeCode)}\n\n${context.memory}`,
+      content: `用户任务：\n${context.prompt.trim()}\n\n当前工程快照：\n${snapshotText(context.snapshot)}\n\n${context.memory}`,
     },
-    ...latest,
   ];
+}
+
+export function appendAgentTurn(messages: AiChatMessage[], turn: AiChatMessage[]): AiChatMessage[] {
+  return [...messages, ...turn];
+}
+
+export function compactAgentAssistantMessage(content: string): string {
+  return truncate(content.trim(), 1_200);
 }
 
 function compactResultValue(value: unknown, key = ""): unknown {

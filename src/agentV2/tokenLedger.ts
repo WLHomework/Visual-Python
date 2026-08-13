@@ -11,6 +11,10 @@ export function createAgentTokenUsage(): AgentTokenUsage {
     inputCharacters: 0,
     toolSchemaCharacters: 0,
     toolResultCharacters: 0,
+    cached: 0,
+    uncachedPrompt: 0,
+    cacheCreation: 0,
+    cacheReportedRequests: 0,
   };
 }
 
@@ -24,7 +28,7 @@ export function recordAgentToolResult(usage: AgentTokenUsage, content: string): 
   usage.toolResultCharacters += content.length;
 }
 
-export function mergeProviderTokenUsage(usage: AgentTokenUsage, result: { promptTokens?: number; completionTokens?: number; totalTokens?: number }): void {
+export function mergeProviderTokenUsage(usage: AgentTokenUsage, result: { promptTokens?: number; completionTokens?: number; totalTokens?: number; cachedTokens?: number; cacheCreationTokens?: number }): void {
   const prompt = Number.isFinite(result.promptTokens) ? Number(result.promptTokens) : 0;
   const completion = Number.isFinite(result.completionTokens) ? Number(result.completionTokens) : 0;
   const total = Number.isFinite(result.totalTokens) ? Number(result.totalTokens) : prompt + completion;
@@ -32,4 +36,12 @@ export function mergeProviderTokenUsage(usage: AgentTokenUsage, result: { prompt
   usage.completion += completion;
   usage.total += total;
   usage.requests += 1;
+  if (Number.isFinite(result.cachedTokens)) {
+    const cached = Math.max(0, Math.min(prompt, Number(result.cachedTokens)));
+    usage.cached += cached;
+    usage.cacheReportedRequests += 1;
+  }
+  usage.uncachedPrompt = Math.max(0, usage.prompt - usage.cached);
+  usage.cacheHitRate = usage.prompt > 0 ? usage.cached / usage.prompt : 0;
+  if (Number.isFinite(result.cacheCreationTokens)) usage.cacheCreation += Math.max(0, Number(result.cacheCreationTokens));
 }

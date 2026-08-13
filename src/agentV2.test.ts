@@ -21,6 +21,7 @@ const completion = (content = "", toolCalls: ReturnType<typeof toolCall>[] = [],
   promptTokens: 10,
   completionTokens: 5,
   totalTokens: 15,
+  cachedTokens: 8,
 });
 
 function createHost(overrides: Partial<AgentHost> = {}): AgentHost {
@@ -87,7 +88,7 @@ describe("Visual Python Agent v2", () => {
 
     expect(mocks.streamAiChat).toHaveBeenCalledTimes(2);
     expect(mocks.streamAiChat.mock.calls[0][2]).toEqual(expect.objectContaining({ maxTokens: 8_192 }));
-    expect((mocks.streamAiChat.mock.calls[0][2].tools as Array<{ function: { name: string } }>).some((tool) => tool.function.name === "save_project")).toBe(false);
+    expect((mocks.streamAiChat.mock.calls[0][2].tools as Array<{ function: { name: string } }>).some((tool) => tool.function.name === "save_project")).toBe(true);
     expect(events.some((event) => event.kind === "thinking" && event.status === "done")).toBe(true);
     expect(events.some((event) => event.kind === "tool" && event.toolName === "get_context")).toBe(true);
     expect(events.some((event) => event.kind === "decision")).toBe(false);
@@ -98,7 +99,7 @@ describe("Visual Python Agent v2", () => {
     expect(result.summary).toContain("已完成修改");
   });
 
-  it("does not resend the initial code or full mutation snapshots after the first decision", async () => {
+  it("keeps the initial request as an exact prefix while omitting full mutation snapshots", async () => {
     const initialCode = `class Demo:\n    ${"pass\n    ".repeat(500)}`;
     const changedCode = initialCode.replace("pass", "self.add(Circle())");
     const executeTool = vi.fn()
@@ -123,12 +124,15 @@ describe("Visual Python Agent v2", () => {
     const firstRequest = JSON.stringify(mocks.streamAiChat.mock.calls[0][0]);
     const secondRequest = JSON.stringify(mocks.streamAiChat.mock.calls[1][0]);
     expect(firstRequest).toContain("class Demo");
-    expect(secondRequest).not.toContain("class Demo");
-    expect(secondRequest).not.toContain(initialCode.slice(0, 500));
+    const firstMessages = mocks.streamAiChat.mock.calls[0][0];
+    const secondMessages = mocks.streamAiChat.mock.calls[1][0];
+    expect(secondMessages.slice(0, firstMessages.length)).toEqual(firstMessages);
+    expect(secondMessages.filter((message: { content?: string }) => message.content?.includes("class Demo"))).toHaveLength(1);
+    expect(secondRequest).not.toContain("\"before\"");
     expect(secondRequest).toContain("self.add(Circle())");
   });
 
-  it("keeps the request message count bounded across tool rounds", async () => {
+  it("keeps every later tool round append-only", async () => {
     mocks.streamAiChat
       .mockResolvedValueOnce(completion("", [toolCall("context-1", "get_context", { includeResources: false })]))
       .mockResolvedValueOnce(completion("", [toolCall("context-2", "get_context", { includeResources: true })]))
@@ -142,8 +146,10 @@ describe("Visual Python Agent v2", () => {
       signal: new AbortController().signal,
     });
 
-    const requestSizes = mocks.streamAiChat.mock.calls.map(([messages]) => (messages as unknown[]).length);
-    expect(requestSizes.slice(1).every((size) => size <= 5)).toBe(true);
+    const requests = mocks.streamAiChat.mock.calls.map(([messages]) => messages as unknown[]);
+    for (let index = 1; index < requests.length; index += 1) {
+      expect(requests[index].slice(0, requests[index - 1].length)).toEqual(requests[index - 1]);
+    }
   });
 
   it("reports context and tool payload telemetry with provider token usage", async () => {
@@ -167,13 +173,16 @@ describe("Visual Python Agent v2", () => {
       inputCharacters: expect.any(Number),
       toolSchemaCharacters: expect.any(Number),
       toolResultCharacters: expect.any(Number),
+      cached: 16,
+      uncachedPrompt: 4,
+      cacheHitRate: 0.8,
     }));
     expect(result.tokenUsage.inputCharacters).toBeGreaterThan(0);
     expect(result.tokenUsage.toolSchemaCharacters).toBeGreaterThan(0);
     expect(result.tokenUsage.toolResultCharacters).toBeGreaterThan(0);
   });
 
-  it("narrows tool schemas after a specialist action while retaining tool-group activation", async () => {
+  it("keeps the task tool schema byte-for-byte stable across rounds", async () => {
     const executeTool = vi.fn()
       .mockResolvedValueOnce({ ok: true, changed: true, diff: "- pass\n+ self.add(Circle())" })
       .mockResolvedValueOnce({ valid: true });
@@ -190,21 +199,32 @@ describe("Visual Python Agent v2", () => {
 
     const firstTools = mocks.streamAiChat.mock.calls[0][2].tools as Array<{ function: { name: string } }>;
     const secondTools = mocks.streamAiChat.mock.calls[1][2].tools as Array<{ function: { name: string } }>;
-    expect(secondTools.length).toBeLessThan(firstTools.length);
+    expect(secondTools).toEqual(firstTools);
     expect(secondTools.some((tool) => tool.function.name === "check_code")).toBe(true);
     expect(secondTools.some((tool) => tool.function.name === "render_manim")).toBe(true);
-    expect(secondTools.some((tool) => tool.function.name === "activate_tool_group")).toBe(true);
-    expect(secondTools.some((tool) => tool.function.name === "install_dependencies")).toBe(false);
+    expect(secondTools.some((tool) => tool.function.name === "activate_tool_group")).toBe(false);
+    expect(secondTools.some((tool) => tool.function.name === "install_dependencies")).toBe(true);
   });
 
-  it("reactivates a deferred tool group without sending the activation call to the host", async () => {
+  it("keeps the reusable system and tool prefix stable across different tasks", async () => {
+    mocks.streamAiChat.mockResolvedValue(completion("完成"));
+    await runVisualPythonAgent({ prompt: "添加一个圆", host: createHost(), onEvent: () => undefined, signal: new AbortController().signal });
+    await runVisualPythonAgent({ prompt: "创建一个坐标轴", host: createHost(), onEvent: () => undefined, signal: new AbortController().signal });
+
+    const first = mocks.streamAiChat.mock.calls[0];
+    const second = mocks.streamAiChat.mock.calls[1];
+    expect(first[0][0]).toEqual(second[0][0]);
+    expect(first[2].tools).toEqual(second[2].tools);
+    expect(JSON.stringify(first[0][0]).length + JSON.stringify(first[2].tools).length).toBeGreaterThan(8_000);
+  });
+
+  it("calls specialized tools directly without an activation round", async () => {
     const executeTool = vi.fn()
       .mockResolvedValueOnce({ ok: true, changed: true, diff: "- pass\n+ self.add(Circle())" })
       .mockResolvedValueOnce({ valid: true })
       .mockResolvedValueOnce({ installed: true, packages: ["numpy"], verified: true });
     mocks.streamAiChat
       .mockResolvedValueOnce(completion("", [toolCall("edit-1", "edit_code", { edits: [{ oldText: "pass", newText: "self.add(Circle())" }] })]))
-      .mockResolvedValueOnce(completion("", [toolCall("activate-1", "activate_tool_group", { group: "dependencies" })]))
       .mockResolvedValueOnce(completion("", [toolCall("install-1", "install_dependencies", { packages: ["numpy"] })]))
       .mockResolvedValueOnce(completion("完成"));
 
@@ -216,8 +236,9 @@ describe("Visual Python Agent v2", () => {
       signal: new AbortController().signal,
     });
 
-    const thirdTools = mocks.streamAiChat.mock.calls[2][2].tools as Array<{ function: { name: string } }>;
-    expect(thirdTools.some((tool) => tool.function.name === "install_dependencies")).toBe(true);
+    const secondTools = mocks.streamAiChat.mock.calls[1][2].tools as Array<{ function: { name: string } }>;
+    expect(secondTools.some((tool) => tool.function.name === "install_dependencies")).toBe(true);
+    expect(mocks.streamAiChat).toHaveBeenCalledTimes(3);
     expect(executeTool).not.toHaveBeenCalledWith("activate_tool_group", expect.anything(), expect.anything());
     expect(executeTool).toHaveBeenCalledWith("install_dependencies", { packages: ["numpy"] }, expect.any(AbortSignal));
   });
@@ -558,7 +579,7 @@ describe("Visual Python Agent v2", () => {
     expect(toolResponses).toEqual(assistantToolCalls);
   });
 
-  it("exposes project saving only when the user explicitly requests it", async () => {
+  it("keeps the save schema stable but only executes saving when explicitly requested", async () => {
     mocks.streamAiChat.mockImplementationOnce(async (_messages, onDelta, options) => {
       onDelta("已保存");
       expect((options.tools as Array<{ function: { name: string } }>).some((tool) => tool.function.name === "save_project")).toBe(true);
@@ -571,6 +592,19 @@ describe("Visual Python Agent v2", () => {
       onEvent: () => undefined,
       signal: new AbortController().signal,
     });
+
+    const executeTool = vi.fn();
+    mocks.streamAiChat
+      .mockReset()
+      .mockResolvedValueOnce(completion("", [toolCall("save-1", "save_project")]))
+      .mockResolvedValueOnce(completion("没有保存工程"));
+    await runVisualPythonAgent({
+      prompt: "添加一个圆",
+      host: createHost({ executeTool }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    expect(executeTool).not.toHaveBeenCalledWith("save_project", expect.anything(), expect.anything());
   });
 
   it("observes long-running work in the host without asking the model to poll", async () => {
