@@ -80,7 +80,6 @@ button { font: inherit; }
 .scene-ai-status.changed { background: #4f9fd8; }
 .scene-ai-status.error { background: #d96868; }
 .scene-ai-status.validated { background: #52aa83; }
-.scene-ai-status.rendered { background: #2f9e8f; }
 @keyframes scene-ai-pulse { 50% { opacity: .45; } }
 .scene-tab-close,.scene-tab-add { flex: 0 0 auto; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .scene-tab-close { width: 25px; opacity: 0; }
@@ -1363,8 +1362,15 @@ button { font: inherit; }
 }
 
 .ai-agent-activity-list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 6px;
+}
+
+.ai-agent-activity-list > * {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .ai-agent-task-plan {
@@ -4928,6 +4934,8 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 .ai-drawer {
   flex: 0 0 var(--ai-panel-width);
   width: var(--ai-panel-width);
+  height: 100%;
+  align-self: stretch;
   min-width: 340px;
   max-width: 520px;
   min-height: 0;
@@ -4980,6 +4988,7 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 .ai-assistant {
   width: 100%;
   height: 100%;
+  overflow: hidden;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -5182,6 +5191,8 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 
 .ai-thread-shell {
   position: relative;
+  display: flex;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -5189,10 +5200,14 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 
 .ai-thread {
   width: 100%;
-  height: 100%;
+  height: auto;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
   padding: 18px;
   scrollbar-color: color-mix(in srgb,var(--muted),transparent 20%) var(--surface-1);
   scrollbar-width: thin;

@@ -1,36 +1,39 @@
-# External plugin examples
+# Visual Python 外部插件示例
 
-This folder contains example plugins for Visual Python.
+完整开发规范参见 [插件开发指南](../../docs/plugin-development/README.md)。
 
-## Install the demo plugin on Windows
+本目录提供两个最小示例：
 
-Copy this folder:
+| 示例 | 用途 |
+| --- | --- |
+| `demo-print/` | 注册一个中文语句积木和工具箱分类，适合作为新插件模板。 |
+| `dependency-check/` | 演示在 Manifest 中声明 Python 包依赖。 |
+
+## 本地目录安装
+
+开发时可以把插件目录复制到：
 
 ```text
-examples\external-plugins\demo-print
+%APPDATA%\com.visualpython.desktop\plugins\<插件 ID>
 ```
 
-to the app plugin folder:
+重新打开 Visual Python，在“设置 -> 插件”中启用插件并确认信任。
 
-```text
-%APPDATA%\com.visualpython.desktop\plugins\demo-print
+## ZIP 安装
+
+以 `demo-print` 为例，在项目根目录执行：
+
+```powershell
+Compress-Archive -Path .\examples\external-plugins\demo-print\* `
+  -DestinationPath .\examples\external-plugins\demo-print.zip `
+  -Force
 ```
 
-Then open Visual Python, click the plugin button in the left rail, and click "扫描外部插件".
+随后在“设置 -> 插件 -> 安装插件”中选择生成的 ZIP。
 
-The "Demo Print" card should appear as an external plugin. Enable it, confirm trust, and a new toolbox category named "外部示例" should appear.
+## 开发注意事项
 
-## Manifest shape
-
-```json
-{
-  "id": "visual-python.demo",
-  "name": "Demo Print",
-  "version": "1.0.0",
-  "apiVersion": "1",
-  "entry": "index.js",
-  "description": "Adds a simple external plugin print block."
-}
-```
-
-The `entry` file must export an object with an `activate(context)` function.
+- API v1 的入口必须是自包含的 `.js` 或 `.mjs` 文件。
+- 外部插件入口不能依赖相对 JavaScript 模块导入。
+- 积木类型和插件贡献 ID 必须使用插件自己的命名空间。
+- 启用外部插件会执行本地 JavaScript，只安装和启用可信源码。

@@ -33,10 +33,19 @@ describe("project file validation", () => {
     expect(() => parseDraftProject(JSON.stringify({ ...validProject, path: [], savedAt: "now" }))).toThrow("草稿");
   });
 
-  it("accepts independent scene documents and validates the active scene", () => {
+  it("accepts independent code documents and validates the active document", () => {
+    const codeDocuments = [{ id: "document-main", name: "main", code: "print('hello')" }];
+    expect(validateProjectFile({ ...validProject, codeDocuments, activeDocumentId: "document-main" }).codeDocuments).toEqual(codeDocuments);
+    expect(() => validateProjectFile({ ...validProject, codeDocuments, activeDocumentId: "missing" })).toThrow("不存在");
+  });
+
+  it("loads legacy scene document fields into the generic document model", () => {
     const sceneDocuments = [{ id: "scene-main", name: "MainScene", code: "from manim import *" }];
-    expect(validateProjectFile({ ...validProject, sceneDocuments, activeSceneId: "scene-main" }).sceneDocuments).toEqual(sceneDocuments);
-    expect(() => validateProjectFile({ ...validProject, sceneDocuments, activeSceneId: "missing" })).toThrow("不存在");
+    const project = validateProjectFile({ ...validProject, sceneDocuments, activeSceneId: "scene-main" });
+    expect(project.codeDocuments).toEqual(sceneDocuments);
+    expect(project.activeDocumentId).toBe("scene-main");
+    expect(project).not.toHaveProperty("sceneDocuments");
+    expect(project).not.toHaveProperty("activeSceneId");
   });
 
   it("persists a stable project id without persisting AI conversations", () => {

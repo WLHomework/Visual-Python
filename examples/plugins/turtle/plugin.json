@@ -1,0 +1,18 @@
+{
+  "id": "visual-python.turtle",
+  "name": "Turtle 海龟绘图",
+  "version": "1.0.2",
+  "apiVersion": "1",
+  "description": "使用中文积木学习 Python Turtle 绘图与交互。",
+  "entry": "index.js",
+  "agent": {
+    "description": "创建和修改 Python Turtle 教学绘图、动画与交互程序。",
+    "tools": [
+      "inspect_turtle_capabilities"
+    ],
+    "fileTypes": [
+      ".py"
+    ],
+    "detect": "imports"
+  }
+}

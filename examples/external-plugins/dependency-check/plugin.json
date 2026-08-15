@@ -1,11 +1,12 @@
 {
   "id": "visual-python.dependency-check",
-  "name": "Dependency Check",
+  "name": "依赖检测示例",
   "version": "1.0.0",
   "apiVersion": "1",
   "entry": "index.js",
-  "description": "Test plugin for Python package dependency detection.",
+  "description": "演示如何声明插件需要的 Python 包。",
   "python": {
-    "packages": ["manim", "numpy"]
+    "packages": ["manim", "numpy"],
+    "minimumVersion": "3.11"
   }
 }

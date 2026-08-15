@@ -84,7 +84,8 @@
     ],
     "resources": {
       "resources/language-server/": "language-server/",
-      "../docs/manim-plugin/": "docs/manim-plugin/"
+      "../docs/manim-plugin/": "docs/manim-plugin/",
+      "../docs/plugin-development/": "docs/plugin-development/"
     },
     "windows": {
       "allowDowngrades": false,

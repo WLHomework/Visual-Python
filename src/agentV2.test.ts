@@ -4,8 +4,10 @@ const mocks = vi.hoisted(() => ({ streamAiChat: vi.fn() }));
 
 vi.mock("./aiConfig", () => ({ streamAiChat: mocks.streamAiChat }));
 
-import { normalizeAiToolCalls, parseTextToolCalls, runVisualPythonAgent, visualPythonTools, type AgentActivityEvent, type AgentHost } from "./agentV2";
-import { requiresPermission } from "./agentV2/toolRegistry";
+import { normalizeAiToolCalls, parseTextToolCalls, runVisualPythonAgent, type AgentActivityEvent, type AgentHost } from "./agentV2";
+import type { AiChatMessage } from "./aiConfig";
+import { coreAgentTools, requiresPermission } from "./agentV2/toolRegistry";
+import { manimAgentTools } from "./plugins/builtin/manim/agentTools";
 
 const toolCall = (id: string, name: string, args: Record<string, unknown> = {}) => ({
   id,
@@ -27,6 +29,7 @@ const completion = (content = "", toolCalls: ReturnType<typeof toolCall>[] = [],
 function createHost(overrides: Partial<AgentHost> = {}): AgentHost {
   return {
     getSnapshot: () => ({ code: "class Demo: pass", scene: "Demo" }),
+    getTools: () => manimAgentTools,
     executeTool: vi.fn().mockResolvedValue({ ok: true, changed: true }),
     observeExecution: vi.fn().mockResolvedValue({ running: false, rendering: false, problems: [] }),
     ...overrides,
@@ -36,9 +39,35 @@ function createHost(overrides: Partial<AgentHost> = {}): AgentHost {
 describe("Visual Python Agent v2", () => {
   beforeEach(() => mocks.streamAiChat.mockReset());
 
+  it("keeps plugin-specific Manim tools out of the core tool set", () => {
+    expect(coreAgentTools.some((tool) => ["validate_scene", "render_manim", "get_voiceover_context"].includes(tool.definition.function.name))).toBe(false);
+  });
+
   it("uses the host confirmation as the only confirmation for explicit rendering", () => {
-    const renderTool = visualPythonTools.find((tool) => tool.function.name === "render_manim");
+    const renderTool = manimAgentTools.find((tool) => tool.definition.function.name === "render_manim")?.definition;
     expect(renderTool?.function.description).toContain("不要先用 ask_user 询问是否渲染");
+  });
+
+  it("exposes generic document tools alongside plugin capabilities", async () => {
+    mocks.streamAiChat.mockImplementationOnce(async (messages, onDelta, options) => {
+      const system = (messages as AiChatMessage[]).find((message) => message.role === "system")?.content || "";
+      expect(system).toContain("Sample Plugin");
+      expect(system).toContain("sample.inspect");
+      expect(system).toContain(".sample");
+      expect(system).toContain("content");
+      expect((options.tools as Array<{ function: { name: string } }>).some((tool) => tool.function.name === "switch_document")).toBe(true);
+      onDelta("已读取当前项目。");
+      return completion("已读取当前项目。");
+    });
+
+    await runVisualPythonAgent({
+      prompt: "查看当前项目",
+      host: createHost({
+        getCapabilities: () => [{ id: "sample", name: "Sample Plugin", description: "处理示例文档", tools: ["sample.inspect"], fileTypes: [".sample"], detect: "content" }],
+      }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
   });
 
   it("parses DSML tool calls into the normal function-call shape", () => {
@@ -287,8 +316,9 @@ describe("Visual Python Agent v2", () => {
   });
 
   it("requires confirmation for high-impact tools even in automatic mode", async () => {
-    const highImpactTools = ["delete_scene", "install_dependencies", "run_project", "render_manim", "save_project"];
-    expect(highImpactTools.every((name) => requiresPermission(name))).toBe(true);
+    const coreHighImpactTools = ["install_dependencies", "run_project", "save_project"];
+    expect(coreHighImpactTools.every((name) => requiresPermission(name))).toBe(true);
+    expect(manimAgentTools.filter((tool) => ["delete_scene", "render_manim"].includes(tool.definition.function.name)).every((tool) => tool.requiresPermission)).toBe(true);
 
     const permissionRequest = vi.fn().mockResolvedValue(true);
     const executeTool = vi.fn().mockResolvedValue({ ok: true, started: true });
@@ -432,7 +462,7 @@ describe("Visual Python Agent v2", () => {
   });
 
   it("reuses an unchanged read result instead of executing the same tool again", async () => {
-    const executeTool = vi.fn().mockResolvedValue({ ok: true, scene: "Demo", code: "class Demo: pass" });
+    const executeTool = vi.fn().mockResolvedValue({ ok: true, scene: "Demo", code: "x".repeat(10_000) });
     mocks.streamAiChat
       .mockResolvedValueOnce(completion("", [toolCall("context-1", "get_context")]))
       .mockResolvedValueOnce(completion("", [toolCall("context-2", "get_context")]))
@@ -447,7 +477,9 @@ describe("Visual Python Agent v2", () => {
 
     expect(executeTool).toHaveBeenCalledTimes(1);
     const thirdRequest = mocks.streamAiChat.mock.calls[2][0] as Array<{ role: string; content?: string }>;
-    expect(thirdRequest.some((message) => message.role === "tool" && message.content?.includes("状态未变化"))).toBe(true);
+    const cachedToolMessage = thirdRequest.filter((message) => message.role === "tool").at(-1);
+    expect(cachedToolMessage?.content).toContain("状态未变化");
+    expect(cachedToolMessage?.content).not.toContain("x".repeat(200));
   });
 
   it("stops early when the model repeatedly reads the same unchanged state", async () => {
@@ -463,6 +495,29 @@ describe("Visual Python Agent v2", () => {
 
     expect(executeTool).toHaveBeenCalledTimes(1);
     expect(mocks.streamAiChat.mock.calls.length).toBeLessThan(12);
+  });
+
+  it("continues beyond the soft round budget while the task keeps making progress", async () => {
+    const executeTool = vi.fn().mockResolvedValue({ ok: true, changed: true });
+    let toolRounds = 0;
+    mocks.streamAiChat.mockImplementation(async () => {
+      if (toolRounds < 13) {
+        toolRounds += 1;
+        return completion("", [toolCall(`create-${toolRounds}`, "create_document", { name: `Document ${toolRounds}` })]);
+      }
+      return completion("long task completed");
+    });
+
+    const result = await runVisualPythonAgent({
+      prompt: "连续创建十三个独立文档",
+      host: createHost({ executeTool }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.summary).toBe("任务已完成。");
+    expect(executeTool).toHaveBeenCalledTimes(13);
+    expect(mocks.streamAiChat).toHaveBeenCalledTimes(14);
   });
 
   it("invalidates cached reads after a code mutation", async () => {
@@ -751,6 +806,41 @@ describe("Visual Python Agent v2", () => {
     const assistantToolCalls = secondRequestMessages.find((message) => message.role === "assistant" && message.toolCalls)?.toolCalls?.map((call) => call.id) || [];
     const toolResponses = secondRequestMessages.filter((message) => message.role === "tool").map((message) => message.toolCallId);
     expect(toolResponses).toEqual(assistantToolCalls);
+  });
+
+  it("does not run the code-only validator after a transactional Blockly mutation", async () => {
+    mocks.streamAiChat
+      .mockResolvedValueOnce(completion("", [toolCall("1", "apply_workspace", { mode: "replace", blocks: [] })]))
+      .mockResolvedValueOnce(completion("图形化工作区已修改。"));
+    const executeTool = vi.fn().mockResolvedValue({ ok: true, changed: true, validated: true });
+
+    await runVisualPythonAgent({
+      prompt: "清空图形化工作区",
+      host: createHost({
+        getSnapshot: () => ({ workspaceMode: "visual" }),
+        getTools: () => [{
+          definition: {
+            type: "function",
+            function: {
+              name: "apply_workspace",
+              description: "事务性修改图形化工作区",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+          label: "修改图形化工作区",
+          workspaceModes: ["visual"],
+          changesState: true,
+          mutation: true,
+        }],
+        executeTool,
+      }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(executeTool).toHaveBeenCalledWith("apply_workspace", { mode: "replace", blocks: [] }, expect.any(AbortSignal));
+    expect(executeTool).not.toHaveBeenCalledWith("check_code", {}, expect.any(AbortSignal));
   });
 
   it("returns a clarification as a first-class question event", async () => {

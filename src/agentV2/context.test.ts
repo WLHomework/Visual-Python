@@ -45,6 +45,26 @@ describe("Agent context compression", () => {
     expect(messages.at(-1)).toMatchObject({ role: "tool", toolCallId: "call-1" });
   });
 
+  it("compacts only old complete tool rounds when the history grows too large", () => {
+    let messages = buildAgentRequestMessages(createAgentRequestContext({ system: "system", prompt: "任务", history: [], snapshot: {}, memory: "memory" }));
+    for (let index = 0; index < 5; index += 1) {
+      messages = appendAgentTurn(messages, [
+        { role: "assistant", content: "", toolCalls: [{ id: `call-${index}`, type: "function", function: { name: "get_context", arguments: "{}" } }] },
+        { role: "tool", toolCallId: `call-${index}`, content: `round-${index}:${"x".repeat(10_000)}` },
+      ]);
+    }
+
+    const serialized = JSON.stringify(messages);
+    expect(serialized.length).toBeLessThan(40_000);
+    expect(serialized).not.toContain("round-0:");
+    expect(serialized).toContain("round-4:");
+    expect(serialized).toContain("历史工具回合已压缩");
+    messages.forEach((message, index) => {
+      if (message.role !== "assistant" || !message.toolCalls?.length) return;
+      expect(messages[index + 1]?.role).toBe("tool");
+    });
+  });
+
   it("removes full code snapshots from mutation results while retaining the diff", () => {
     const result = compactAgentToolResult("edit_code", {
       ok: true,
@@ -55,6 +75,20 @@ describe("Agent context compression", () => {
 
     expect(result).toContain("self.add(Circle())");
     expect(result).not.toContain("before");
+    expect(result).not.toContain("x".repeat(500));
+  });
+
+  it("removes repeated full code from incremental Blockly results", () => {
+    const result = compactAgentToolResult("add_workspace_block", {
+      ok: true,
+      changed: true,
+      block: { id: "block-2", type: "visual_python_turtle_forward", parentId: "program-1" },
+      blockCount: 2,
+      code: "x".repeat(20_000),
+    });
+
+    expect(result).toContain("block-2");
+    expect(result).toContain("blockCount");
     expect(result).not.toContain("x".repeat(500));
   });
 

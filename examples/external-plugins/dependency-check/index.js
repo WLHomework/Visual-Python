@@ -1,22 +1,23 @@
+const BLOCK_TYPE = "visual_python_dependency_check_print";
+
 export default {
   activate(context) {
     context.registerBlock({
-      type: "visual_python_dependency_check_print",
-      message0: "打印依赖检测测试消息",
+      type: BLOCK_TYPE,
+      message0: "输出依赖检测消息",
       previousStatement: null,
       nextStatement: null,
       colour: "#397bc0",
-      tooltip: "测试插件依赖检测状态",
-      helpUrl: ""
-    }, () => "print(\"Dependency check plugin is active\")\n");
+      tooltip: "用于验证插件的 Python 依赖检测状态。",
+    }, () => "print('插件依赖已就绪')\n");
 
     context.registerToolboxCategory({
       id: "visual-python.dependency-check.toolbox",
-      name: "依赖测试",
+      name: "依赖检测",
       colour: "#397bc0",
       contents: [
-        { kind: "block", type: "visual_python_dependency_check_print" }
-      ]
+        { kind: "block", type: BLOCK_TYPE },
+      ],
     });
-  }
+  },
 };

@@ -13,6 +13,7 @@ import { AlertCircle, AlignLeft, ArrowLeft, Blocks, BookOpen, Box, Braces, Check
 import { AiAssistantPanel } from "./AiAssistantPanel";
 import { AiModelSettings } from "./AiModelSettings";
 import { createVisualPythonHostAdapter, runVisualPythonAgent, type AgentActivityEvent, type AgentTokenUsage, type AiAgentActivity, type AiAgentMode, type AiAgentPermissionRequest, type AiAgentPlanStep, type AiAgentProgress, type AiAgentResult, type AiAgentToolName, type AiCodeChangeSnapshot, type AiConversationTurn, type AiTaskChangeSnapshot } from "./agentV2";
+import { blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockInputs } from "./agentV2/blocklyHost";
 import type { AiAgentPermissionMode } from "./aiConfig";
 import { createAiConversationScope } from "./aiConversationContext";
 import { inspectVoiceovers } from "./aiVoiceover";
@@ -27,9 +28,11 @@ import { editorFontOptions, editorFontSizeMax, editorFontSizeMin, editorIndentSi
 import { PyrightClient, type LspCompletionItem, type LspDiagnostic, type LspHover, type LspLocation, type LspLocationLink, type LspRange, type LspSignatureHelp, type LspWorkspaceEdit } from "./pyrightClient";
 import { formatPyrightDiagnostic } from "./pyrightDiagnostics";
 import type { ExampleProject } from "./examples/types";
-import { ensureProjectPlugins, getPluginEnabledPreference, isCorePlugin, pluginRegistry, setPluginEnabled } from "./plugins";
+import { ensureProjectPlugins, getActiveAgentCapabilities, getPluginEnabledPreference, isCorePlugin, pluginRegistry, setPluginEnabled } from "./plugins";
 import type { ExternalPluginDiscovery, ExternalPluginDiscoveryResponse, ExternalPluginEntry, PluginRecord, VisualPythonPlugin } from "./plugins/api/types";
 import { getManimRenderConfig, setManimRenderConfig, subscribeManimRenderConfig, type ManimRenderConfig } from "./plugins/builtin/manim/renderConfig";
+import { createManimCapabilityExecutor } from "./plugins/builtin/manim/agentRuntime";
+import { manimPlugin } from "./plugins/builtin/manim";
 import { bailianTtsModels, bailianVoiceCloneModel, defaultTtsExpression, getBailianVoiceOptions, getTtsConfig, isBailianClonedVoice, saveTtsConfig, ttsExpressionSummary, type TtsConfig, type TtsExpressionConfig } from "./plugins/builtin/manim/ttsConfig";
 import { ManimVoiceoverError, prepareManimVoiceovers } from "./plugins/builtin/manim/voiceoverPreprocessor";
 import { ManimLocalAudioError, prepareManimLocalAudio } from "./plugins/builtin/manim/localAudioPreprocessor";
@@ -40,7 +43,7 @@ import { buildManimOutputFilename } from "./plugins/builtin/manim/outputNaming";
 import { formatRenderElapsed, initialManimRenderProgress, parseManimRenderProgress, type ManimRenderProgress } from "./plugins/builtin/manim/renderProgress";
 import { prepareManimStillImage } from "./plugins/builtin/manim/stillImagePreprocessor";
 import { extractManimSceneNames } from "./plugins/builtin/manim/sceneNames";
-import { createSceneDocument, legacySceneDocument, sceneDocumentName, type SceneDocument } from "./sceneDocuments";
+import { createCodeDocument, createCodeDocumentFromSource, type CodeDocument } from "./sceneDocuments";
 import { isBlockWorkspaceMode, normalizeWorkspaceMode, type WorkspaceMode } from "./workspaceMode";
 import { getWorkbenchShortcutAction } from "./workbenchShortcuts";
 import { blockSearchFlyout, createBlockSearchIndex, searchBlockIndex } from "./blockSearch";
@@ -62,7 +65,7 @@ import { analyzeVoiceSample, bytesToBase64, createWaveformPeaks, encodeMonoPcmWa
 type RecentProject = { path: string; name: string; openedAt: number };
 type ManimRenderOutput = { type: "video" | "image"; scene: string; path: string; url: string; workDir: string; transparentBackground: boolean };
 type SceneConsoleState = { output: OutputEntry[]; problems: CodeProblem[]; renderOutput: ManimRenderOutput | null };
-type SceneAiStatus = "working" | "changed" | "error" | "validated" | "rendered";
+type SceneAiStatus = "working" | "changed" | "error" | "validated";
 type OutputEntry = { id: number; stream: "stdout" | "stderr" | "system" | "input"; data: string };
 type PythonOutputEvent = { task_id: number; stream: OutputEntry["stream"]; data: string };
 type PythonFinishedEvent = { task_id: number; exit_code: number; stopped: boolean; timed_out: boolean };
@@ -140,6 +143,8 @@ const Editor = lazy(() => import("@monaco-editor/react"));
 const FormulaEditorDialog = lazy(() => import("./FormulaEditorDialog"));
 const codeDiagnosticMarkerOwner = "visual-python-code-diagnostic";
 const pyrightDiagnosticMarkerOwner = "visual-python-pyright-diagnostic";
+const resolveCodeDocumentName = (code: string, fallback: string) => pluginRegistry.resolveCodeDocumentName(code, fallback);
+const legacyCodeDocument = (code: string) => createCodeDocumentFromSource(code, resolveCodeDocumentName(code, "main"), "scene-main");
 
 const readLocalAudioDuration = (path: string) => new Promise<number>((resolve, reject) => {
   const audio = new Audio(convertFileSrc(path));
@@ -848,7 +853,7 @@ export default function App() {
   const restoreBlockViewport = useRef(false);
   const [code, setCode] = useState("");
   const [sourceCode, setSourceCode] = useState("");
-  const [sceneDocuments, setSceneDocuments] = useState<SceneDocument[]>([]);
+  const [sceneDocuments, setSceneDocuments] = useState<CodeDocument[]>([]);
   const [activeSceneId, setActiveSceneId] = useState("");
   const [aiAgentBusy, setAiAgentBusy] = useState(false);
   const [aiCodeReview, setAiCodeReview] = useState<AiCodeChangeSnapshot | null>(null);
@@ -898,7 +903,7 @@ export default function App() {
   const editorFontFamily = getEditorFontFamily(editorFontId);
   const codeValidationVersion = useRef(0);
   const sourceCodeRef = useRef("");
-  const sceneDocumentsRef = useRef<SceneDocument[]>([]);
+  const sceneDocumentsRef = useRef<CodeDocument[]>([]);
   const activeSceneIdRef = useRef("");
   const aiAgentSceneIdRef = useRef<string | null>(null);
   const aiAgentRunTokenRef = useRef<object | null>(null);
@@ -1017,7 +1022,7 @@ export default function App() {
   const [activePanel, setActivePanel] = useState<ConsolePanel>("output");
   const [aiAssistantOpen, setAiAssistantOpen] = useState(() => localStorage.getItem("visual-python:ai-assistant-open") === "true");
   const [aiWorkspaceEpoch, setAiWorkspaceEpoch] = useState(0);
-  const aiAssistantVisible = workspaceMode === "code" && aiAssistantOpen;
+  const aiAssistantVisible = aiAssistantOpen;
   const [aiPanelWidth, setAiPanelWidth] = useState(() => {
     const saved = Number(localStorage.getItem("visual-python:ai-panel-width"));
     return Number.isFinite(saved) && saved >= 340 && saved <= 520 ? saved : 400;
@@ -1800,8 +1805,8 @@ export default function App() {
     const generatedCode = generateWorkspacePython(ws);
     const restoredMode = normalizeWorkspaceMode(draft?.workspaceMode, normalizeWorkspaceMode(localStorage.getItem("visual-python:workspace-mode")));
     const restoredSourceCode = typeof draft?.sourceCode === "string" ? draft.sourceCode : restoredMode === "code" ? generatedCode : "";
-    const restoredDocuments = draft?.sceneDocuments?.length ? draft.sceneDocuments : restoredMode === "code" ? [legacySceneDocument(restoredSourceCode)] : [];
-    const restoredActiveSceneId = restoredDocuments.some((document) => document.id === draft?.activeSceneId) ? draft!.activeSceneId! : restoredDocuments[0]?.id || "";
+    const restoredDocuments = draft?.codeDocuments?.length ? draft.codeDocuments : restoredMode === "code" ? [legacyCodeDocument(restoredSourceCode)] : [];
+    const restoredActiveSceneId = restoredDocuments.some((document) => document.id === draft?.activeDocumentId) ? draft!.activeDocumentId! : restoredDocuments[0]?.id || "";
     const restoredActiveCode = restoredDocuments.find((document) => document.id === restoredActiveSceneId)?.code ?? restoredSourceCode;
     setCode(generatedCode);
     setSceneDocuments(restoredDocuments);
@@ -1991,7 +1996,7 @@ export default function App() {
       restoreBlockViewport.current = true;
     }
     if (nextMode === "code" && !sourceCodeInitialized) {
-      const document = code.trim() ? legacySceneDocument(code) : createSceneDocument([], "MainScene");
+      const document = code.trim() ? legacyCodeDocument(code) : createCodeDocument([], "main");
       setSceneDocuments([document]);
       setActiveSceneId(document.id);
       setSourceCode(document.code);
@@ -2026,7 +2031,7 @@ export default function App() {
     }
     if (activeSceneIdRef.current) {
       const documents = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current
-        ? { ...document, name: sceneDocumentName(nextCode, document.name), code: nextCode }
+        ? { ...document, name: resolveCodeDocumentName(nextCode, document.name), code: nextCode }
         : document);
       sceneDocumentsRef.current = documents;
       setSceneDocuments(documents);
@@ -2207,7 +2212,7 @@ export default function App() {
     sourceCodeRef.current = sourceCode;
     if (activeSceneId) {
       setSceneDocuments((documents) => documents.map((document) => document.id === activeSceneId
-        ? { ...document, name: sceneDocumentName(sourceCode, document.name), code: sourceCode }
+        ? { ...document, name: resolveCodeDocumentName(sourceCode, document.name), code: sourceCode }
         : document));
     }
     setCodeSyntaxDiagnostic(null);
@@ -3260,8 +3265,8 @@ export default function App() {
         autosaveTimer.current = window.setTimeout(saveDraft, 300);
         return;
       }
-      const persistedDocuments = sceneDocuments.map((document) => document.id === activeSceneId ? { ...document, code: sourceCode, name: sceneDocumentName(sourceCode, document.name) } : document);
-      const draft: DraftProject = { version: 1, projectId: projectIdRef.current, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: activeSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
+      const persistedDocuments = sceneDocuments.map((document) => document.id === activeSceneId ? { ...document, code: sourceCode, name: resolveCodeDocumentName(sourceCode, document.name) } : document);
+      const draft: DraftProject = { version: 1, projectId: projectIdRef.current, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: activeSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
       localStorage.setItem("visual-python:draft", JSON.stringify(draft));
       autosaveTimer.current = null;
     };
@@ -3614,8 +3619,8 @@ export default function App() {
     if (!workspace.current) return false;
     const currentSceneId = activeSceneIdRef.current;
     const savedSource = sourceOverride ?? sourceCodeRef.current;
-    const persistedDocuments = sceneDocumentsRef.current.map((document) => document.id === currentSceneId ? { ...document, code: savedSource, name: sceneDocumentName(savedSource, document.name) } : document);
-    const data: ProjectFile = { version: 1, projectId: projectIdRef.current, name: path.split(/[\\/]/).pop() || projectName, workspace: Blockly.serialization.workspaces.save(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, sceneDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeSceneId: currentSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
+    const persistedDocuments = sceneDocumentsRef.current.map((document) => document.id === currentSceneId ? { ...document, code: savedSource, name: resolveCodeDocumentName(savedSource, document.name) } : document);
+    const data: ProjectFile = { version: 1, projectId: projectIdRef.current, name: path.split(/[\\/]/).pop() || projectName, workspace: Blockly.serialization.workspaces.save(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: currentSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
     const contents = JSON.stringify(data, null, 2);
     if (saveAs) {
       await invoke("save_project_as", { sourceProjectPath: projectPathRef.current, destinationProjectPath: path, contents });
@@ -3779,8 +3784,8 @@ export default function App() {
       const generatedCode = generateWorkspacePython(workspace.current);
       const loadedMode = normalizeWorkspaceMode(data.workspaceMode);
       const loadedSourceCode = typeof data.sourceCode === "string" ? data.sourceCode : loadedMode === "code" ? generatedCode : "";
-      const loadedDocuments = data.sceneDocuments?.length ? data.sceneDocuments : loadedMode === "code" ? [legacySceneDocument(loadedSourceCode)] : [];
-      const loadedActiveSceneId = loadedDocuments.some((document) => document.id === data.activeSceneId) ? data.activeSceneId! : loadedDocuments[0]?.id || "";
+      const loadedDocuments = data.codeDocuments?.length ? data.codeDocuments : loadedMode === "code" ? [legacyCodeDocument(loadedSourceCode)] : [];
+      const loadedActiveSceneId = loadedDocuments.some((document) => document.id === data.activeDocumentId) ? data.activeDocumentId! : loadedDocuments[0]?.id || "";
       const loadedActiveCode = loadedDocuments.find((document) => document.id === loadedActiveSceneId)?.code ?? loadedSourceCode;
       const loadedProjectId = data.projectId || createProjectId();
       projectIdRef.current = loadedProjectId;
@@ -3840,7 +3845,7 @@ export default function App() {
     setProjectId(nextProjectId);
     projectResourcesRef.current = [];
     setProjectResources([]);
-    const initialDocument = workspaceMode === "code" ? createSceneDocument([], "MainScene") : null;
+    const initialDocument = workspaceMode === "code" ? createCodeDocument([], "main") : null;
     setProjectName("untitled.vpy"); setProjectPath(null); setDirty(false); setCode(""); setSceneDocuments(initialDocument ? [initialDocument] : []); setActiveSceneId(initialDocument?.id || ""); setSourceCode(initialDocument?.code || ""); setSourceCodeInitialized(workspaceMode === "code"); setProblems([]); setManimRenderOutput(null); localStorage.removeItem("visual-python:draft");
     setOutput([{ id: outputId.current++, stream: "system", data: "已创建新工程。\n" }]);
     setProjectMenuOpen(false); requestAnimationFrame(() => {
@@ -4328,12 +4333,12 @@ export default function App() {
     setCodeOutlineOpen(false);
   };
   const persistActiveSceneDocument = () => sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current
-    ? { ...document, name: sceneDocumentName(sourceCodeRef.current, document.name), code: sourceCodeRef.current }
+    ? { ...document, name: resolveCodeDocumentName(sourceCodeRef.current, document.name), code: sourceCodeRef.current }
     : document);
   const focusManimSceneTab = (sceneId: string) => {
     if (sceneId === activeSceneIdRef.current) return codeEditor.current?.focus();
-    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法切换场景", message: "AI 正在修改当前场景。请先停止或等待任务完成，再切换场景。" });
-    if (runningRef.current || renderingManimRef.current) return showBlockingAlert({ title: "暂时无法切换场景", message: "请先停止当前运行或渲染任务，再切换场景。" });
+    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法切换代码文档", message: "AI 正在修改当前文档。请先停止或等待任务完成，再切换文档。" });
+    if (runningRef.current || renderingManimRef.current) return showBlockingAlert({ title: "暂时无法切换代码文档", message: "请先停止当前运行或渲染任务，再切换文档。" });
     const documents = persistActiveSceneDocument();
     const document = documents.find((item) => item.id === sceneId);
     if (!document) return;
@@ -4348,9 +4353,9 @@ export default function App() {
     requestAnimationFrame(() => codeEditor.current?.focus());
   };
   const addManimSceneTab = () => {
-    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法新建场景", message: "AI 正在修改当前场景。请先停止或等待任务完成，再新建场景。" });
+    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法新建代码文档", message: "AI 正在修改当前文档。请先停止或等待任务完成，再新建文档。" });
     const documents = persistActiveSceneDocument();
-    const document = createSceneDocument(documents.map((item) => item.name));
+    const document = createCodeDocument(documents.map((item) => item.name));
     const nextDocuments = [...documents, document];
     switchSceneConsoleState(activeSceneIdRef.current, document.id);
     codeValidationVersion.current += 1;
@@ -4365,17 +4370,16 @@ export default function App() {
     setCodeRuntimeDiagnostic(null);
     setProblems((items) => items.filter((problem) => !["syntax", "runtime", "timeout"].includes(problem.kind)));
     setDirty(true);
-    updateManimRenderConfig({ selectedScene: document.name });
-    requestAnimationFrame(() => { codeEditor.current?.setPosition({ lineNumber: 6, column: 9 }); codeEditor.current?.focus(); });
+    requestAnimationFrame(() => { codeEditor.current?.setPosition({ lineNumber: 1, column: 1 }); codeEditor.current?.focus(); });
   };
   const closeManimSceneTab = async (sceneId: string) => {
-    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法删除场景", message: "AI 正在修改当前场景。请先停止或等待任务完成，再删除场景。" });
+    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法删除代码文档", message: "AI 正在修改当前文档。请先停止或等待任务完成，再删除文档。" });
     const documents = persistActiveSceneDocument();
     const index = documents.findIndex((document) => document.id === sceneId);
     const closing = documents[index];
     if (!closing) return;
-    if (documents.length === 1) return showBlockingAlert({ title: "无法删除场景", message: "工程至少需要保留一个场景。" });
-    if (!(await requestConfirmation({ title: `删除场景“${closing.name}”？`, message: "该场景的完整代码将被永久删除。", confirmLabel: "删除场景", tone: "danger" }))) return;
+    if (documents.length === 1) return showBlockingAlert({ title: "无法删除代码文档", message: "工程至少需要保留一个代码文档。" });
+    if (!(await requestConfirmation({ title: `删除代码文档“${closing.name}”？`, message: "该文档的完整代码将被永久删除。", confirmLabel: "删除文档", tone: "danger" }))) return;
     const remainingScenes = documents.filter((document) => document.id !== sceneId);
     const nextActive = sceneId === activeSceneIdRef.current ? remainingScenes[Math.min(index, remainingScenes.length - 1)] : remainingScenes.find((document) => document.id === activeSceneIdRef.current)!;
     codeValidationVersion.current += 1;
@@ -4957,26 +4961,29 @@ export default function App() {
     onPermissionRequest: (request: AiAgentPermissionRequest) => Promise<boolean>;
     signal: AbortSignal;
   }): Promise<AiAgentResult> => {
-    if (workspaceModeRef.current !== "code") throw new Error("AI 编程助手仅在纯代码模式下可用");
     const agentSceneId = activeSceneIdRef.current;
+    const agentWorkspaceMode = workspaceModeRef.current;
+    const tracksDocumentStatus = agentWorkspaceMode === "code" && Boolean(agentSceneId);
     const agentRunToken = {};
     aiAgentRunTokenRef.current = agentRunToken;
     aiAgentSceneIdRef.current = agentSceneId;
     setAiAgentBusy(true);
-    setSceneAiStatuses((statuses) => ({ ...statuses, [agentSceneId]: "working" }));
+    if (tracksDocumentStatus) setSceneAiStatuses((statuses) => ({ ...statuses, [agentSceneId]: "working" }));
     const reportActivity = (activity: AiAgentActivity) => {
       const sceneId = activeSceneIdRef.current || agentSceneId;
-      const mutating = activity.toolName && ["create_scene", "rename_scene", "delete_scene", "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "add_voiceover", "add_synchronized_voiceover", "format_code", "undo_code", "redo_code"].includes(activity.toolName);
-      if (activity.status === "error") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "error" }));
-      else if (activity.toolName === "switch_scene") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "working" }));
-      else if (activity.toolName === "inspect_rendered_output") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "rendered" }));
-      else if (activity.toolName === "validate_scene") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "validated" }));
-      else if (mutating) setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "changed" }));
+      if (tracksDocumentStatus && sceneId) {
+        if (activity.status === "error") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "error" }));
+        else if (activity.codeChange) setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "changed" }));
+        else if (activity.channel === "verification" && activity.status === "done") setSceneAiStatuses((statuses) => ({ ...statuses, [sceneId]: "validated" }));
+      }
       onActivity(activity);
     };
     const taskBeforeDocuments = sceneDocumentsRef.current.map((document) => document.id === agentSceneId
-      ? { ...document, code: sourceCodeRef.current, name: sceneDocumentName(sourceCodeRef.current, document.name) }
+      ? { ...document, code: sourceCodeRef.current, name: resolveCodeDocumentName(sourceCodeRef.current, document.name) }
       : { ...document });
+    const taskBeforeWorkspace = isBlockWorkspaceMode(agentWorkspaceMode) && workspace.current
+      ? Blockly.serialization.workspaces.save(workspace.current) as object
+      : undefined;
     const taskBeforeActiveSceneId = agentSceneId;
     let projectDirty = dirty;
 
@@ -5014,40 +5021,28 @@ export default function App() {
         signal,
         host: createVisualPythonHostAdapter({
           workspaceModeRef,
-          sceneDocumentsRef,
-          activeSceneIdRef,
+          documentsRef: sceneDocumentsRef,
+          activeDocumentIdRef: activeSceneIdRef,
           sourceCodeRef,
           projectPathRef,
           projectResourcesRef,
           taskId,
-          manimTaskId,
-          manimRenderAttempt,
           runningRef,
-          renderingManimRef,
           pythonRunStartedAt,
           pythonRunElapsed,
-          manimRenderStartedAt,
-          manimRenderElapsedRef,
-          manimRenderProgressRef,
           outputRef,
           problemsRef,
-          problemIdRef: problemId,
-          manimRenderOutputRef,
           codeEditor,
           aiCodePreviewing,
           codeValidationVersion,
           projectName,
           pythonEnvironment,
-          voiceoverRoles,
-          ttsConfig,
-          ttsApiKey,
           usePipMirror,
           pipMirrorUrl,
-          manimRenderConfig,
           getProjectDirty: () => projectDirty,
           setProjectDirty: (value) => { projectDirty = value; },
-          setSceneDocuments,
-          setActiveSceneId,
+          setDocuments: setSceneDocuments,
+          setActiveDocumentId: setActiveSceneId,
           setSourceCode,
           setSourceCodeInitialized,
           setDirty,
@@ -5056,34 +5051,125 @@ export default function App() {
           setCodeRuntimeDiagnostic: () => setCodeRuntimeDiagnostic(null),
           setActivePanel,
           setInstallingPackages,
-          switchSceneConsoleState,
-          updateManimRenderConfig,
+          switchDocumentConsoleState: switchSceneConsoleState,
           formatCurrentPythonCode,
           runCode,
-          renderManim,
-          stopManimRender,
           stopCode,
           writeProject,
           saveProject,
-          inspectImageQuality,
-          inspectVideoQuality,
           invoke,
           listen,
+          getPluginExecutionState: () => ({ [`${manimPlugin.manifest.id}.rendering`]: renderingManimRef.current || manimRenderAttempt.current !== null }),
+          stopPluginExecutions: stopManimRender,
+          agentCapabilities: getActiveAgentCapabilities(),
           assertActive: (toolSignal) => {
             if (toolSignal.aborted || aiAgentRunTokenRef.current !== agentRunToken) throw new Error("已停止生成");
-            if (workspaceModeRef.current !== "code") throw new Error("工作区已经离开纯代码模式");
+            if (workspaceModeRef.current !== agentWorkspaceMode) throw new Error("工作区模式已改变，请重新提交任务");
           },
+          getCapabilities: getActiveAgentCapabilities,
+          getTools: () => [
+            ...blocklyAgentTools,
+            ...pluginRegistry.getAgentTools().map(({ tool }) => ({
+              definition: tool.definition,
+              label: tool.label,
+              workspaceModes: tool.workspaceModes,
+              readOnly: tool.readOnly,
+              changesState: tool.changesState,
+              requiresPermission: tool.requiresPermission,
+              longRunning: tool.longRunning,
+              mutation: tool.mutation,
+              verificationTool: tool.verificationTool,
+              executionLabels: tool.executionLabels,
+              execution: tool.execution,
+            })),
+          ],
+          blocklyTools: createBlocklyToolExecutor({
+            workspace: workspace.current!,
+            selectedBlockId: () => selectedBlockIdRef.current,
+            searchBlocks: (query, limit) => {
+              const index = createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null);
+              return searchBlockIndex(index, query, limit).map((entry) => ({ type: entry.type, label: entry.label, category: entry.category, state: entry.item as unknown as Record<string, unknown>, inputSlots: describeBlocklyBlockInputs(entry.type) }));
+            },
+            getBlockTemplates: (types) => {
+              const index = createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null);
+              const wanted = new Set(types);
+              return index.filter((entry) => wanted.has(entry.type)).map((entry) => ({ type: entry.type, label: entry.label, category: entry.category, state: entry.item as unknown as Record<string, unknown>, inputSlots: describeBlocklyBlockInputs(entry.type) }));
+            },
+            generateCode: generateWorkspacePython,
+            validateContexts: (candidate) => validatePythonBlockContexts(candidate).map((issue) => ({ blockId: issue.blockId, message: issue.message })),
+            validateCode: async (candidate) => { await invoke("validate_python_code", { code: candidate, pythonPath: pythonEnvironment?.path || null }); },
+            commit: (state, generatedCode) => {
+              const ws = workspace.current;
+              if (!ws) throw new Error("图形化工作区尚未就绪");
+              Blockly.Events.disable();
+              try { Blockly.serialization.workspaces.load(state, ws); ws.clearUndo(); } finally { Blockly.Events.enable(); }
+              setCode(generatedCode);
+              setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
+              setDirty(true);
+              setWorkspaceRevision((revision) => revision + 1);
+            },
+          }),
+          blocklyToolNames: blocklyAgentTools.map((tool) => tool.definition.function.name),
+          executePluginTool: (name, args, toolSignal, executeCapability) => pluginRegistry.executeAgentTool(name, args, (pluginId) => ({
+            executeCapability: async (capability, capabilityArgs, capabilitySignal) => {
+              if (pluginId !== manimPlugin.manifest.id) return executeCapability(capability, capabilityArgs, capabilitySignal);
+              const executeManimCapability = createManimCapabilityExecutor({
+                workspaceModeRef,
+                documentsRef: sceneDocumentsRef,
+                activeDocumentIdRef: activeSceneIdRef,
+                sourceCodeRef,
+                projectPathRef,
+                projectResourcesRef,
+                taskId,
+                renderTaskId: manimTaskId,
+                renderAttempt: manimRenderAttempt,
+                renderOutputRef: manimRenderOutputRef,
+                problemsRef,
+                problemIdRef: problemId,
+                projectName,
+                pythonEnvironment,
+                voiceoverRoles,
+                ttsConfig,
+                ttsApiKey,
+                renderConfig: manimRenderConfig,
+                getCurrentCode: () => isBlockWorkspaceMode(workspaceModeRef.current) && workspace.current ? generateWorkspacePython(workspace.current) : sourceCodeRef.current,
+                setDocuments: setSceneDocuments,
+                setActiveDocumentId: setActiveSceneId,
+                setSourceCode,
+                setSourceCodeInitialized,
+                setDirty,
+                setProblems,
+                setActivePanel,
+                switchDocumentConsoleState: switchSceneConsoleState,
+                updateRenderConfig: updateManimRenderConfig,
+                render: renderManim,
+                inspectImageQuality,
+                inspectVideoQuality,
+                invoke,
+              }, executeCapability);
+              return executeManimCapability(capability, capabilityArgs, capabilitySignal);
+            },
+          }), toolSignal),
           getSnapshot: () => {
             const document = sceneDocumentsRef.current.find((item) => item.id === activeSceneIdRef.current);
             return {
-              project: { name: projectName, path: projectPathRef.current, dirty: projectDirty, scene: { id: activeSceneIdRef.current, name: document?.name || "当前场景" }, sceneCount: sceneDocumentsRef.current.length },
+              workspaceMode: workspaceModeRef.current,
+              project: { name: projectName, path: projectPathRef.current, dirty: projectDirty, activeDocument: { id: activeSceneIdRef.current, name: document?.name || "当前文档" }, documentCount: sceneDocumentsRef.current.length },
               code: sourceCodeRef.current,
               lineCount: sourceCodeRef.current ? sourceCodeRef.current.split("\n").length : 0,
               pythonEnvironment: pythonEnvironment ? { version: pythonEnvironment.version, path: pythonEnvironment.path } : null,
               running: taskId.current !== null,
-              rendering: manimTaskId.current !== null || manimRenderAttempt.current !== null,
-              manimOutput: { type: manimRenderConfig.outputType, transparentBackground: manimRenderConfig.transparentBackground, imageSizeMode: manimRenderConfig.imageSizeMode, imageWidth: manimRenderConfig.imageWidth, imageHeight: manimRenderConfig.imageHeight, imageCaptureMode: manimRenderConfig.imageCaptureMode, imageAnimationStep: manimRenderConfig.imageAnimationStep },
-              renderOutput: manimRenderOutputRef.current ? { type: manimRenderOutputRef.current.type, scene: manimRenderOutputRef.current.scene, path: manimRenderOutputRef.current.path, transparentBackground: manimRenderOutputRef.current.transparentBackground } : null,
+              capabilities: getActiveAgentCapabilities(),
+              plugins: {
+                [manimPlugin.manifest.id]: {
+                  rendering: manimTaskId.current !== null || manimRenderAttempt.current !== null,
+                  output: { type: manimRenderConfig.outputType, transparentBackground: manimRenderConfig.transparentBackground, imageSizeMode: manimRenderConfig.imageSizeMode, imageWidth: manimRenderConfig.imageWidth, imageHeight: manimRenderConfig.imageHeight, imageCaptureMode: manimRenderConfig.imageCaptureMode, imageAnimationStep: manimRenderConfig.imageAnimationStep },
+                  renderResult: manimRenderOutputRef.current ? { type: manimRenderOutputRef.current.type, scene: manimRenderOutputRef.current.scene, path: manimRenderOutputRef.current.path, transparentBackground: manimRenderOutputRef.current.transparentBackground } : null,
+                },
+              },
+              ...(isBlockWorkspaceMode(workspaceModeRef.current) && workspace.current ? {
+                blockWorkspace: { blockCount: workspace.current.getAllBlocks(false).length, selectedBlockId: selectedBlockIdRef.current, code: generateWorkspacePython(workspace.current) },
+              } : {}),
             };
           },
         }),
@@ -5099,25 +5185,32 @@ export default function App() {
         clarification: agentResult.clarification,
       };
       const taskAfterDocuments = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current
-        ? { ...document, code: sourceCodeRef.current, name: sceneDocumentName(sourceCodeRef.current, document.name) }
+        ? { ...document, code: sourceCodeRef.current, name: resolveCodeDocumentName(sourceCodeRef.current, document.name) }
         : { ...document });
       const changed = JSON.stringify(taskBeforeDocuments) !== JSON.stringify(taskAfterDocuments);
-      setSceneAiStatuses((statuses) => {
-        const next = { ...statuses };
-        if (next[agentSceneId] === "working") delete next[agentSceneId];
-        for (const document of taskAfterDocuments) {
-          const before = taskBeforeDocuments.find((item) => item.id === document.id);
-          if ((!before || before.code !== document.code || before.name !== document.name) && !next[document.id]) next[document.id] = "changed";
-        }
-        return next;
-      });
+      const taskAfterWorkspace = isBlockWorkspaceMode(agentWorkspaceMode) && workspace.current
+        ? Blockly.serialization.workspaces.save(workspace.current) as object
+        : undefined;
+      const workspaceChanged = JSON.stringify(taskBeforeWorkspace) !== JSON.stringify(taskAfterWorkspace);
+      if (tracksDocumentStatus) {
+        setSceneAiStatuses((statuses) => {
+          const next = { ...statuses };
+          if (next[agentSceneId] === "working") delete next[agentSceneId];
+          for (const document of taskAfterDocuments) {
+            const before = taskBeforeDocuments.find((item) => item.id === document.id);
+            if ((!before || before.code !== document.code || before.name !== document.name) && !next[document.id]) next[document.id] = "changed";
+          }
+          return next;
+        });
+      }
       return {
         ...result,
-        ...(changed ? { taskChange: { before: taskBeforeDocuments, after: taskAfterDocuments, beforeActiveSceneId: taskBeforeActiveSceneId, afterActiveSceneId: activeSceneIdRef.current } } : {}),
+        ...(changed || workspaceChanged ? { taskChange: { before: taskBeforeDocuments, after: taskAfterDocuments, beforeActiveDocumentId: taskBeforeActiveSceneId, afterActiveDocumentId: activeSceneIdRef.current, workspaceMode: agentWorkspaceMode, beforeWorkspace: taskBeforeWorkspace, afterWorkspace: taskAfterWorkspace, conversationTargetId: agentWorkspaceMode === "code" ? `code:${activeSceneIdRef.current || "no-document"}` : `workspace:${agentWorkspaceMode}` } } : {}),
       };
     } catch (error) {
-      if (aiAgentRunTokenRef.current === agentRunToken) {
-        setSceneAiStatuses((statuses) => ({ ...statuses, [activeSceneIdRef.current || agentSceneId]: "error" }));
+      if (aiAgentRunTokenRef.current === agentRunToken && tracksDocumentStatus) {
+        const documentId = activeSceneIdRef.current || agentSceneId;
+        if (documentId) setSceneAiStatuses((statuses) => ({ ...statuses, [documentId]: "error" }));
       }
       throw error;
     } finally {
@@ -5132,18 +5225,41 @@ export default function App() {
 
   const applyAiTaskSnapshot = useCallback((change: AiTaskChangeSnapshot, direction: "undo" | "apply") => {
     if (aiAgentSceneIdRef.current) return false;
+    if (change.beforeWorkspace && change.afterWorkspace) {
+      const ws = workspace.current;
+      if (!ws || !isBlockWorkspaceMode(workspaceModeRef.current) || workspaceModeRef.current !== change.workspaceMode) {
+        showBlockingAlert({ title: direction === "undo" ? "无法撤销任务" : "无法重新应用任务", message: "请先切换回执行该任务时的图形化工作区。" });
+        return false;
+      }
+      const expected = direction === "undo" ? change.afterWorkspace : change.beforeWorkspace;
+      const replacement = direction === "undo" ? change.beforeWorkspace : change.afterWorkspace;
+      if (JSON.stringify(Blockly.serialization.workspaces.save(ws)) !== JSON.stringify(expected)) {
+        showBlockingAlert({ title: direction === "undo" ? "无法撤销任务" : "无法重新应用任务", message: "任务完成后图形化工作区又发生了变化。" });
+        return false;
+      }
+      Blockly.Events.disable();
+      try { Blockly.serialization.workspaces.load(replacement, ws); ws.clearUndo(); } finally { Blockly.Events.enable(); }
+      const generatedCode = generateWorkspacePython(ws);
+      setCode(generatedCode);
+      setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
+      setDirty(true);
+      setWorkspaceRevision((revision) => revision + 1);
+      return true;
+    }
     const expected = direction === "undo" ? change.after : change.before;
     const replacement = direction === "undo" ? change.before : change.after;
     const current = persistActiveSceneDocument();
     if (JSON.stringify(current) !== JSON.stringify(expected)) {
       showBlockingAlert({
         title: direction === "undo" ? "无法撤销任务" : "无法重新应用任务",
-        message: direction === "undo" ? "任务完成后场景代码又发生了变化，无法整体撤销。" : "撤销后场景代码又发生了变化，无法重新应用。",
+        message: direction === "undo" ? "任务完成后代码文档又发生了变化，无法整体撤销。" : "撤销后代码文档又发生了变化，无法重新应用。",
       });
       return false;
     }
     const documents = replacement.map((document) => ({ ...document }));
-    const requestedActiveId = direction === "undo" ? change.beforeActiveSceneId : change.afterActiveSceneId;
+    const requestedActiveId = direction === "undo"
+      ? change.beforeActiveDocumentId ?? change.beforeActiveSceneId
+      : change.afterActiveDocumentId ?? change.afterActiveSceneId;
     const active = documents.find((document) => document.id === requestedActiveId) ?? documents[0];
     switchSceneConsoleState(activeSceneIdRef.current, active.id);
     sceneDocumentsRef.current = documents;
@@ -5215,8 +5331,10 @@ export default function App() {
 
   const undoAiCodeReview = useCallback(() => {
     if (!aiCodeReview) return;
-    if (aiCodeReview.sceneId && aiCodeReview.sceneId !== activeSceneIdRef.current) {
-      showBlockingAlert({ title: "无法撤销修改", message: `请先切换到场景“${aiCodeReview.sceneName || aiCodeReview.sceneId}”后再撤销。` });
+    const documentId = aiCodeReview.documentId ?? aiCodeReview.sceneId;
+    const documentName = aiCodeReview.documentName ?? aiCodeReview.sceneName;
+    if (documentId && documentId !== activeSceneIdRef.current) {
+      showBlockingAlert({ title: "无法撤销修改", message: `请先切换到文档“${documentName || documentId}”后再撤销。` });
       return;
     }
     const editor = codeEditor.current;
@@ -5436,6 +5554,14 @@ export default function App() {
       showBlockingAlert({ title: "无法打开使用说明", message: "Manim 使用说明未能通过系统浏览器打开。", detail: String(error) });
     }
   };
+  const openPluginDevelopmentGuide = async () => {
+    setHelpMenuOpen(false);
+    try {
+      await invoke("open_plugin_development_guide");
+    } catch (error) {
+      showBlockingAlert({ title: "无法打开插件开发文档", message: "插件开发文档未能通过系统程序打开。", detail: String(error) });
+    }
+  };
   const renderManagementNavigation = () => <aside className="management-navigation" aria-label="管理中心导航">
     <header><span className="management-brand"><Settings size={18}/></span><span><strong>管理中心</strong><small>Visual Python</small></span></header>
     <div className="management-navigation-scroll">
@@ -5470,6 +5596,7 @@ export default function App() {
         <button className="project-menu-trigger" aria-expanded={helpMenuOpen} onClick={() => { setHelpMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setShortcutMenuOpen(false); }}>帮助 <ChevronDown size={13}/></button>
         {helpMenuOpen && <div className="project-menu help-menu" role="menu" aria-label="帮助">
           <button role="menuitem" onClick={() => void openManimGuide()}><BookOpen size={15}/><span>Manim 使用说明</span><ExternalLink size={13}/></button>
+          <button role="menuitem" onClick={() => void openPluginDevelopmentGuide()}><Plug size={15}/><span>插件开发文档</span><ExternalLink size={13}/></button>
         </div>}
       </div></div></div>
       <div className="project-title" data-tauri-drag-region title={projectPath || "尚未保存"}><input value={projectNameDraft} onChange={(event) => setProjectNameDraft(projectFileBaseName(event.target.value))} onBlur={() => void commitProjectName()} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } else if (event.key === "Escape") { event.preventDefault(); cancelProjectNameCommit.current = true; setProjectNameDraft(projectFileBaseName(projectName)); event.currentTarget.blur(); } }} disabled={renamingProject} aria-label="工程文件名" title={renamingProject ? "正在重命名工程" : projectPath || "尚未保存"} spellCheck={false}/>{dirty ? <span className="dirty-dot" data-tauri-drag-region title="未保存"/> : <span className="saved-dot" data-tauri-drag-region title="已保存"/>}</div>
@@ -5496,7 +5623,7 @@ export default function App() {
     <section className={`workbench mode-${workspaceMode} ${aiAssistantVisible ? "ai-panel-open" : ""} ${effectiveBottomPanelOpen ? "" : "bottom-panel-collapsed"}`} style={{ "--right-panel-width": `${rightPanelWidth}px`, "--bottom-panel-height": `${bottomPanelHeight}px`, "--ai-panel-width": `${aiPanelWidth}px` } as CSSProperties}>
       <aside className="activity-rail" onContextMenu={(event) => event.preventDefault()}>
         <button className={`activity ${isBlockWorkspaceMode(workspaceMode) ? "active" : ""}`} title="切换到纯图形化" disabled={running || renderingManim} onClick={() => changeWorkspaceMode("visual")}><Blocks size={20}/></button>
-        <button className={`activity ${aiAssistantVisible ? "active" : ""}`} title={workspaceMode === "code" ? "AI 编程助手" : "AI 编程助手仅在纯代码模式可用"} aria-label="AI 编程助手" aria-pressed={aiAssistantVisible} disabled={workspaceMode !== "code"} onClick={() => setAiAssistantOpen((open) => !open)}><Sparkles size={20}/></button>
+        <button className={`activity ${aiAssistantVisible ? "active" : ""}`} title="AI 智能体" aria-label="AI 智能体" aria-pressed={aiAssistantVisible} onClick={() => setAiAssistantOpen((open) => !open)}><Sparkles size={20}/></button>
         <div className="rail-spacer"/><button className={`activity ${settingsOpen || manimRenderSettingsOpen || pluginsOpen || resourcesOpen ? "active" : ""}`} title="设置" onClick={() => openApplicationSettings("appearance")}><Settings size={20}/></button>
       </aside>
       <section className="workspace-shell">
@@ -5528,9 +5655,9 @@ export default function App() {
       </section>
       <div className="panel-resizer" onPointerDown={startRightPanelResize} role="separator" aria-label="调整辅助面板宽度" aria-orientation="vertical"/>
       <aside className="right-panel">
-        <div className="panel-head"><div className="code-scene-tabs" role="tablist" aria-label="Python 场景">{workspaceMode === "code" ? sceneDocuments.map((scene) => { const aiStatus = sceneAiStatuses[scene.id]; const aiStatusLabel = aiStatus ? ({ working: "AI 正在处理", changed: "AI 已修改", error: "AI 处理出错", validated: "AI 已校验", rendered: "AI 已检查渲染" } as const)[aiStatus] : ""; return <div key={scene.id} className={`scene-tab ${scene.id === activeSceneId ? "active" : ""}`} role="tab" aria-selected={scene.id === activeSceneId}><button className="scene-tab-label" onClick={() => focusManimSceneTab(scene.id)} title={`打开场景 ${scene.name}`}><Film size={13}/><span>{scene.name}</span>{aiStatus && <i className={`scene-ai-status ${aiStatus}`} title={aiStatusLabel} aria-label={aiStatusLabel}/>}</button><button className="scene-tab-close" onClick={() => closeManimSceneTab(scene.id)} title={`删除场景 ${scene.name}`} aria-label={`删除场景 ${scene.name}`}><X size={12}/></button></div>; }) : <div className="panel-tab active"><Braces size={14}/> Python</div>}{workspaceMode === "code" && <button className="scene-tab-add" onClick={addManimSceneTab} title="新建独立 Manim 场景" aria-label="新建独立 Manim 场景"><Plus size={14}/></button>}</div><div className="panel-head-actions"><span className="read-only">{workspaceMode === "code" ? "独立场景" : "实时生成"}</span>{workspaceMode === "code" && <div className="code-outline-wrap" ref={codeOutlineRef}><button ref={codeOutlineTriggerRef} className="code-outline-trigger" disabled={!codeOutline.length} aria-label="代码结构大纲" title="代码结构大纲" aria-haspopup="menu" aria-expanded={codeOutlineOpen} onClick={() => setCodeOutlineOpen((open) => !open)}><ListTree size={15}/></button>{codeOutlineOpen && <div className="code-outline-menu" role="menu" aria-label="代码结构">{codeOutline.map((item) => <button key={`${item.kind}-${item.lineNumber}-${item.label}`} role="menuitem" onClick={() => focusCodeOutlineItem(item)} title={`第 ${item.lineNumber} 行`}><span className={`code-outline-icon outline-${item.kind}`}>{item.kind === "function" ? <Braces size={14}/> : <Box size={14}/>}</span><span className="code-outline-label"><strong>{item.label}</strong><small>{item.kind === "function" ? item.signature : `class ${item.label}`}</small></span><span className="code-outline-line">{item.lineNumber}</span></button>)}</div>}</div>}</div></div>
+        <div className="panel-head"><div className="code-scene-tabs" role="tablist" aria-label="Python 代码文档">{workspaceMode === "code" ? sceneDocuments.map((scene) => { const aiStatus = sceneAiStatuses[scene.id]; const aiStatusLabel = aiStatus ? ({ working: "AI 正在处理", changed: "AI 已修改", error: "AI 处理出错", validated: "AI 已校验" } as const)[aiStatus] : ""; return <div key={scene.id} className={`scene-tab ${scene.id === activeSceneId ? "active" : ""}`} role="tab" aria-selected={scene.id === activeSceneId}><button className="scene-tab-label" onClick={() => focusManimSceneTab(scene.id)} title={`打开文档 ${scene.name}`}><Code2 size={13}/><span>{scene.name}</span>{aiStatus && <i className={`scene-ai-status ${aiStatus}`} title={aiStatusLabel} aria-label={aiStatusLabel}/>}</button><button className="scene-tab-close" onClick={() => closeManimSceneTab(scene.id)} title={`删除文档 ${scene.name}`} aria-label={`删除文档 ${scene.name}`}><X size={12}/></button></div>; }) : <div className="panel-tab active"><Braces size={14}/> Python</div>}{workspaceMode === "code" && <button className="scene-tab-add" onClick={addManimSceneTab} title="新建代码文档" aria-label="新建代码文档"><Plus size={14}/></button>}</div><div className="panel-head-actions"><span className="read-only">{workspaceMode === "code" ? "代码文档" : "实时生成"}</span>{workspaceMode === "code" && <div className="code-outline-wrap" ref={codeOutlineRef}><button ref={codeOutlineTriggerRef} className="code-outline-trigger" disabled={!codeOutline.length} aria-label="代码结构大纲" title="代码结构大纲" aria-haspopup="menu" aria-expanded={codeOutlineOpen} onClick={() => setCodeOutlineOpen((open) => !open)}><ListTree size={15}/></button>{codeOutlineOpen && <div className="code-outline-menu" role="menu" aria-label="代码结构">{codeOutline.map((item) => <button key={`${item.kind}-${item.lineNumber}-${item.label}`} role="menuitem" onClick={() => focusCodeOutlineItem(item)} title={`第 ${item.lineNumber} 行`}><span className={`code-outline-icon outline-${item.kind}`}>{item.kind === "function" ? <Braces size={14}/> : <Box size={14}/>}</span><span className="code-outline-label"><strong>{item.label}</strong><small>{item.kind === "function" ? item.signature : `class ${item.label}`}</small></span><span className="code-outline-line">{item.lineNumber}</span></button>)}</div>}</div>}</div></div>
         <div className="editor-wrap" onContextMenu={openCodeEditorContextMenu}>
-          <Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `scene-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", contextmenu: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense>
+          <Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `document-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", contextmenu: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense>
           {aiCodeReview && aiCodeReviewTop !== null && <div className="ai-code-review-actions" style={{ top: aiCodeReviewTop }} role="toolbar" aria-label="AI 代码修改操作">
             <button type="button" className="undo" onClick={undoAiCodeReview} aria-label="撤销 AI 修改，快捷键 Alt+N"><kbd>Alt+N</kbd><span>撤销</span></button>
             <button type="button" className="keep" onClick={clearAiCodeChange} aria-label="保留 AI 修改，快捷键 Alt+Y"><kbd>Alt+Y</kbd><span>保留</span></button>
@@ -5554,7 +5681,7 @@ export default function App() {
       </section>
       <div className={`ai-panel-resizer ${aiAssistantVisible ? "" : "collapsed"}`} onPointerDown={startAiPanelResize} role="separator" aria-label="调整 AI 智能体宽度" aria-orientation="vertical" aria-valuemin={340} aria-valuemax={520} aria-valuenow={aiPanelWidth}/>
       <aside className={`ai-drawer ${aiAssistantVisible ? "open" : ""}`} aria-hidden={!aiAssistantVisible}>
-        <AiAssistantPanel key={createAiConversationScope(projectId, (aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene")} conversationScope={createAiConversationScope(projectId, (aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-scene")} conversationProjectId={projectId} workspaceEpoch={aiWorkspaceEpoch} lineCount={sourceCode ? sourceCode.split("\n").length : 0} sceneName={sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前场景"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onRevealProblem={revealAiProblem} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")} onClearConversationConfirm={() => requestConfirmation({ title: "清空当前 AI 对话？", message: "当前对话中的全部消息和任务记录都将被永久删除。", confirmLabel: "清空对话", tone: "danger" })}/>
+        <AiAssistantPanel key={createAiConversationScope(projectId, workspaceMode === "code" ? `code:${(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-document"}` : `workspace:${workspaceMode}`)} conversationScope={createAiConversationScope(projectId, workspaceMode === "code" ? `code:${(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-document"}` : `workspace:${workspaceMode}`)} conversationProjectId={projectId} workspaceEpoch={aiWorkspaceEpoch} lineCount={activeCode ? activeCode.split("\n").length : 0} contextName={workspaceMode === "code" ? sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前文档" : workspaceMode === "visual" ? "图形化工作区" : "图形化与代码"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onRevealProblem={revealAiProblem} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")} onClearConversationConfirm={() => requestConfirmation({ title: "清空当前 AI 对话？", message: "当前对话中的全部消息和任务记录都将被永久删除。", confirmLabel: "清空对话", tone: "danger" })}/>
       </aside>
     </section>
     <footer className="statusbar" onContextMenu={(event) => event.preventDefault()}><div className="python-environment-switcher" ref={pythonEnvironmentMenuRef}><button className="environment-status" aria-haspopup="menu" aria-expanded={pythonEnvironmentMenuOpen} disabled={running || renderingManim} onClick={() => { const next = !pythonEnvironmentMenuOpen; setPythonEnvironmentMenuOpen(next); if (next) void detectPythonEnvironments(); }}><span>{pythonEnvironment ? `Python ${pythonEnvironment.version}` : "未选择 Python"}</span></button>{pythonEnvironmentMenuOpen && <div className="python-environment-menu" role="menu" aria-label="切换 Python 解释器"><header><span><strong>Python 解释器</strong><small>{supportedPythonRangeLabel}</small></span><button className="python-environment-refresh" onClick={() => void detectPythonEnvironments()} disabled={detectingPython} title="重新检测" aria-label="重新检测 Python 解释器"><RefreshCw size={13} className={detectingPython ? "spin" : ""}/></button></header><div className="python-environment-options">{pythonEnvironments.length ? pythonEnvironments.map((environment) => { const selected = pythonEnvironment?.path.toLowerCase() === environment.path.toLowerCase(); return <button key={environment.path} className={`python-environment-option ${selected ? "selected" : ""}`} role="menuitemradio" aria-checked={selected} title={environment.path} onClick={() => selectPythonEnvironment(environment)}><span className="python-environment-option-check">{selected && <Check size={12}/>}</span><span><strong>Python {environment.version}</strong><small>{environment.implementation}{environment.virtual_env ? " · 虚拟环境" : ""}</small><code>{environment.path}</code></span></button>; }) : <div className="python-environment-empty"><Braces size={18}/><span>{detectingPython ? "正在检测 Python..." : `未检测到${supportedPythonRangeLabel}`}</span></div>}</div></div>}</div><span className="status-spacer"/>{workspaceMode === "code" && <div className="editor-status-items"><button onClick={() => runCodeEditorAction("editor.action.gotoLine")} title="跳转到行">行 {codeCursorPosition.lineNumber}，列 {codeCursorPosition.column}</button><span title="Python 缩进宽度">空格: {codeIndentSize}</span><span title="文件编码">UTF-8</span></div>}<span>{running ? "正在运行" : renderingManim ? "正在渲染" : "就绪"}</span></footer>

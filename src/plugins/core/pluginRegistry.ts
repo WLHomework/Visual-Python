@@ -3,8 +3,11 @@ import { pythonGenerator } from "blockly/python";
 import { localizeBlockDefinition } from "../../blockDisplayLocalization";
 import {
   PLUGIN_API_VERSION,
+  type PluginAgentRuntime,
+  type PluginAgentTool,
   type PluginBlockDefinition,
   type PluginCommand,
+  type PluginCodeDocumentHandler,
   type PluginContext,
   type PluginManifest,
   type PluginProblem,
@@ -22,11 +25,13 @@ type Contributions = {
   categories: PluginToolboxCategory[];
   settings: PluginSettingContribution[];
   serializers: PluginProjectSerializer[];
+  documentHandlers: PluginCodeDocumentHandler[];
   commands: PluginCommand[];
+  agentTools: PluginAgentTool[];
 };
 
 const emptyContributions = (): Contributions => ({
-  blockTypes: new Set(), categories: [], settings: [], serializers: [], commands: [],
+  blockTypes: new Set(), categories: [], settings: [], serializers: [], documentHandlers: [], commands: [], agentTools: [],
 });
 
 const pluginPrefix = (pluginId: string) => `${pluginId.replace(/[^A-Za-z0-9_]/g, "_")}_`;
@@ -107,8 +112,29 @@ export class PluginRegistry {
     return this.activeContributions().flatMap((entry) => entry.serializers);
   }
 
+  resolveCodeDocumentName(code: string, fallback: string) {
+    const handler = this.activeContributions().flatMap((entry) => entry.documentHandlers).find((item) => item.matches(code));
+    return handler?.name(code, fallback) || fallback;
+  }
+
   getCommands() {
     return this.activeContributions().flatMap((entry) => entry.commands);
+  }
+
+  getAgentTools() {
+    return this.activeEntries().flatMap(([pluginId, , contribution]) => contribution.agentTools.map((tool) => ({ pluginId, tool })));
+  }
+
+  getAgentToolNames(pluginId: string) {
+    return this.getAgentTools()
+      .filter((entry) => entry.pluginId === pluginId)
+      .map(({ tool }) => tool.definition.function.name);
+  }
+
+  async executeAgentTool(name: string, args: Record<string, unknown>, createRuntime: (pluginId: string) => PluginAgentRuntime, signal: AbortSignal) {
+    const matches = this.getAgentTools().filter(({ tool }) => tool.definition.function.name === name);
+    if (matches.length !== 1 || !matches[0].tool.execute) throw new Error(`插件 Agent 工具不可执行：${name}`);
+    return matches[0].tool.execute(args, createRuntime(matches[0].pluginId), signal);
   }
 
   createProjectState(workspace: Blockly.Workspace): PluginProjectState | undefined {
@@ -183,7 +209,14 @@ export class PluginRegistry {
       },
       registerSetting: (setting) => { ensureContributionId(setting.id); contribution.settings.push(setting); },
       registerProjectSerializer: (serializer) => { ensureContributionId(serializer.id); contribution.serializers.push(serializer); },
+      registerCodeDocumentHandler: (handler) => { ensureContributionId(handler.id); contribution.documentHandlers.push(handler); },
       registerCommand: (command) => { ensureContributionId(command.id); contribution.commands.push(command); },
+      registerAgentTool: (tool) => {
+        const name = tool.definition.function.name;
+        ensureContributionId(tool.id);
+        if (this.getAgentTools().some((entry) => entry.tool.definition.function.name === name) || contribution.agentTools.some((entry) => entry.definition.function.name === name)) throw new Error(`Agent 工具重复：${name}`);
+        contribution.agentTools.push(tool);
+      },
       reportProblem: (message, detail) => { this.problems.push({ pluginId: manifest.id, message, detail }); this.emitChange(); },
     };
   }

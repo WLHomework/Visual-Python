@@ -1,5 +1,7 @@
 import type * as Blockly from "blockly/core";
 import type { pythonGenerator } from "blockly/python";
+import type { AiChatToolDefinition } from "../../aiConfig";
+import type { WorkspaceMode } from "../../workspaceMode";
 
 export const PLUGIN_API_VERSION = "1";
 
@@ -14,6 +16,12 @@ export interface PluginManifest {
   builtin?: boolean;
   entry?: string;
   python?: { packages?: string[]; minimumVersion?: string };
+  agent?: {
+    description: string;
+    tools?: string[];
+    fileTypes?: string[];
+    detect?: "imports" | "content" | "project";
+  };
 }
 
 export type PythonBlockGenerator = (
@@ -47,10 +55,43 @@ export interface PluginProjectSerializer {
   clear?(): void;
 }
 
+export interface PluginCodeDocumentHandler {
+  id: string;
+  matches(code: string): boolean;
+  name(code: string, fallback: string): string;
+}
+
 export interface PluginCommand {
   id: string;
   title: string;
   run(...args: unknown[]): unknown | Promise<unknown>;
+}
+
+export interface PluginAgentRuntime {
+  executeCapability(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<Record<string, unknown>>;
+}
+
+export interface PluginAgentTool {
+  id: string;
+  definition: AiChatToolDefinition;
+  label: string;
+  workspaceModes?: WorkspaceMode[];
+  readOnly?: boolean;
+  changesState?: boolean;
+  requiresPermission?: boolean;
+  longRunning?: boolean;
+  mutation?: boolean;
+  verificationTool?: string;
+  executionLabels?: {
+    running: string;
+    success: string;
+    failure: string;
+  };
+  execution?: {
+    stateField: string;
+    verificationTool?: string;
+  };
+  execute?(args: Record<string, unknown>, runtime: PluginAgentRuntime, signal: AbortSignal): Promise<Record<string, unknown>>;
 }
 
 export interface PluginProblem {
@@ -65,7 +106,9 @@ export interface PluginContext {
   registerToolboxCategory(category: PluginToolboxCategory): void;
   registerSetting(setting: PluginSettingContribution): void;
   registerProjectSerializer(serializer: PluginProjectSerializer): void;
+  registerCodeDocumentHandler(handler: PluginCodeDocumentHandler): void;
   registerCommand(command: PluginCommand): void;
+  registerAgentTool(tool: PluginAgentTool): void;
   reportProblem(message: string, detail?: string): void;
 }
 

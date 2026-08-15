@@ -1,6 +1,7 @@
 import { manimPlugin } from "./builtin/manim";
 import { PluginRegistry } from "./core/pluginRegistry";
 import type { PluginCompatibilityIssue, PluginProjectRequirement } from "./api/types";
+import type { AgentCapability } from "../agentV2/types";
 
 export const pluginRegistry = new PluginRegistry();
 
@@ -21,6 +22,20 @@ const writePreference = (pluginId: string, enabled: boolean) => {
 };
 
 export const getPluginEnabledPreference = (pluginId: string) => isCorePlugin(pluginId) || (readPreferences()[pluginId] ?? false);
+
+export function getActiveAgentCapabilities(): AgentCapability[] {
+  return pluginRegistry.getRecords()
+    .filter((record) => record.state === "active" && record.plugin.manifest.agent)
+    .map((record) => ({
+      id: record.plugin.manifest.id,
+      name: record.plugin.manifest.name,
+      description: record.plugin.manifest.agent!.description,
+      tools: pluginRegistry.getAgentToolNames(record.plugin.manifest.id),
+      fileTypes: record.plugin.manifest.agent!.fileTypes,
+      detect: record.plugin.manifest.agent!.detect,
+      active: true,
+    }));
+}
 
 export function initializePlugins() {
   if (initialization) return initialization;

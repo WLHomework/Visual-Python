@@ -1,7 +1,7 @@
 import type { PluginProjectState } from "./plugins/api/types";
 import type { ProjectResource, ProjectResourceType } from "./projectResources";
 import type { WorkspaceMode } from "./workspaceMode";
-import { validateSceneDocuments, type SceneDocument } from "./sceneDocuments";
+import { validateCodeDocuments, type CodeDocument } from "./sceneDocuments";
 
 export type ProjectFile = {
   version: 1;
@@ -10,8 +10,8 @@ export type ProjectFile = {
   workspace: object;
   plugins?: PluginProjectState;
   sourceCode?: string;
-  sceneDocuments?: SceneDocument[];
-  activeSceneId?: string;
+  codeDocuments?: CodeDocument[];
+  activeDocumentId?: string;
   workspaceMode?: WorkspaceMode;
   blockInputLayout?: "inline" | "external";
   resources?: ProjectResource[];
@@ -69,9 +69,10 @@ export function validateProjectFile(value: unknown): ProjectFile {
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.workspace)) throw new Error("不支持的工程格式");
   if (typeof value.name !== "string" || !value.name.trim() || value.name.length > 260) throw new Error("工程名称无效");
   if (value.sourceCode !== undefined && typeof value.sourceCode !== "string") throw new Error("工程源代码无效");
-  const sceneDocuments = validateSceneDocuments(value.sceneDocuments);
-  if (value.activeSceneId !== undefined && typeof value.activeSceneId !== "string") throw new Error("工程当前场景无效");
-  if (sceneDocuments && value.activeSceneId !== undefined && !sceneDocuments.some((document) => document.id === value.activeSceneId)) throw new Error("工程当前场景不存在");
+  const codeDocuments = validateCodeDocuments(value.codeDocuments ?? value.sceneDocuments);
+  const activeDocumentId = value.activeDocumentId ?? value.activeSceneId;
+  if (activeDocumentId !== undefined && typeof activeDocumentId !== "string") throw new Error("工程当前代码文档无效");
+  if (codeDocuments && activeDocumentId !== undefined && !codeDocuments.some((document) => document.id === activeDocumentId)) throw new Error("工程当前代码文档不存在");
   if (value.workspaceMode !== undefined && !["visual", "split", "code"].includes(String(value.workspaceMode))) throw new Error("工程工作区模式无效");
   if (value.blockInputLayout !== undefined && !["inline", "external"].includes(String(value.blockInputLayout))) throw new Error("积木输入布局无效");
   const plugins = parsePlugins(value.plugins);
@@ -83,8 +84,8 @@ export function validateProjectFile(value: unknown): ProjectFile {
     workspace: value.workspace,
     ...(plugins ? { plugins } : {}),
     ...(typeof value.sourceCode === "string" ? { sourceCode: value.sourceCode } : {}),
-    ...(sceneDocuments ? { sceneDocuments } : {}),
-    ...(typeof value.activeSceneId === "string" ? { activeSceneId: value.activeSceneId } : {}),
+    ...(codeDocuments ? { codeDocuments } : {}),
+    ...(typeof activeDocumentId === "string" ? { activeDocumentId } : {}),
     ...(value.workspaceMode ? { workspaceMode: value.workspaceMode as WorkspaceMode } : {}),
     ...(value.blockInputLayout ? { blockInputLayout: value.blockInputLayout as "inline" | "external" } : {}),
     ...(resources ? { resources } : {}),

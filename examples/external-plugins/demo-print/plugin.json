@@ -1,8 +1,8 @@
 {
   "id": "visual-python.demo",
-  "name": "Demo Print",
+  "name": "输出示例",
   "version": "1.0.0",
   "apiVersion": "1",
   "entry": "index.js",
-  "description": "Adds a simple external plugin print block."
+  "description": "演示如何注册一个中文输出积木和工具箱分类。"
 }

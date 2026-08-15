@@ -44,7 +44,7 @@ type RunAgentArgs = {
 
 type AiAssistantPanelProps = {
   lineCount: number;
-  sceneName: string;
+  contextName: string;
   conversationScope: string;
   conversationProjectId?: string;
   workspaceEpoch: number;
@@ -629,7 +629,7 @@ export function removeFinalMessageActivity(activities: AiAgentActivity[], summar
 function agentToolCategory(toolName?: AiAgentToolName | "inspect_rendered_video"): AgentToolCategory {
   if (!toolName) return "other";
   if (["get_context", "list_scenes", "get_scene", "list_resources", "get_resource", "get_voiceover_context", "inspect_python_structure"].includes(toolName)) return "explore";
-  if (["create_scene", "switch_scene", "rename_scene", "delete_scene", "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "add_voiceover", "add_synchronized_voiceover", "format_code", "undo_code", "redo_code"].includes(toolName)) return "edit";
+  if (["create_document", "switch_document", "rename_document", "delete_document", "create_scene", "switch_scene", "rename_scene", "delete_scene", "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "add_voiceover", "add_synchronized_voiceover", "format_code", "undo_code", "redo_code"].includes(toolName)) return "edit";
   if (["validate_scene", "check_resources", "check_dependencies", "check_voiceover", "check_code", "inspect_rendered_output", "inspect_rendered_video"].includes(toolName)) return "verify";
   if (["run_project", "render_manim", "get_execution_state", "wait", "stop_execution"].includes(toolName)) return "execute";
   return "other";
@@ -658,6 +658,12 @@ export function summarizeAgentActivities(activities: AiAgentActivity[]): string 
 
 export function isNearLatestScroll(scrollTop: number, clientHeight: number, scrollHeight: number, threshold = 48): boolean {
   return scrollHeight - scrollTop - clientHeight <= threshold;
+}
+
+export function nextAiThreadScrollTop(scrollTop: number, deltaY: number, clientHeight: number, scrollHeight: number): number {
+  const maximum = Math.max(0, scrollHeight - clientHeight);
+  const next = scrollTop + deltaY;
+  return Math.max(0, Math.min(maximum, Number.isFinite(next) ? next : scrollTop));
 }
 
 export function scrollThreadToLatest(thread: Pick<HTMLElement, "scrollTop" | "scrollHeight">, enabled: boolean): boolean {
@@ -810,7 +816,7 @@ export function formatCodeChangeStats(diff: string): { added: number; removed: n
 }
 
 function codeChangeSceneName(change: AiCodeChangeSnapshot): string {
-  const name = change.sceneName?.trim() || "当前场景";
+  const name = change.documentName?.trim() || change.sceneName?.trim() || "当前文档";
   return name.replace(/\.py$/i, "");
 }
 
@@ -951,7 +957,7 @@ export function settlePermissionResolvers(resolvers: Map<number, (approved: bool
   resolvers.clear();
 }
 
-export function AiAssistantPanel({ lineCount, sceneName, conversationScope, conversationProjectId, workspaceEpoch, onOpenSettings, onClose, onRunAgent, onRevealCodeChange, onRevealProblem, onUndoTaskChange, onApplyTaskChange, onClearConversationConfirm }: AiAssistantPanelProps) {
+export function AiAssistantPanel({ lineCount, contextName, conversationScope, conversationProjectId, workspaceEpoch, onOpenSettings, onClose, onRunAgent, onRevealCodeChange, onRevealProblem, onUndoTaskChange, onApplyTaskChange, onClearConversationConfirm }: AiAssistantPanelProps) {
   const [prompt, setPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<AiAgentMode>("agent");
   const [agentModeMenuOpen, setAgentModeMenuOpen] = useState(false);
@@ -1150,8 +1156,8 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, conv
       });
       setRuns(() => completedRuns);
       completedSuccessfully = true;
-      const transferredScope = result.taskChange?.afterActiveSceneId
-        ? conversationProjectId ? createAiConversationScope(conversationProjectId, result.taskChange.afterActiveSceneId) : result.taskChange.afterActiveSceneId
+      const transferredScope = result.taskChange?.conversationTargetId
+        ? conversationProjectId ? createAiConversationScope(conversationProjectId, result.taskChange.conversationTargetId) : result.taskChange.conversationTargetId
         : "";
       if (transferredScope && transferredScope !== conversationScope) {
         const title = activeConversation?.title === "新对话" ? conversationTitle(normalizedVisiblePrompt) : activeConversation?.title || conversationTitle(normalizedVisiblePrompt);
@@ -1216,7 +1222,14 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, conv
   };
 
   const handleThreadWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    if (event.deltaY >= 0) return;
+    event.stopPropagation();
+    const thread = threadRef.current;
+    if (!thread || event.deltaY === 0) return;
+    const deltaY = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * thread.clientHeight : event.deltaY;
+    const next = nextAiThreadScrollTop(thread.scrollTop, deltaY, thread.clientHeight, thread.scrollHeight);
+    if (next === thread.scrollTop) return;
+    event.preventDefault();
+    thread.scrollTop = next;
     stickToLatestRef.current = false;
     setShowScrollToLatest(true);
   };
@@ -1347,7 +1360,7 @@ export function AiAssistantPanel({ lineCount, sceneName, conversationScope, conv
               <button type="button" role="menuitemradio" aria-checked={agentMode === "plan"} className={agentMode === "plan" ? "selected" : ""} onClick={() => { setAgentMode("plan"); setAgentModeMenuOpen(false); requestAnimationFrame(() => agentModeTriggerRef.current?.focus()); }}><ListChecks size={14}/><span>计划</span>{agentMode === "plan" && <Check size={13}/>}</button>
             </div>}
           </div>
-          <span className="ai-composer-scope" title={`${sceneName} · ${lineCount} 行代码`}><Code2 size={14}/><span>{sceneName}</span><small>{lineCount} 行</small></span>
+          <span className="ai-composer-scope" title={`${contextName} · ${lineCount} 行代码`}><Code2 size={14}/><span>{contextName}</span><small>{lineCount} 行</small></span>
           <span className="ai-composer-footer-spacer"/>
           {running
             ? <button className="stop" onClick={stopAgent} title="停止智能体" aria-label="停止智能体"><Square size={13}/></button>

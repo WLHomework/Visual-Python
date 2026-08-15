@@ -1,37 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { createSceneDocument, legacySceneDocument, renameSceneDocument, sceneDocumentName, validateSceneDocuments } from "./sceneDocuments";
+import sceneDocumentsSource from "./sceneDocuments.ts?raw";
+import { createCodeDocument, createCodeDocumentFromSource, renameCodeDocument, validateCodeDocuments } from "./sceneDocuments";
 
 describe("scene documents", () => {
-  it("creates complete standalone scene files with unique names", () => {
-    const document = createSceneDocument(["NewScene", "NewScene2"]);
-    expect(document.name).toBe("NewScene3");
-    expect(document.code).toContain("from manim import *");
-    expect(document.code).toContain("class NewScene3(Scene):");
+  it("does not depend on a plugin implementation", () => {
+    expect(sceneDocumentsSource).not.toMatch(/plugins\/builtin|Manim|Scene/);
   });
 
-  it("migrates legacy source without changing its contents", () => {
-    const code = "from manim import *\nclass Lesson(Scene):\n    pass\n";
-    expect(legacySceneDocument(code)).toEqual({ id: "scene-main", name: "Lesson", code });
-    expect(sceneDocumentName("print('hello')", "Fallback")).toBe("Fallback");
+  it("creates a generic empty Python document without a Manim template", () => {
+    const document = createCodeDocument(["main"]);
+    expect(document.name).toBe("main2");
+    expect(document.code).toBe("");
+  });
+
+  it("renames a generic Python document without rewriting its code", () => {
+    const document = { id: "document-1", name: "main", code: "print('hello')\n" };
+    expect(renameCodeDocument(document, "工具")).toEqual({ ...document, name: "工具" });
+    expect(() => renameCodeDocument(document, "not valid")).toThrow("Python 标识符");
+  });
+
+  it("wraps legacy source without interpreting plugin-specific code", () => {
+    const code = "class Lesson(CustomPluginBase):\n    pass\n";
+    expect(createCodeDocumentFromSource(code, "lesson", "document-main")).toEqual({ id: "document-main", name: "lesson", code });
   });
 
   it("validates persisted documents and rejects duplicate ids", () => {
     const documents = [{ id: "scene-one", name: "One", code: "class One(Scene): pass" }];
-    expect(validateSceneDocuments(documents)).toEqual(documents);
-    expect(() => validateSceneDocuments([...documents, ...documents])).toThrow("无效");
-  });
-
-  it("renames the document and its primary scene class", () => {
-    const renamed = renameSceneDocument(legacySceneDocument("from manim import *\nclass Old(Scene):\n    pass\n"), "Lesson");
-    expect(renamed.name).toBe("Lesson");
-    expect(renamed.code).toContain("class Lesson(Scene):");
-    expect(() => renameSceneDocument(renamed, "not valid")).toThrow("Python 类名");
-  });
-
-  it("supports Chinese scene names", () => {
-    const renamed = renameSceneDocument(legacySceneDocument("from manim import *\nclass Old(Scene):\n    pass\n"), "圆形动画");
-    expect(renamed.name).toBe("圆形动画");
-    expect(renamed.code).toContain("class 圆形动画(Scene):");
-    expect(validateSceneDocuments([renamed])).toEqual([renamed]);
+    expect(validateCodeDocuments(documents)).toEqual(documents);
+    expect(() => validateCodeDocuments([...documents, ...documents])).toThrow("无效");
   });
 });

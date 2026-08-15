@@ -14,6 +14,9 @@ import { installFileBlockPickerFields } from "../../../fileBlockPicker";
 import { colourForManimBlock } from "./constants";
 import { getManimRenderConfig, isDefaultManimRenderConfig, loadManimRenderConfig, resetManimRenderConfig } from "./renderConfig";
 import { clearProjectVoiceoverRoles, loadProjectVoiceoverRoles, saveProjectVoiceoverRoles } from "./voiceoverRoles";
+import { registerManimAgentTools } from "./agentTools";
+import { extractManimSceneNames } from "./sceneNames";
+import { manimSceneDocumentName } from "./sceneDocuments";
 
 export const manimPlugin: VisualPythonPlugin = {
   manifest: {
@@ -24,6 +27,12 @@ export const manimPlugin: VisualPythonPlugin = {
     description: "通过图形化积木生成 Manim 场景代码。",
     builtin: true,
     python: { packages: ["manim"], minimumVersion: "3.11" },
+    agent: {
+      description: "创建、检查和渲染 Manim 动画，并管理 Manim 配音与资源。",
+      tools: ["validate_scene", "render_manim", "inspect_rendered_output", "get_voiceover_context", "add_voiceover", "add_synchronized_voiceover", "check_voiceover"],
+      fileTypes: [".py", ".vpy"],
+      detect: "imports",
+    },
   },
   activate(context) {
     registerManimAngleField();
@@ -49,6 +58,12 @@ export const manimPlugin: VisualPythonPlugin = {
     registerMethodBlocks(colouredContext);
 
     registerManimToolbox(colouredContext);
+    registerManimAgentTools(context);
+    context.registerCodeDocumentHandler({
+      id: "visual-python.manim.code-documents",
+      matches: (code) => extractManimSceneNames(code).length > 0,
+      name: manimSceneDocumentName,
+    });
     context.registerProjectSerializer({
       id: "visual-python.manim.render-config",
       save: () => isDefaultManimRenderConfig() ? undefined : getManimRenderConfig(),

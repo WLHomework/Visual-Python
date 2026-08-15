@@ -1,5 +1,6 @@
 import type { AiChatMessage, AiChatToolCall, AiChatToolDefinition } from "../aiConfig";
-import type { SceneDocument } from "../sceneDocuments";
+import type { CodeDocument } from "../sceneDocuments";
+import type { WorkspaceMode } from "../workspaceMode";
 
 export type AgentMode = "agent" | "plan";
 export type AiAgentMode = AgentMode;
@@ -11,6 +12,8 @@ export type AgentActivityStatus = "running" | "done" | "error" | "stopped";
 export type AgentCodeChange = {
   before: string;
   after: string;
+  documentId?: string;
+  documentName?: string;
   sceneId?: string;
   sceneName?: string;
 };
@@ -92,10 +95,16 @@ export type AiClarification = AgentClarification;
 export type AiAgentPlanStep = { step: string; status: "pending" | "in_progress" | "completed" };
 export type AiAgentPermissionRequest = { id: string; toolName: AiAgentToolName; title: string; detail: string };
 export type AiTaskChangeSnapshot = {
-  before: SceneDocument[];
-  after: SceneDocument[];
-  beforeActiveSceneId: string;
-  afterActiveSceneId: string;
+  before: CodeDocument[];
+  after: CodeDocument[];
+  beforeActiveDocumentId: string;
+  afterActiveDocumentId: string;
+  beforeActiveSceneId?: string;
+  afterActiveSceneId?: string;
+  workspaceMode?: WorkspaceMode;
+  beforeWorkspace?: object;
+  afterWorkspace?: object;
+  conversationTargetId?: string;
 };
 export type AiAgentProgress = {
   phase: "preparing" | "waiting" | "thinking" | "responding" | "preparingTool" | "executingTool";
@@ -120,8 +129,41 @@ export type AgentExecutionObservation = Record<string, unknown>;
 
 export type AgentHost = {
   getSnapshot: () => Record<string, unknown>;
+  getCapabilities?: () => AgentCapability[];
+  getTools?: () => AgentTool[];
   executeTool: (name: string, args: Record<string, unknown>, signal: AbortSignal) => Promise<Record<string, unknown>>;
   observeExecution?: (toolName: string, signal: AbortSignal) => Promise<AgentExecutionObservation>;
+};
+
+export type AgentTool = {
+  definition: AiChatToolDefinition;
+  label: string;
+  workspaceModes?: WorkspaceMode[];
+  readOnly?: boolean;
+  changesState?: boolean;
+  requiresPermission?: boolean;
+  longRunning?: boolean;
+  mutation?: boolean;
+  verificationTool?: string;
+  executionLabels?: {
+    running: string;
+    success: string;
+    failure: string;
+  };
+  execution?: {
+    stateField: string;
+    verificationTool?: string;
+  };
+};
+
+export type AgentCapability = {
+  id: string;
+  name: string;
+  description: string;
+  tools?: string[];
+  fileTypes?: string[];
+  detect?: "imports" | "content" | "project";
+  active?: boolean;
 };
 
 export type AgentRunResult = {

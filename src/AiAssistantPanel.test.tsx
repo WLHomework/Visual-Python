@@ -1,9 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, storeConversationState, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
+import { AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, storeConversationState, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
 import type { AiAgentActivity } from "./agentV2";
 
 describe("AI assistant Markdown", () => {
+  it("clamps wheel scrolling to the AI thread bounds", () => {
+    expect(nextAiThreadScrollTop(40, -100, 200, 600)).toBe(0);
+    expect(nextAiThreadScrollTop(400, 300, 200, 600)).toBe(400);
+    expect(nextAiThreadScrollTop(100, 50, 200, 600)).toBe(150);
+  });
+
   it("unwraps a model-supplied Markdown fence", () => {
     expect(normalizeAssistantMarkdown("```markdown\n**完成**\n\n- 已修改代码\n```"))
       .toBe("**完成**\n\n- 已修改代码");

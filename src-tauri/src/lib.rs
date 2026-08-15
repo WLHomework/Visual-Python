@@ -3270,6 +3270,15 @@ struct PluginPythonManifest {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PluginAgentManifest {
+    description: String,
+    tools: Option<Vec<String>>,
+    file_types: Option<Vec<String>>,
+    detect: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct PluginManifest {
     id: String,
     name: String,
@@ -3279,6 +3288,7 @@ struct PluginManifest {
     builtin: Option<bool>,
     entry: Option<String>,
     python: Option<PluginPythonManifest>,
+    agent: Option<PluginAgentManifest>,
 }
 
 #[derive(Clone, Serialize)]
@@ -3485,6 +3495,32 @@ fn validate_plugin_manifest_value(value: &Value) -> Result<PluginManifest, Vec<S
                     errors.push("python packages cannot contain empty names".into());
                 }
             }
+        }
+    }
+    if let Some(agent) = &manifest.agent {
+        if agent.description.trim().is_empty() {
+            errors.push("agent description cannot be empty".into());
+        }
+        if agent
+            .tools
+            .as_ref()
+            .is_some_and(|tools| tools.iter().any(|tool| tool.trim().is_empty()))
+        {
+            errors.push("agent tools cannot contain empty names".into());
+        }
+        if agent.file_types.as_ref().is_some_and(|file_types| {
+            file_types
+                .iter()
+                .any(|file_type| file_type.trim().is_empty())
+        }) {
+            errors.push("agent file types cannot contain empty values".into());
+        }
+        if agent
+            .detect
+            .as_deref()
+            .is_some_and(|detect| !matches!(detect, "imports" | "content" | "project"))
+        {
+            errors.push("agent detect must be one of: imports, content, project".into());
         }
     }
 
@@ -5569,7 +5605,7 @@ fn open_manim_guide(app: AppHandle) -> Result<(), String> {
         .map_err(|error| format!("无法定位应用资源目录：{error}"))?
         .join("docs")
         .join("manim-plugin")
-        .join("README.html");
+        .join("manim-plugin.html");
     if bundled_path.is_file() {
         return open_system_video(bundled_path.to_string_lossy().into_owned());
     }
@@ -5580,13 +5616,41 @@ fn open_manim_guide(app: AppHandle) -> Result<(), String> {
             .join("..")
             .join("docs")
             .join("manim-plugin")
-            .join("README.html");
+            .join("manim-plugin.html");
         if development_path.is_file() {
             return open_system_video(development_path.to_string_lossy().into_owned());
         }
     }
 
     Err("未找到内置 Manim 使用说明，请重新安装应用或重新生成说明文档。".into())
+}
+
+#[tauri::command]
+fn open_plugin_development_guide(app: AppHandle) -> Result<(), String> {
+    let bundled_path = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("无法定位应用资源目录：{error}"))?
+        .join("docs")
+        .join("plugin-development")
+        .join("plugin-development.html");
+    if bundled_path.is_file() {
+        return open_system_video(bundled_path.to_string_lossy().into_owned());
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let development_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("docs")
+            .join("plugin-development")
+            .join("plugin-development.html");
+        if development_path.is_file() {
+            return open_system_video(development_path.to_string_lossy().into_owned());
+        }
+    }
+
+    Err("未找到插件开发文档，请检查项目文档目录或重新安装应用。".into())
 }
 
 #[tauri::command]
@@ -5753,6 +5817,7 @@ pub fn run() {
             open_manim_render_folder,
             open_system_video,
             open_manim_guide,
+            open_plugin_development_guide,
             reveal_video_in_folder,
             has_tts_api_key,
             clear_tts_api_key,
@@ -6648,11 +6713,63 @@ mod tests {
           "version": "1.2.3",
           "apiVersion": "1",
           "entry": "index.js",
-          "python": { "packages": ["numpy"], "minimumVersion": "3.11" }
+          "python": { "packages": ["numpy"], "minimumVersion": "3.11" },
+          "agent": {
+            "description": "处理示例项目",
+            "tools": ["inspect_sample"],
+            "fileTypes": [".sample"],
+            "detect": "content"
+          }
         }))
         .expect("valid manifest");
 
         assert_eq!(manifest.id, "visual-python.sample");
+        assert_eq!(manifest.agent.as_ref().unwrap().description, "处理示例项目");
+        assert_eq!(
+            manifest.agent.as_ref().unwrap().tools.as_ref().unwrap(),
+            &["inspect_sample"]
+        );
+        assert_eq!(
+            manifest
+                .agent
+                .as_ref()
+                .unwrap()
+                .file_types
+                .as_ref()
+                .unwrap(),
+            &[".sample"]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_agent_manifest() {
+        let errors = validate_plugin_manifest_value(&json!({
+          "id": "visual-python.sample",
+          "name": "Sample",
+          "version": "1.2.3",
+          "apiVersion": "1",
+          "entry": "index.js",
+          "agent": {
+            "description": "",
+            "tools": [""],
+            "fileTypes": [""],
+            "detect": "unknown"
+          }
+        }))
+        .expect_err("invalid agent manifest");
+
+        assert!(errors
+            .iter()
+            .any(|error| error.contains("agent description cannot be empty")));
+        assert!(errors
+            .iter()
+            .any(|error| error.contains("agent tools cannot contain empty names")));
+        assert!(errors
+            .iter()
+            .any(|error| error.contains("agent file types cannot contain empty values")));
+        assert!(errors
+            .iter()
+            .any(|error| error.contains("agent detect must be one of")));
     }
 
     #[test]

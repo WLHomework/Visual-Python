@@ -31,7 +31,9 @@ describe("Manim render configuration", () => {
       registerToolboxCategory: () => undefined,
       registerSetting: () => undefined,
       registerProjectSerializer: (value) => { if (value.id === "visual-python.manim.render-config") serializer = value; },
+      registerCodeDocumentHandler: () => undefined,
       registerCommand: () => undefined,
+      registerAgentTool: () => undefined,
       reportProblem: () => undefined,
     });
     setManimRenderConfig({ outputType: "image", transparentBackground: true, imageSizeMode: "custom", imageWidth: 1600, imageHeight: 1200, lockImageAspectRatio: false, imageCaptureMode: "animation", imageAnimationStep: 3, quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });

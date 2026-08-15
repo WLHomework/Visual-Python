@@ -10,6 +10,7 @@ import { hiddenCompatibilityBlockTypes, registerManimToolbox } from "./toolbox";
 import { parseVoiceoverMarker } from "./voiceoverMarkers";
 import { parseLocalAudioMarker } from "./localAudioMarkers";
 import { customColorExpression, customColorHex, FieldManimColor, hexToHsv, hsvToHex, parseRecentColours } from "./colorField";
+import { manimAgentTools } from "./agentTools";
 
 const number = (value: number) => ({ block: { type: "math_number", fields: { NUM: value } } });
 const text = (value: string) => ({ block: { type: "text", fields: { TEXT: value } } });
@@ -33,6 +34,33 @@ const activateManimPlugin = async () => {
 describe("Manim plugin generators", () => {
   beforeAll(async () => {
     await activateManimPlugin();
+  });
+
+  it("defines Manim Agent tools in the Manim plugin", () => {
+    expect(manimAgentTools.map((tool) => tool.definition.function.name)).toEqual(expect.arrayContaining([
+      "validate_scene",
+      "render_manim",
+      "inspect_rendered_output",
+      "get_voiceover_context",
+      "add_voiceover",
+      "add_synchronized_voiceover",
+      "check_voiceover",
+    ]));
+    expect(manimAgentTools.find((tool) => tool.definition.function.name === "render_manim")).toMatchObject({ requiresPermission: true, longRunning: true });
+  });
+
+  it("declares code validation for every Manim code mutation", () => {
+    const mutations = manimAgentTools.filter((tool) => tool.mutation);
+
+    expect(mutations.length).toBeGreaterThan(0);
+    expect(mutations.every((tool) => tool.verificationTool === "check_code")).toBe(true);
+  });
+
+  it("limits source-code mutations to the editable code workspace", () => {
+    const codeMutationNames = new Set(["add_voiceover", "add_synchronized_voiceover"]);
+    const mutations = manimAgentTools.filter((tool) => codeMutationNames.has(tool.definition.function.name));
+
+    expect(mutations.every((tool) => tool.workspaceModes?.length === 1 && tool.workspaceModes[0] === "code")).toBe(true);
   });
 
   it("assigns distinct semantic colours to Manim block families", () => {

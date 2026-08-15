@@ -1,53 +1,55 @@
 import { streamAiChat, type AiChatMessage, type AiChatToolCall } from "./aiConfig";
-import { changesAgentState, isCacheableTool, isLongRunningTool, requiresPermission, toolLabel, toolsForAgentMode } from "./agentV2/toolRegistry";
+import { coreAgentTools } from "./agentV2/toolRegistry";
 import { createAgentMemory, rememberAgentDecision, rememberAgentEvidence, serializeAgentMemory } from "./agentV2/memory";
 import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext } from "./agentV2/context";
 import { createAgentTokenUsage, mergeProviderTokenUsage, recordAgentRequest, recordAgentToolResult } from "./agentV2/tokenLedger";
-import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, RunVisualPythonAgentArgs } from "./agentV2/types";
+import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
 
-export type { AgentActivityEvent, AgentCodeChange, AgentConversationTurn, AgentHost, AgentMode, AgentProgress, AgentRunResult, AgentTokenUsage, RunVisualPythonAgentArgs, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiCodeEdit, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
-export { toolsForAgentMode, visualPythonTools } from "./agentV2/toolRegistry";
+export type { AgentActivityEvent, AgentCapability, AgentCodeChange, AgentConversationTurn, AgentHost, AgentMode, AgentProgress, AgentRunResult, AgentTokenUsage, AgentTool, RunVisualPythonAgentArgs, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiCodeEdit, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
+export { coreAgentTools, visualPythonTools } from "./agentV2/toolRegistry";
 export { createAgentMemory, rememberAgentDecision, rememberAgentEvidence, serializeAgentMemory } from "./agentV2/memory";
 export { createVisualPythonHostAdapter, type VisualPythonHostServices } from "./agentV2/hostAdapter";
 export { applyExactCodeEdits, createCodeChangePreview, restoreMissingBaseIndent } from "./agentV2/codeChanges";
 
-const maxRounds = 12;
+export const AGENT_SOFT_ROUND_LIMIT = 12;
+export const AGENT_HARD_ROUND_LIMIT = 48;
+const noProgressRoundLimitAfterSoftBudget = 4;
 // Keep each decision turn bounded. This is the portable Chat Completions control;
 // provider-specific reasoning fields are intentionally not sent.
 const maxTokensPerRequest = 8_192;
 const maxToolResultCharacters = 6000;
 const stopError = "任务已停止";
-const mutationTools = new Set(["replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "add_voiceover", "add_synchronized_voiceover", "format_code", "undo_code", "redo_code"]);
+const toolByName = (tools: AgentTool[], name: string) => tools.find((tool) => tool.definition.function.name === name);
 
-const systemRules = `你是 Visual Python 的专业软件智能体。你通过工具直接操控当前工程，而不是只在聊天中给出代码。
+const systemRules = `你是 Visual Python 的通用软件智能体。你通过工具直接操控当前工程，而不是只在聊天中给出代码。
 
 你必须遵守：
 1. 先读取必要的当前状态，再决定下一步；不要猜测场景、文件、对象或资源的 ID。
 2. 用户要求修改、创建、运行、渲染或保存时，必须通过工具完成，不能只回复一段代码并声称完成。
 3. 代码修改优先使用定点编辑工具；只有空文件或用户明确要求整体重写时才使用 replace_code。
-4. 每次修改后调用 check_code；涉及 Manim 场景时还要调用 validate_scene。
-5. 运行或渲染由你根据任务目标判断。用户明确禁止时绝不执行；用户要求交付可视结果时必须验证真实输出。
+4. 修改工具可能自行验证，也可能声明专用后置验证；遵循工具结果和能力说明，不要把一种文档或插件的验证方式套用到其它工作区。
+5. 是否运行长任务由任务目标决定。用户明确禁止时绝不执行；用户要求交付运行结果时必须取得真实输出。
 6. 工具返回失败时，读取错误并改变修复方案；不要重复相同的错误调用。
 7. 只有取得工具结果和验证证据后，才能宣称任务完成。
 8. 普通回复使用清晰的 Markdown。工具调用前可以用一句简短说明，避免重复规划和冗长解释。
 9. 需要用户决定时调用 ask_user，并提供 2 到 4 个简洁编号选项；不确定的关键选择不要擅自执行。
-10. run_project、render_manim、install_dependencies、delete_scene 和 save_project 都由宿主提供唯一的执行确认。不要再用 ask_user 询问“是否执行”或“是否渲染”；用户已经明确提出操作时直接调用对应工具，只有场景、输出类型等真正影响结果的选择存在歧义时才询问。
+10. 工具声明需要确认时，由宿主提供唯一的执行确认。不要在调用前再用 ask_user 重复询问；只有目标或参数存在真实歧义时才询问。
 11. 不要输出 XML、DSML、伪工具标签或原始 JSON 作为用户可见回复。
 
 平台工作方式：
-- 每个场景是完整、独立的 Python 文件，通常包含 from manim import * 和一个 Scene 子类；不要假定存在公共代码文件。
-- 当前编辑器状态由宿主管理。get_context 用于读取当前场景摘要，get_scene 用于按 ID 读取其他场景；场景切换前先用 list_scenes 取得真实 ID。
+- Visual Python 工程可以包含普通 Python 文档、插件文档、图形化工作区、资源和多个运行目标。不要把整个工程默认当成某个插件工程。
+- 纯代码文档是独立文件。除非当前插件明确要求，不要自动添加 import、基类、construct 或其它专用模板。
+- 当前编辑器状态由宿主管理。get_context 用于读取项目、当前文档、文件列表、运行状态和已启用插件；需要其它文档时先用 list_documents，再用 get_document 读取真实 ID。
+- 文档切换前先用 list_documents 取得真实 ID，再调用 switch_document；create_document 只创建空白普通 Python 文档，插件专用文档使用插件提供的创建工具。
 - 代码修改首选 edit_code、insert_statements、replace_function_body 和 add_import。oldText 必须来自当前真实代码且精确匹配；修改失败后重新读取相关代码，不要猜测缩进或文本。
-- replace_code 只适用于空场景、全新场景或用户明确要求整体重写。已有代码的局部需求不得整文件替换。
-- 修改工具由宿主自动执行 Python 语法检查；仍需根据任务调用 validate_scene 检查 Manim 场景结构。检查成功后不要重复检查同一版本。
-- Manim 对象不能直接传给 Scene.play。对象使用 self.add，动画使用 Create、Write、FadeIn 等 Animation。渲染失败时依据真实问题修复，不要把纯代码错误描述为积木连接错误。
+- replace_code 只适用于空文档、全新文档或用户明确要求整体重写。已有代码的局部需求不得整文件替换。
+- 修改工具由宿主自动执行 Python 语法检查；插件专用验证只在插件检测结果匹配时使用。检查成功后不要重复检查同一版本。
+- 插件能力由 get_context 返回。只有用户请求或当前文件确实匹配时才调用插件工具，不要向普通 Python 任务展示或调用无关插件流程。
 - 工程资源通过 list_resources 和 get_resource 获取可用路径；不要虚构图片、音频、字体或资源 ID。资源引用后调用 check_resources。
-- 配音前调用 get_voiceover_context 获取真实配置和角色。使用 add_voiceover 或 add_synchronized_voiceover 后调用 check_voiceover；配置缺失时说明需要用户配置，不要伪造音频。
 - 依赖操作先用 check_dependencies。missing 为空表示已经安装；只有确实缺失且用户允许时才调用 install_dependencies。
-- run_project 和 render_manim 是长任务，宿主会等待并返回真实观察结果。不要轮询，不要在成功观察后重复执行。
-- render_manim 支持视频和图片。用户未指定输出类型且选择会显著影响结果时才询问；用户明确要求时直接调用，由宿主负责唯一确认。
+- 长任务由工具元数据和宿主管理，宿主会等待并返回真实观察结果。不要自行轮询，不要在成功观察后重复执行。
 - save_project 只在用户当前请求明确包含保存要求时执行。代码修改成功不等于需要保存工程。
-- 删除场景、安装依赖、运行、渲染和保存由宿主确认。用户拒绝后视为已取消，不要重复请求相同操作。
+- 需要确认的操作由宿主统一确认。用户拒绝后视为已取消，不要重复请求相同操作。
 - ask_user 只用于会显著改变结果的真实歧义。颜色、布局、动画节奏等普通实现细节由你专业判断，避免不必要的往返。
 - 最终回复只总结实际完成内容、验证结果和需要用户决定的事项。不要复述全部工具调用或输出未经处理的内部数据。`;
 
@@ -195,10 +197,10 @@ function observationFailureDetail(observation: Record<string, unknown>): string 
   return undefined;
 }
 
-function isSuccessfulObservation(toolName: string, observation: Record<string, unknown>): boolean {
+function isSuccessfulObservation(tool: AgentTool | undefined, observation: Record<string, unknown>): boolean {
   if (observation.success === false || observation.failed === true) return false;
   if (Array.isArray(observation.problems) && observation.problems.length > 0) return false;
-  if (toolName !== "render_manim") return observation.running !== true && observation.rendering !== true;
+  if (!tool?.executionLabels) return observation.running !== true && observation.rendering !== true;
   const renderOutput = observation.renderOutput;
   if (!renderOutput || typeof renderOutput !== "object" || typeof (renderOutput as Record<string, unknown>).path !== "string") return false;
   const inspection = observation.inspection;
@@ -229,16 +231,29 @@ function failureDetail(result: Record<string, unknown>): string | undefined {
 export async function runVisualPythonAgent({ prompt, history = [], mode = "agent", host, onEvent, onProgress, onPermissionRequest, signal }: RunVisualPythonAgentArgs): Promise<AgentRunResult> {
   if (!prompt.trim()) throw new Error("请输入任务");
   const memory = createAgentMemory(history);
+  const capabilities = host.getCapabilities?.() ?? [];
+  const snapshot = host.getSnapshot();
+  const workspaceMode = snapshot.workspaceMode === "visual" || snapshot.workspaceMode === "split" || snapshot.workspaceMode === "code" ? snapshot.workspaceMode : "code";
+  const capabilityRules = capabilities.length
+    ? `\n\n当前可用能力：\n${capabilities.map((capability) => `- ${capability.name}（${capability.id}）：${capability.description}${capability.tools?.length ? `；专用工具：${capability.tools.join(", ")}` : ""}${capability.fileTypes?.length ? `；文件类型：${capability.fileTypes.join(", ")}` : ""}${capability.detect ? `；检测方式：${capability.detect}` : ""}`).join("\n")}`
+    : "\n\n当前没有插件提供额外的 Agent 能力；按通用 Python 工程处理。";
+  const workspaceConstructionRules = workspaceMode === "visual" || workspaceMode === "split"
+    ? `\n\nBlockly construction protocol:\n- Build complex visual tasks incrementally: create the entry block first, then add exactly one block per add_workspace_block call.\n- Use the returned real block id for the next connection. Use parentBlockId and the exact inputName from the template for nested blocks, or afterBlockId for statement order.\n- Do not create a batch of disconnected top-level blocks and connect them later. Do not guess input names.\n- Use apply_workspace only for a small complete structure or when the user explicitly asks to replace the whole workspace.`
+    : "";
   const requestContext = createAgentRequestContext({
-    system: `${systemRules}\n\n当前模式：${mode === "plan" ? "计划模式，只能读取和分析，不得修改工程" : "智能体模式，可以执行必要的工程操作"}`,
+    system: `${systemRules}${capabilityRules}${workspaceConstructionRules}\n\n当前模式：${mode === "plan" ? "计划模式，只能读取和分析，不得修改工程" : "智能体模式，可以执行必要的工程操作"}`,
     history,
     prompt,
-    snapshot: host.getSnapshot(),
+    snapshot,
     memory: serializeAgentMemory(memory),
   });
   const usage = createAgentTokenUsage();
   let requestMessages = buildAgentRequestMessages(requestContext);
-  const taskTools = toolsForAgentMode(mode);
+  const allTools = [...coreAgentTools, ...(host.getTools?.() ?? [])];
+  const activeTools = allTools.filter((tool) => !tool.workspaceModes?.length || tool.workspaceModes.includes(workspaceMode as "visual" | "split" | "code"));
+  const taskAgentTools = mode === "plan" ? activeTools.filter((tool) => tool.readOnly) : activeTools;
+  const taskTools = taskAgentTools.map((tool) => tool.definition);
+  const toolLabel = (name: string) => toolByName(taskAgentTools, name)?.label || name;
   let toolCallCount = 0;
   let sequence = 0;
   let truncatedContinuations = 0;
@@ -246,8 +261,10 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
   let clarification: AgentClarification | undefined;
   let stateVersion = 0;
   let consecutiveNoProgress = 0;
+  let noProgressRoundsAfterSoftBudget = 0;
   const failedToolCalls = new Map<string, { toolName: string; message: string; blocksCompletion: boolean; stateVersion: number; attempts: number; lastAttempt: number }>();
-  const successfulReadCache = new Map<string, { stateVersion: number; result: Record<string, unknown>; resultText: string; modelResult: string }>();
+  const repeatedStructureFailures = new Map<string, number>();
+  const successfulReadCache = new Map<string, { stateVersion: number; result: Record<string, unknown>; resultText: string }>();
   const recordFailure = (fingerprint: string, toolName: string, message: string, blocksCompletion = true) => {
     const previous = failedToolCalls.get(fingerprint);
     const attempts = previous?.stateVersion === stateVersion ? previous.attempts + 1 : 1;
@@ -256,6 +273,9 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
   const clearFailuresFor = (toolName: string) => {
     for (const [fingerprint, failure] of failedToolCalls) {
       if (failure.toolName === toolName) failedToolCalls.delete(fingerprint);
+    }
+    for (const key of repeatedStructureFailures.keys()) {
+      if (key.includes(`:${toolName}:`)) repeatedStructureFailures.delete(key);
     }
   };
 
@@ -268,12 +288,13 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
     recordAgentToolResult(usage, content);
   };
 
-  for (let round = 1; round <= maxRounds; round += 1) {
+  for (let round = 1; round <= AGENT_HARD_ROUND_LIMIT; round += 1) {
     if (signal.aborted) throw new Error(stopError);
     const messageId = `message-${round}`;
     let content = "";
     let reasoning = "";
     let thinkingEmitted = false;
+    let roundProgressed = false;
     recordAgentRequest(usage, requestMessages, taskTools, round);
     reportProgress({ phase: "thinking", label: round === 1 ? "分析当前请求和工程状态" : "根据执行结果决定下一步" });
     emit({ id: messageId, kind: "message", status: "running", title: "", markdown: "" });
@@ -366,9 +387,10 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
         pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: true, skipped: true, reason: message }));
         continue;
       }
-      const cachedRead = isCacheableTool(call.function.name) ? successfulReadCache.get(fingerprint) : undefined;
+      const currentTool = toolByName(taskAgentTools, call.function.name);
+      const cachedRead = currentTool?.readOnly ? successfulReadCache.get(fingerprint) : undefined;
       if (cachedRead?.stateVersion === stateVersion) {
-        const cachedResponse = `${cachedRead.modelResult}\n\n状态未变化，已复用最近一次读取结果；不要重复读取，请继续下一步。`;
+        const cachedResponse = JSON.stringify({ ok: true, cached: true, stateVersion, message: "状态未变化，上一条读取结果仍然有效；不要重复读取，请继续下一步。" });
         consecutiveNoProgress += 1;
         emit({ id: toolId, kind: "tool", status: "done", title: toolLabel(call.function.name), detail: "状态未变化", toolName: call.function.name, result: cachedRead.result, resultText: cachedRead.resultText });
         pushToolResponse(turnMessages, call.id, cachedResponse);
@@ -376,7 +398,7 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
         continue;
       }
       consecutiveNoProgress = 0;
-      const permissionDenied = requiresPermission(call.function.name)
+      const permissionDenied = currentTool?.requiresPermission
         && (!onPermissionRequest || !(await onPermissionRequest({ id: toolId, toolName: call.function.name, title: `需要确认：${toolLabel(call.function.name)}`, detail: "该操作会修改工程或启动任务。" })));
       if (mode === "plan" || permissionDenied) {
         const denied = { ok: false, error: mode === "plan" ? "计划模式禁止执行修改或运行操作" : "用户拒绝了这次操作" };
@@ -395,26 +417,29 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
         const resultFailed = result.ok === false || result.valid === false || result.success === false || result.saved === false;
         if (resultFailed) recordFailure(fingerprint, call.function.name, failureDetail(result) || "工具返回失败");
         else {
+          roundProgressed = true;
           clearFailuresFor(call.function.name);
-          if (changesAgentState(call.function.name) && result.changed !== false) {
+          if (currentTool?.changesState && result.changed !== false) {
             stateVersion += 1;
             successfulReadCache.clear();
-          } else if (isCacheableTool(call.function.name)) {
-            successfulReadCache.set(fingerprint, { stateVersion, result, resultText, modelResult: combinedToolResponse });
+          } else if (currentTool?.readOnly) {
+            successfulReadCache.set(fingerprint, { stateVersion, result, resultText });
           }
         }
         emit({ id: toolId, kind: "tool", status: resultFailed ? "error" : "done", title: toolLabel(call.function.name), detail: resultFailed ? "失败" : undefined, toolName: call.function.name, result, resultText, codeChange: result.__codeChange && typeof result.__codeChange === "object" ? result.__codeChange as AgentActivityEvent["codeChange"] : undefined });
-        if (mutationTools.has(call.function.name) && result.ok !== false) {
+        if (currentTool?.verificationTool && result.ok !== false) {
           const verificationId = `verification-${round}-${toolCallCount}`;
-          const validation = await host.executeTool("check_code", {}, signal);
+          const verificationTool = currentTool.verificationTool;
+          const validation = await host.executeTool(verificationTool, {}, signal);
           const validationText = serializeResult(validation);
-          const compactValidation = compactAgentToolResult("check_code", validation);
-          rememberAgentEvidence(memory, "代码检查", compactValidation);
+          const compactValidation = compactAgentToolResult(verificationTool, validation);
+          const verificationLabel = toolLabel(verificationTool);
+          rememberAgentEvidence(memory, verificationLabel, compactValidation);
           const valid = validation.valid !== false;
-          if (!valid) recordFailure(fingerprint, "check_code", failureDetail(validation) || "代码检查未通过");
-          else clearFailuresFor("check_code");
-          emit({ id: verificationId, kind: "verification", status: valid ? "done" : "error", title: valid ? "代码检查通过" : "代码检查发现问题", result: validation, resultText: validationText });
-          combinedToolResponse = `${combinedToolResponse}\n\nCode check result: ${compactValidation}`;
+          if (!valid) recordFailure(fingerprint, verificationTool, failureDetail(validation) || `${verificationLabel}未通过`);
+          else clearFailuresFor(verificationTool);
+          emit({ id: verificationId, kind: "verification", status: valid ? "done" : "error", title: valid ? `${verificationLabel}通过` : `${verificationLabel}发现问题`, result: validation, resultText: validationText });
+          combinedToolResponse = `${combinedToolResponse}\n\nVerification result: ${compactValidation}`;
         }
         const question = call.function.name === "ask_user" ? getClarification(result) : undefined;
         if (question) {
@@ -424,23 +449,23 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
           reportProgress({ phase: "completed", label: "等待用户选择" });
           return { summary: question.question, toolCallCount, tokenUsage: usage, clarification };
         }
-        if (isLongRunningTool(call.function.name) && isExecutionStarted(result) && host.observeExecution) {
+        if (currentTool?.longRunning && isExecutionStarted(result) && host.observeExecution) {
           const observationId = `observation-${round}-${toolCallCount}`;
           reportProgress({ phase: "observing", label: "等待宿主任务完成并读取真实结果" });
-          emit({ id: observationId, kind: "observation", status: "running", title: call.function.name === "render_manim" ? "渲染 Manim" : "运行 Python 工程", toolName: call.function.name });
+          const executionLabels = currentTool.executionLabels ?? { running: currentTool.label, success: "任务已完成并取得输出", failure: `${currentTool.label}失败` };
+          emit({ id: observationId, kind: "observation", status: "running", title: executionLabels.running, toolName: call.function.name });
           try {
             const observation = await host.observeExecution(call.function.name, signal);
             const observationText = serializeResult(observation);
             const compactObservation = compactAgentToolResult(call.function.name, observation);
             rememberAgentEvidence(memory, "后台任务观察", compactObservation);
-            const observationSucceeded = isSuccessfulObservation(call.function.name, observation);
-            const isManimRender = call.function.name === "render_manim";
+            const observationSucceeded = isSuccessfulObservation(currentTool, observation);
             const detail = observationSucceeded ? undefined : observationFailureDetail(observation);
-            emit({ id: observationId, kind: isManimRender || !observationSucceeded ? "verification" : "observation", status: observationSucceeded ? "done" : "error", title: observationSucceeded ? (isManimRender ? "渲染 Manim 通过" : "任务已完成并取得输出") : (isManimRender ? "渲染 Manim 发现问题" : "任务完成，但验证发现问题"), detail, toolName: call.function.name, result: observation, resultText: observationText });
+            emit({ id: observationId, kind: currentTool.executionLabels || !observationSucceeded ? "verification" : "observation", status: observationSucceeded ? "done" : "error", title: observationSucceeded ? executionLabels.success : detail ? `${executionLabels.running} 发现问题` : executionLabels.failure, detail, toolName: call.function.name, result: observation, resultText: observationText });
             combinedToolResponse = `${combinedToolResponse}\n\nBackground task observation: ${compactObservation}`;
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            emit({ id: observationId, kind: "observation", status: "error", title: `${call.function.name === "render_manim" ? "渲染 Manim" : "运行 Python 工程"} 失败`, detail: message, toolName: call.function.name, result: { ok: false, error: message }, resultText: message });
+            emit({ id: observationId, kind: "observation", status: "error", title: executionLabels.failure, detail: message, toolName: call.function.name, result: { ok: false, error: message }, resultText: message });
             throw error;
           }
         }
@@ -448,11 +473,28 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         recordFailure(fingerprint, call.function.name, message);
-        emit({ id: toolId, kind: "tool", status: "error", title: `执行失败：${toolLabel(call.function.name)}`, detail: message, toolName: call.function.name, result: { ok: false, error: message }, resultText: message });
-        pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: false, error: message }));
+        const missingInput = message.match(/(?:没有|缺少)\s+([A-Z][A-Z0-9_]*)\s+输入/i)?.[1]
+          || message.match(/missing a\(n\)\s+([A-Z][A-Z0-9_]*)\s+connection/i)?.[1];
+        const structureKey = missingInput ? `${stateVersion}:${call.function.name}:${missingInput}` : "";
+        const structureAttempts = structureKey ? (repeatedStructureFailures.get(structureKey) || 0) + 1 : 0;
+        if (structureKey) repeatedStructureFailures.set(structureKey, structureAttempts);
+        const stopRepeating = structureAttempts >= 3;
+        const responseMessage = stopRepeating
+          ? `${message}\n同一连接错误已连续出现 ${structureAttempts} 次，已停止重复提交。请先读取积木模板中的 inputSlots，再重新构造工作区。`
+          : message;
+        emit({ id: toolId, kind: "tool", status: "error", title: `执行失败：${toolLabel(call.function.name)}`, detail: responseMessage, toolName: call.function.name, result: { ok: false, error: responseMessage }, resultText: responseMessage });
+        pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: false, error: responseMessage, ...(stopRepeating ? { stopped: true } : {}) }));
+        if (stopRepeating) throw new Error("智能体连续提交无效的 Blockly 连接，任务已停止");
       }
     }
     requestMessages = appendAgentTurn(requestMessages, turnMessages);
+    if (round >= AGENT_SOFT_ROUND_LIMIT) {
+      if (roundProgressed) noProgressRoundsAfterSoftBudget = 0;
+      else noProgressRoundsAfterSoftBudget += 1;
+      if (noProgressRoundsAfterSoftBudget >= noProgressRoundLimitAfterSoftBudget) {
+        throw new Error(`任务连续 ${noProgressRoundLimitAfterSoftBudget} 个决策回合没有有效进展，已停止`);
+      }
+    }
   }
-  throw new Error(`任务在 ${maxRounds} 个决策回合内没有完成`);
+  throw new Error(`任务在 ${AGENT_HARD_ROUND_LIMIT} 个决策回合内没有完成`);
 }
