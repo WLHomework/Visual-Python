@@ -5,6 +5,7 @@ import { parsePythonSyntaxDiagnostic, type PythonCodeDiagnostic } from "../pytho
 import { createCodeDocument, renameCodeDocument, type CodeDocument } from "../sceneDocuments";
 import { projectResourceReference, resolveProjectResourceReference, type ProjectResource } from "../projectResources";
 import { applyExactCodeEdits, createCodeChangePreview } from "./codeChanges";
+import { pluginDraftSummary, validatePluginDraft, type PluginDraft, type PluginDraftFiles, type PluginDraftStore } from "./pluginAuthoring";
 import type { AgentCapability, AgentHost, AiCodeEdit } from "./types";
 
 type Ref<T> = { current: T };
@@ -17,6 +18,7 @@ type PythonEnvironment = { path: string; version: string };
 type PythonPackageStatus = { name: string; installed: boolean };
 type PackageInstallFinishedEvent = { success: boolean; stopped: boolean; error?: string | null; packages: string[] };
 type ProjectResourceStatus = { path: string; exists: boolean; size: number };
+type InstalledPluginSummary = { id: string; name: string; version: string; active: boolean; valid?: boolean; errors?: string[] };
 type CodeEditor = MonacoEditor.IStandaloneCodeEditor;
 
 export type VisualPythonHostServices = {
@@ -61,8 +63,13 @@ export type VisualPythonHostServices = {
   saveProject: () => Promise<boolean>;
   invoke: Invoke;
   listen: typeof listenFunction;
+  pluginDraftStore?: PluginDraftStore;
+  listInstalledPlugins?: () => Promise<InstalledPluginSummary[]>;
+  readInstalledPluginFiles?: (pluginId: string) => Promise<PluginDraftFiles>;
+  installPluginDraft?: (draft: PluginDraft, signal: AbortSignal) => Promise<Record<string, unknown>>;
   assertActive: (signal: AbortSignal) => void;
   agentCapabilities?: AgentCapability[];
+  getAgentCapabilities?: () => AgentCapability[];
 };
 
 const checkedString = (args: Record<string, unknown>, key: string, allowEmpty = false) => {
@@ -72,6 +79,17 @@ const checkedString = (args: Record<string, unknown>, key: string, allowEmpty = 
 };
 
 const toolSummary = (args: Record<string, unknown>, fallback: string) => typeof args.summary === "string" && args.summary.trim() ? args.summary.trim() : fallback;
+
+const checkedDraftFiles = (args: Record<string, unknown>): PluginDraftFiles => {
+  const value = args.files;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("files 必须是文件路径到文本内容的对象");
+  const files: PluginDraftFiles = {};
+  for (const [path, content] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof content !== "string") throw new Error(`文件内容必须是文本：${path}`);
+    files[path] = content;
+  }
+  return files;
+};
 
 const waitWithSignal = (milliseconds: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
   if (signal.aborted) return reject(new Error("已停止生成"));
@@ -122,9 +140,69 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
     try { await services.invoke("validate_python_code", { code: candidateCode, pythonPath: services.pythonEnvironment?.path || null }); }
     catch (error) { throw new Error(`候选代码存在语法或缩进错误，未应用到编辑器：${String(error)}`); }
   };
+  const getAgentCapabilities = () => services.getAgentCapabilities?.() ?? services.agentCapabilities ?? [];
+  const pluginValidationContext = () => ({
+    availableCapabilities: getAgentCapabilities().map((capability) => ({ id: capability.id, ...capability.codegen })),
+  });
 
   return async (name, args, signal) => {
     if (signal.aborted) throw new Error("已停止生成");
+    if (["list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft_file", "create_plugin_draft", "update_plugin_draft", "validate_plugin_draft", "install_plugin_draft"].includes(name)) {
+      const store = services.pluginDraftStore;
+      if (!store) throw new Error("插件草稿服务尚未就绪");
+      if (name === "list_installed_plugins") {
+        if (!services.listInstalledPlugins) throw new Error("已安装插件查询服务尚未就绪");
+        return { plugins: await services.listInstalledPlugins() };
+      }
+      if (name === "import_installed_plugin_draft") {
+        if (!services.readInstalledPluginFiles) throw new Error("已安装插件读取服务尚未就绪");
+        const pluginId = checkedString(args, "pluginId");
+        const imported = store.createFromFiles(await services.readInstalledPluginFiles(pluginId));
+        const summary = pluginDraftSummary(imported, pluginValidationContext());
+        if (summary.validation.manifest?.id !== pluginId) throw new Error(`插件文件 ID 与请求不一致：${pluginId}`);
+        return { imported: true, pluginId, ...summary };
+      }
+      if (name === "create_plugin_draft") {
+        const draft = store.create({
+          id: checkedString(args, "id"),
+          name: checkedString(args, "name"),
+          description: checkedString(args, "description"),
+          ...(typeof args.version === "string" && args.version.trim() ? { version: args.version.trim() } : {}),
+          ...(args.files !== undefined ? { files: checkedDraftFiles(args) } : {}),
+        });
+        return { created: true, ...pluginDraftSummary(draft, pluginValidationContext()), files: draft.files };
+      }
+      const draftId = checkedString(args, "draftId");
+      const draft = store.get(draftId);
+      if (!draft) throw new Error(`插件草稿不存在：${draftId}`);
+      if (name === "read_plugin_draft_file") {
+        const path = checkedString(args, "path");
+        const content = draft.files[path];
+        if (typeof content !== "string") throw new Error(`插件草稿文件不存在：${path}`);
+        const offset = typeof args.offset === "number" && Number.isInteger(args.offset) ? Math.max(0, args.offset) : 0;
+        const maxChars = typeof args.maxChars === "number" && Number.isInteger(args.maxChars) ? Math.max(1, Math.min(5000, args.maxChars)) : 5000;
+        const page = content.slice(offset, offset + maxChars);
+        const nextOffset = offset + page.length;
+        return {
+          draftId,
+          path,
+          offset,
+          content: page,
+          totalChars: content.length,
+          truncated: nextOffset < content.length,
+          ...(nextOffset < content.length ? { nextOffset } : {}),
+        };
+      }
+      if (name === "update_plugin_draft") {
+        const updated = store.update(draftId, checkedDraftFiles(args));
+        return { updated: true, ...pluginDraftSummary(updated, pluginValidationContext()), files: updated.files };
+      }
+      const validation = validatePluginDraft(draft, pluginValidationContext());
+      if (name === "validate_plugin_draft") return { ...pluginDraftSummary(draft, pluginValidationContext()), validation };
+      if (!validation.valid) return { installed: false, ...pluginDraftSummary(draft, pluginValidationContext()), validation };
+      if (!services.installPluginDraft) throw new Error("插件安装服务尚未就绪");
+      return { installed: true, ...await services.installPluginDraft(draft, signal), capabilities: getAgentCapabilities(), validation };
+    }
     const codeOnly = new Set(["list_documents", "get_document", "switch_document", "create_document", "rename_document", "delete_document", "inspect_python_structure", "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "check_code", "format_code", "undo_code", "redo_code"]);
     if (codeOnly.has(name) && services.workspaceModeRef.current !== "code") throw new Error("当前工具只适用于纯代码工作区");
 
@@ -215,9 +293,25 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
         pythonEnvironment: services.pythonEnvironment ? { version: services.pythonEnvironment.version, path: services.pythonEnvironment.path } : null,
         running: services.taskId.current !== null || services.runningRef.current,
         pluginExecutions: services.getPluginExecutionState?.() || {},
-        capabilities: services.agentCapabilities || [],
+        capabilities: getAgentCapabilities(),
         documents: services.documentsRef.current.map(({ id, name: documentName, code }) => ({ id, name: documentName, lineCount: code ? code.split("\n").length : 0, active: id === services.activeDocumentIdRef.current })),
         ...(args.includeResources === true ? { resources: services.projectResourcesRef.current.map(({ id, type, path, originalName, size }) => ({ id, type, path, originalName, size })) } : {}),
+      };
+    }
+    if (name === "get_diagnostics") {
+      const limit = Math.max(1, Math.min(200, Math.round(typeof args.limit === "number" ? args.limit : 80)));
+      const includeOutput = args.includeOutput !== false;
+      const includeProblems = args.includeProblems !== false;
+      const output = includeOutput
+        ? services.outputRef.current.slice(-limit).map(({ stream, data }) => ({ stream, data }))
+        : undefined;
+      const problems = includeProblems
+        ? services.problemsRef.current.slice(-limit).map(({ kind, line, message, suggestion }) => ({ kind, line, message, suggestion }))
+        : undefined;
+      return {
+        ...(output ? { output } : {}),
+        ...(problems ? { problems } : {}),
+        hasErrors: Boolean(output?.some((entry) => entry.stream === "stderr") || problems?.length),
       };
     }
     if (name === "list_resources") {

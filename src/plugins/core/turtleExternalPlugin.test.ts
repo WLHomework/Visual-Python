@@ -118,6 +118,11 @@ describe("Turtle external plugin package", () => {
         tools: ["inspect_turtle_capabilities"],
         fileTypes: [".py"],
         detect: "imports",
+        codegen: {
+          entryBlock: "visual_python_turtle_program",
+          statementInput: "BODY",
+          runtimeNames: ["screen", "pen"],
+        },
       },
     });
     expect(manifest.python).toBeUndefined();

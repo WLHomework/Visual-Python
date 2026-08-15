@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
-import { defaultAiModelConfig, getAiAgentPermissionMode, getAiModelCapabilities, getAiModelConfig, normalizeAiModelConfig, saveAiAgentPermissionMode, saveAiModelConfig, streamAiChat, updateAiModelCapabilities } from "./aiConfig";
+import { defaultAiModelConfig, getAiAgentPermissionMode, getAiModelCapabilities, getAiModelConfig, getAiReasoningEffort, normalizeAiModelConfig, saveAiAgentPermissionMode, saveAiModelConfig, saveAiReasoningEffort, streamAiChat, updateAiModelCapabilities } from "./aiConfig";
 
 describe("AI model configuration", () => {
   beforeEach(() => {
@@ -42,6 +42,16 @@ describe("AI model configuration", () => {
     expect(getAiAgentPermissionMode()).toBe("confirm");
   });
 
+  it("persists high as the default reasoning effort", () => {
+    expect(getAiReasoningEffort()).toBe("high");
+    expect(saveAiReasoningEffort("xhigh")).toBe("xhigh");
+    expect(localStorage.setItem).toHaveBeenCalledWith("visual-python:ai-reasoning-effort", "xhigh");
+    vi.mocked(localStorage.getItem).mockReturnValue("medium");
+    expect(getAiReasoningEffort()).toBe("medium");
+    vi.mocked(localStorage.getItem).mockReturnValue("unsupported");
+    expect(getAiReasoningEffort()).toBe("high");
+  });
+
   it("passes standard tool choice controls to the native OpenAI-compatible request", async () => {
     mocks.invoke.mockResolvedValue({ content: "", toolCalls: [], model: "test" });
     const tools = [{
@@ -49,12 +59,13 @@ describe("AI model configuration", () => {
       function: { name: "edit_code", description: "edit", parameters: { type: "object" } },
     }];
 
-    await streamAiChat([{ role: "user", content: "修改代码" }], vi.fn(), { tools, toolChoice: "required" });
+    await streamAiChat([{ role: "user", content: "修改代码" }], vi.fn(), { tools, toolChoice: "required", reasoningEffort: "xhigh" });
 
     expect(mocks.invoke).toHaveBeenCalledWith("ai_chat_completion_stream", expect.objectContaining({
       tools,
       toolChoice: "required",
       omitToolChoice: false,
+      reasoningEffort: "xhigh",
     }));
   });
 

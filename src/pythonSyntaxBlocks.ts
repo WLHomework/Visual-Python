@@ -154,6 +154,13 @@ export const pythonSyntaxToolbox = {
     { kind: "block", type: "python_from_import_star", fields: { MODULE: "math" } },
   ],
   standardLibrary: [
+    { kind: "label", text: "输入输出", "web-class": "python-standard-library-label" },
+    { kind: "block", type: "python_pprint", inputs: { VALUE: expressionShadow("数据") } },
+    { kind: "block", type: "python_sys_argv" },
+    { kind: "block", type: "python_sys_exit", inputs: { CODE: numberShadow(0) } },
+    { kind: "block", type: "python_csv_read", fields: { VAR: variableField("表格数据"), DELIMITER: "," }, inputs: { PATH: textShadow("scores.csv") } },
+    { kind: "block", type: "python_csv_write", fields: { DELIMITER: "," }, inputs: { PATH: textShadow("scores.csv"), DATA: listShadow([1, 2, 3]) } },
+    { kind: "sep", gap: 20 },
     { kind: "label", text: "数学", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_math_constant" },
     { kind: "block", type: "python_math_unary", inputs: { VALUE: numberShadow(9) } },
@@ -174,6 +181,7 @@ export const pythonSyntaxToolbox = {
     { kind: "block", type: "python_datetime_parse", inputs: { TEXT: textShadow("2026-01-01"), FORMAT: textShadow("%Y-%m-%d") } },
     { kind: "block", type: "python_datetime_format", inputs: { VALUE: { shadow: { type: "python_datetime_now", fields: { MODE: "now" } } }, FORMAT: textShadow("%Y-%m-%d %H:%M") } },
     { kind: "block", type: "python_datetime_timedelta", inputs: { DAYS: numberShadow(1) } },
+    { kind: "block", type: "python_time_sleep", inputs: { SECONDS: numberShadow(1) } },
     { kind: "sep", gap: 20 },
     { kind: "label", text: "系统", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_os_getenv", inputs: { NAME: textShadow("HOME") } },
@@ -297,7 +305,7 @@ export function registerPythonSyntaxBlocks(colours: PythonSyntaxColours) {
     { type: "python_from_import_as", message0: "从 %1 导入 %2 命名为 %3", args0: [{ type: "field_input", name: "MODULE", text: "pathlib" }, { type: "field_input", name: "NAME", text: "Path" }, { type: "field_input", name: "ALIAS", text: "FilePath" }], previousStatement: null, nextStatement: null, colour: colours.module },
     { type: "python_from_import_multiple", message0: "从 %1 导入 %2 和 %3", args0: [{ type: "field_input", name: "MODULE", text: "collections" }, { type: "field_input", name: "NAME1", text: "Counter" }, { type: "field_input", name: "NAME2", text: "defaultdict" }], previousStatement: null, nextStatement: null, colour: colours.module },
     { type: "python_from_import_star", message0: "从 %1 导入全部 *", args0: [{ type: "field_input", name: "MODULE", text: "module" }], previousStatement: null, nextStatement: null, colour: colours.module },
-    { type: "python_standard_library_import", message0: "导入标准库 %1", args0: [{ type: "field_dropdown", name: "MODULE", options: [["数学 math", "math"], ["随机 random", "random"], ["JSON json", "json"], ["日期时间 datetime", "datetime"], ["路径 pathlib", "pathlib"], ["系统 os", "os"], ["正则表达式 re", "re"], ["集合工具 collections", "collections"]] }], previousStatement: null, nextStatement: null, colour: colours.module },
+    { type: "python_standard_library_import", message0: "导入标准库 %1", args0: [{ type: "field_dropdown", name: "MODULE", options: [["数学 math", "math"], ["随机 random", "random"], ["JSON json", "json"], ["日期时间 datetime", "datetime"], ["时间 time", "time"], ["路径 pathlib", "pathlib"], ["系统 os", "os"], ["系统参数 sys", "sys"], ["正则表达式 re", "re"], ["集合工具 collections", "collections"], ["结构化输出 pprint", "pprint"], ["表格数据 csv", "csv"]] }], previousStatement: null, nextStatement: null, colour: colours.module },
     { type: "python_math_constant", message0: "数学常量 %1", args0: [{ type: "field_dropdown", name: "CONSTANT", options: [["圆周率 π", "pi"], ["自然常数 e", "e"], ["圆周常量 τ", "tau"], ["正无穷", "inf"]] }], output: "Number", colour: colours.module },
     { type: "python_math_unary", message0: "数学 %1 %2", args0: [{ type: "field_dropdown", name: "FUNCTION", options: [["平方根 sqrt", "sqrt"], ["正弦 sin", "sin"], ["余弦 cos", "cos"], ["正切 tan", "tan"], ["向上取整 ceil", "ceil"], ["向下取整 floor", "floor"], ["弧度转角度 degrees", "degrees"], ["角度转弧度 radians", "radians"]] }, { type: "input_value", name: "VALUE", check: "Number" }], inputsInline: true, output: "Number", colour: colours.module },
     { type: "python_random_randint", message0: "随机整数 random.randint 从 %1 到 %2", args0: [{ type: "input_value", name: "A", check: "Number" }, { type: "input_value", name: "B", check: "Number" }], inputsInline: true, output: "Number", colour: colours.module },
@@ -307,10 +315,16 @@ export function registerPythonSyntaxBlocks(colours: PythonSyntaxColours) {
     { type: "python_random_shuffle", message0: "打乱 random.shuffle %1", args0: [{ type: "input_value", name: "SEQUENCE" }], previousStatement: null, nextStatement: null, colour: colours.module },
     { type: "python_json_dumps", message0: "转 JSON json.dumps %1 缩进 %2", args0: [{ type: "input_value", name: "VALUE" }, { type: "input_value", name: "INDENT", check: "Number" }], inputsInline: true, output: "String", colour: colours.module },
     { type: "python_json_loads", message0: "解析 JSON json.loads %1", args0: [{ type: "input_value", name: "TEXT", check: "String" }], output: null, colour: colours.module },
+    { type: "python_pprint", message0: "结构化打印 %1", args0: [{ type: "input_value", name: "VALUE" }], previousStatement: null, nextStatement: null, colour: colours.module, tooltip: "以更易阅读的形式输出列表、字典和嵌套数据。" },
+    { type: "python_sys_argv", message0: "命令行参数", output: "Array", colour: colours.module, tooltip: "返回启动 Python 程序时传入的参数列表。" },
+    { type: "python_sys_exit", message0: "退出程序，状态码 %1", args0: [{ type: "input_value", name: "CODE", check: "Number" }], previousStatement: null, nextStatement: null, colour: colours.module, tooltip: "结束程序运行；状态码留空时使用默认值。" },
+    { type: "python_csv_read", message0: "读取表格文件 %1 保存到 %2 分隔符 %3", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_variable", name: "VAR", variable: "表格数据" }, { type: "field_input", name: "DELIMITER", text: "," }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.module, tooltip: "读取逗号分隔表格文件的全部行并保存为列表；也可以自定义分隔符。" },
+    { type: "python_csv_write", message0: "将数据 %1 写入表格文件 %2 分隔符 %3", args0: [{ type: "input_value", name: "DATA" }, { type: "input_value", name: "PATH", check: "String" }, { type: "field_input", name: "DELIMITER", text: "," }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.module, tooltip: "将二维列表写入逗号分隔表格文件；会覆盖原文件并使用 UTF-8 编码。" },
     { type: "python_datetime_now", message0: "日期时间 %1", args0: [{ type: "field_dropdown", name: "MODE", options: [["当前日期时间 now", "now"], ["今天日期 today", "today"], ["当前 UTC 时间", "utc"]] }], output: null, colour: colours.module },
     { type: "python_datetime_parse", message0: "解析日期时间 %1 格式 %2", args0: [{ type: "input_value", name: "TEXT", check: "String" }, { type: "input_value", name: "FORMAT", check: "String" }], inputsInline: true, output: null, colour: colours.module },
     { type: "python_datetime_format", message0: "格式化日期时间 %1 格式 %2", args0: [{ type: "input_value", name: "VALUE" }, { type: "input_value", name: "FORMAT", check: "String" }], inputsInline: true, output: "String", colour: colours.module },
     { type: "python_datetime_timedelta", message0: "时间差 timedelta 天 %1 秒 %2 小时 %3", args0: [{ type: "input_value", name: "DAYS", check: "Number" }, { type: "input_value", name: "SECONDS", check: "Number" }, { type: "input_value", name: "HOURS", check: "Number" }], inputsInline: true, output: null, colour: colours.module },
+    { type: "python_time_sleep", message0: "等待 %1 秒", args0: [{ type: "input_value", name: "SECONDS", check: "Number" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.module },
     { type: "python_path_create", message0: "创建 %1 路径 %2", args0: [{ type: "field_dropdown", name: "PATH_KIND", options: [["文件", "file"], ["目录", "directory"]] }, { type: "input_value", name: "VALUE" }], inputsInline: true, output: null, colour: colours.file },
     { type: "python_path_join", message0: "拼接路径 %1 / %2", args0: [{ type: "input_value", name: "BASE" }, { type: "input_value", name: "CHILD" }], inputsInline: true, output: null, colour: colours.file },
     { type: "python_path_check", message0: "路径 %1 %2", args0: [{ type: "input_value", name: "PATH" }, { type: "field_dropdown", name: "METHOD", options: [["是否存在", "exists"], ["是否为文件", "is_file"], ["是否为目录", "is_dir"]] }], inputsInline: true, output: "Boolean", colour: colours.file },
@@ -530,6 +544,24 @@ export function registerPythonSyntaxBlocks(colours: PythonSyntaxColours) {
     return [`${standardLibraryCall(block, "json", "dumps")}(${value(generator, block, "VALUE")}${indent ? `, indent=${indent}` : ""})`, Order.FUNCTION_CALL];
   };
   pythonGenerator.forBlock.python_json_loads = (block, generator) => [`${standardLibraryCall(block, "json", "loads")}(${value(generator, block, "TEXT", "''")})`, Order.FUNCTION_CALL];
+  pythonGenerator.forBlock.python_pprint = (block, generator) => `${standardLibraryCall(block, "pprint", "pprint")}(${value(generator, block, "VALUE", "None")})\n`;
+  pythonGenerator.forBlock.python_sys_argv = (block) => [`${standardLibraryCall(block, "sys", "argv")}`, Order.MEMBER];
+  pythonGenerator.forBlock.python_sys_exit = (block, generator) => {
+    const code = optionalValue(generator, block, "CODE");
+    return `${standardLibraryCall(block, "sys", "exit")}(${code})\n`;
+  };
+  pythonGenerator.forBlock.python_csv_read = (block, generator) => {
+    const delimiter = String(block.getFieldValue("DELIMITER") || ",");
+    const path = value(generator, block, "PATH", "''");
+    const variable = variableName(generator, block, "VAR", "表格数据");
+    return `with open(${path}, "r", newline="", encoding="utf-8") as 文件:\n${generator.INDENT}${variable} = list(${standardLibraryCall(block, "csv", "reader")}(文件, delimiter=${JSON.stringify(delimiter)}))\n`;
+  };
+  pythonGenerator.forBlock.python_csv_write = (block, generator) => {
+    const delimiter = String(block.getFieldValue("DELIMITER") || ",");
+    const path = value(generator, block, "PATH", "''");
+    const data = value(generator, block, "DATA", "[]");
+    return `with open(${path}, "w", newline="", encoding="utf-8") as 文件:\n${generator.INDENT}${standardLibraryCall(block, "csv", "writer")}(文件, delimiter=${JSON.stringify(delimiter)}).writerows(${data})\n`;
+  };
   pythonGenerator.forBlock.python_datetime_now = (block) => {
     const mode = block.getFieldValue("MODE");
     if (mode === "today") return [`${standardLibraryCall(block, "datetime", "date.today")}()`, Order.FUNCTION_CALL];
@@ -546,6 +578,7 @@ export function registerPythonSyntaxBlocks(colours: PythonSyntaxColours) {
       }).filter(Boolean);
     return [`${standardLibraryCall(block, "datetime", "timedelta")}(${options.join(", ")})`, Order.FUNCTION_CALL];
   };
+  pythonGenerator.forBlock.python_time_sleep = (block, generator) => `${standardLibraryCall(block, "time", "sleep")}(${value(generator, block, "SECONDS", "1")})\n`;
   pythonGenerator.forBlock.python_path_create = (block, generator) => [`${standardLibraryCall(block, "pathlib", "Path")}(${value(generator, block, "VALUE", "''")})`, Order.FUNCTION_CALL];
   pythonGenerator.forBlock.python_path_join = (block, generator) => [`${value(generator, block, "BASE", "None", Order.MULTIPLICATIVE)} / ${value(generator, block, "CHILD", "''", Order.MULTIPLICATIVE)}`, Order.MULTIPLICATIVE];
   pythonGenerator.forBlock.python_path_check = (block, generator) => [`${value(generator, block, "PATH", "None", Order.MEMBER)}.${block.getFieldValue("METHOD")}()`, Order.FUNCTION_CALL];
@@ -1032,6 +1065,9 @@ const requiredInputsByType: Record<string, Array<[string, string]>> = {
   python_random_shuffle: [["SEQUENCE", "序列"]],
   python_json_dumps: [["VALUE", "待转换值"]],
   python_json_loads: [["TEXT", "JSON 文本"]],
+  python_pprint: [["VALUE", "待打印对象"]],
+  python_csv_read: [["PATH", "CSV 文件路径"]],
+  python_csv_write: [["DATA", "表格数据"], ["PATH", "CSV 文件路径"]],
   python_datetime_parse: [["TEXT", "日期时间文本"], ["FORMAT", "日期时间格式"]],
   python_datetime_format: [["VALUE", "日期时间对象"], ["FORMAT", "日期时间格式"]],
   python_path_create: [["VALUE", "路径内容"]],
@@ -1064,6 +1100,7 @@ const requiredInputsByType: Record<string, Array<[string, string]>> = {
   python_async_with: [["CONTEXT", "异步上下文对象"]],
   python_asyncio_sleep: [["SECONDS", "等待秒数"]],
   python_asyncio_run: [["COROUTINE", "异步函数调用"]],
+  python_time_sleep: [["SECONDS", "等待秒数"]],
 };
 
 const hasConnectedBlock = (block: Blockly.Block, inputName: string) => Boolean(block.getInput(inputName)?.connection?.targetBlock());

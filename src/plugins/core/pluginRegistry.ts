@@ -58,6 +58,13 @@ export class PluginRegistry {
     this.emitChange();
     try {
       await record.plugin.activate(this.createContext(record.plugin.manifest));
+      const contribution = this.contributions.get(pluginId);
+      if (!contribution || !this.hasContributions(contribution)) {
+        throw new Error("插件 activate() 未注册任何插件能力");
+      }
+      if (contribution.blockTypes.size > 0 && contribution.categories.length === 0) {
+        throw new Error("插件注册了积木，但没有注册工具箱分类");
+      }
       record.state = "active";
     } catch (error) {
       this.clearContributions(pluginId);
@@ -102,6 +109,22 @@ export class PluginRegistry {
 
   getBlockTypes(pluginId: string) {
     return [...(this.contributions.get(pluginId)?.blockTypes ?? [])];
+  }
+
+  generatePythonSamples(pluginId: string) {
+    const record = this.requireRecord(pluginId);
+    if (record.state !== "active") throw new Error(`插件尚未激活：${pluginId}`);
+    return this.getBlockTypes(pluginId).sort().map((blockType) => {
+      const workspace = new Blockly.Workspace();
+      try {
+        workspace.newBlock(blockType);
+        return { blockType, code: pythonGenerator.workspaceToCode(workspace) };
+      } catch (error) {
+        throw new Error(`无法生成积木 ${blockType} 的 Python 测试代码：${String(error)}`);
+      } finally {
+        workspace.dispose();
+      }
+    });
   }
 
   getSettings() {
@@ -199,7 +222,14 @@ export class PluginRegistry {
         if (!definition.type.startsWith(prefix)) throw new Error(`积木类型必须以 ${prefix} 开头：${definition.type}`);
         if (Blockly.Blocks[definition.type] || contribution.blockTypes.has(definition.type)) throw new Error(`积木类型重复：${definition.type}`);
         Blockly.common.defineBlocksWithJsonArray([localizeBlockDefinition(definition)]);
-        pythonGenerator.forBlock[definition.type] = generator as (block: Blockly.Block, generator: typeof pythonGenerator) => any;
+        pythonGenerator.forBlock[definition.type] = manifest.builtin
+          ? generator as (block: Blockly.Block, generator: typeof pythonGenerator) => any
+          : ((block: Blockly.Block, activeGenerator: typeof pythonGenerator) => {
+              const previousIndent = activeGenerator.INDENT;
+              activeGenerator.INDENT = "    ";
+              try { return generator(block, activeGenerator); }
+              finally { activeGenerator.INDENT = previousIndent; }
+            });
         contribution.blockTypes.add(definition.type);
       },
       registerToolboxCategory: (category) => {
@@ -232,6 +262,16 @@ export class PluginRegistry {
     return [...this.records.entries()]
       .filter(([, record]) => record.state === "active")
       .map(([id, record]) => [id, record, this.contributions.get(id)!]);
+  }
+
+  private hasContributions(contribution: Contributions) {
+    return contribution.blockTypes.size > 0
+      || contribution.categories.length > 0
+      || contribution.settings.length > 0
+      || contribution.serializers.length > 0
+      || contribution.documentHandlers.length > 0
+      || contribution.commands.length > 0
+      || contribution.agentTools.length > 0;
   }
 
   private clearContributions(pluginId: string) {

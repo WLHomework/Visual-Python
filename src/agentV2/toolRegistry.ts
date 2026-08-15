@@ -1,5 +1,6 @@
 import type { AiChatToolDefinition } from "../aiConfig";
 import type { AgentTool } from "./types";
+import { pluginAuthoringTools } from "./pluginAuthoring";
 
 const objectSchema = (properties: Record<string, unknown> = {}, required: string[] = []) => ({
   type: "object",
@@ -18,6 +19,7 @@ function tool(name: string, description: string, parameters: Record<string, unkn
 export const visualPythonTools: AiChatToolDefinition[] = [
   tool("ask_user", "当任务存在会显著影响结果的歧义时向用户提问。普通视觉细节和实现细节由 Agent 自行判断。", objectSchema({ question: { type: "string", minLength: 1, maxLength: 500 }, options: { type: "array", minItems: 2, maxItems: 4, items: text } }, ["question", "options"])),
   tool("get_context", "读取当前工程、文档、工作区、运行状态和环境摘要。修改前或状态不确定时使用。", objectSchema({ includeResources: { type: "boolean" } })),
+  tool("get_diagnostics", "按需读取当前输出和问题面板中的最新诊断。插件安装、加载、运行或渲染失败后，在再次修改前使用。", objectSchema({ includeOutput: { type: "boolean" }, includeProblems: { type: "boolean" }, limit: { type: "integer", minimum: 1, maximum: 200 } })),
   tool("list_documents", "列出工程中的代码文档及当前文档。普通 Python 和插件文档都使用此工具。", objectSchema()),
   tool("get_document", "读取指定代码文档的完整源码。", objectSchema({ documentId: text }, ["documentId"])),
   tool("switch_document", "切换当前编辑的代码文档。", objectSchema({ documentId: text }, ["documentId"])),
@@ -45,6 +47,7 @@ export const visualPythonTools: AiChatToolDefinition[] = [
 const labels: Record<string, string> = {
   ask_user: "询问用户",
   get_context: "读取当前工程",
+  get_diagnostics: "读取输出与问题",
   list_documents: "查看代码文档",
   get_document: "读取代码文档",
   switch_document: "切换代码文档",
@@ -70,15 +73,15 @@ const labels: Record<string, string> = {
 };
 
 const readOnlyTools = new Set([
-  "get_context", "list_documents", "get_document", "list_resources", "get_resource", "check_resources",
-  "check_dependencies", "inspect_python_structure", "check_code",
+  "get_context", "get_diagnostics", "list_documents", "get_document", "list_resources", "get_resource", "check_resources",
+  "check_dependencies", "inspect_python_structure", "check_code", "list_installed_plugins", "read_plugin_draft_file", "validate_plugin_draft",
 ]);
 
 const stateChangingTools = new Set([
   "switch_document", "create_document", "rename_document", "delete_document", "install_dependencies",
   "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import",
   "format_code", "undo_code", "redo_code",
-  "run_project", "save_project", "stop_execution",
+  "run_project", "save_project", "stop_execution", "import_installed_plugin_draft", "create_plugin_draft", "update_plugin_draft", "install_plugin_draft",
 ]);
 
 const codeOnlyTools = new Set([
@@ -92,7 +95,7 @@ const mutationTools = new Set([
   "format_code", "undo_code", "redo_code",
 ]);
 
-export const coreAgentTools: AgentTool[] = visualPythonTools.map((definition) => {
+export const coreAgentTools: AgentTool[] = [...visualPythonTools.map((definition) => {
   const name = definition.function.name;
   return {
     definition,
@@ -105,7 +108,7 @@ export const coreAgentTools: AgentTool[] = visualPythonTools.map((definition) =>
     mutation: mutationTools.has(name),
     ...(mutationTools.has(name) ? { verificationTool: "check_code" } : {}),
   };
-});
+}), ...pluginAuthoringTools];
 
 export function toolsForAgentMode(mode: "agent" | "plan"): AiChatToolDefinition[] {
   return (mode === "plan" ? coreAgentTools.filter((item) => item.readOnly) : coreAgentTools).map((item) => item.definition);
@@ -120,7 +123,7 @@ export function changesAgentState(name: string): boolean {
 }
 
 export function toolLabel(name: string): string {
-  return labels[name] || name;
+  return labels[name] || coreAgentTools.find((tool) => tool.definition.function.name === name)?.label || name;
 }
 
 export function isLongRunningTool(name: string): boolean {
@@ -128,5 +131,5 @@ export function isLongRunningTool(name: string): boolean {
 }
 
 export function requiresPermission(name: string): boolean {
-  return name === "delete_document" || name === "install_dependencies" || name === "run_project" || name === "save_project";
+  return name === "delete_document" || name === "install_dependencies" || name === "run_project" || name === "save_project" || name === "install_plugin_draft";
 }

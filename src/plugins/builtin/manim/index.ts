@@ -32,6 +32,11 @@ export const manimPlugin: VisualPythonPlugin = {
       tools: ["validate_scene", "render_manim", "inspect_rendered_output", "get_voiceover_context", "add_voiceover", "add_synchronized_voiceover", "check_voiceover"],
       fileTypes: [".py", ".vpy"],
       detect: "imports",
+      codegen: {
+        entryBlock: "visual_python_manim_scene",
+        statementInput: "BODY",
+        runtimeNames: ["self"],
+      },
     },
   },
   activate(context) {

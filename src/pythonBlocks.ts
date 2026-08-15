@@ -131,6 +131,7 @@ Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
   { type: "python_print", message0: "打印 %1", args0: [{ type: "input_value", name: "VALUE" }], previousStatement: null, nextStatement: null, colour: colours.inputOutput, tooltip: "在输出面板显示文本、数字或其他值。" },
   { type: "python_input", message0: "询问 %1 并等待输入", args0: [{ type: "input_value", name: "PROMPT", check: "String" }], output: null, colour: colours.inputOutput, tooltip: "显示提示文字并返回用户输入的文本。" },
   { type: "python_input_assign", message0: "询问 %2 并保存到 %1", args0: [{ type: "field_variable", name: "VAR", variable: "回答" }, { type: "input_value", name: "PROMPT", check: "String" }], previousStatement: null, nextStatement: null, colour: colours.inputOutput, tooltip: "显示提示文字，并把用户输入保存到所选变量。" },
+  { type: "python_input_typed_assign", message0: "询问 %2 转换为 %3 并保存到 %1", args0: [{ type: "field_variable", name: "VAR", variable: "回答" }, { type: "input_value", name: "PROMPT", check: "String" }, { type: "field_dropdown", name: "TYPE", options: [["整数", "int"], ["小数", "float"], ["文本", "str"]] }], previousStatement: null, nextStatement: null, colour: colours.inputOutput, tooltip: "读取用户输入后立即转换为整数、小数或文本，并保存到变量。" },
   { type: "python_import", message0: "导入模块 %1", args0: [{ type: "field_input", name: "MODULE", text: "math" }], previousStatement: null, nextStatement: null, colour: colours.module },
   { type: "python_from_import", message0: "从 %1 导入 %2", args0: [{ type: "field_input", name: "MODULE", text: "math" }, { type: "field_input", name: "NAME", text: "sqrt" }], previousStatement: null, nextStatement: null, colour: colours.module },
   { type: "python_raw_expression", message0: "Python 表达式 %1", args0: [{ type: "field_input", name: "CODE", text: "len(items)" }], output: null, colour: colours.module },
@@ -452,6 +453,131 @@ Blockly.Blocks.python_dynamic_dict = {
   updateShape_(this: any) { this.getInput("TAIL") && this.removeInput("TAIL"); for (let i = 0; this.getInput(`KEY${i}`); i++) { this.removeInput(`KEY${i}`); this.removeInput(`VALUE${i}`); } this.getInput("EMPTY") && this.removeInput("EMPTY"); if (!this.itemCount_) this.appendDummyInput("EMPTY").appendField("空"); for (let i = 0; i < this.itemCount_; i++) { const key = this.appendValueInput(`KEY${i}`); if (i > 0) key.appendField(","); this.appendValueInput(`VALUE${i}`).appendField(":"); } this.appendDummyInput("TAIL").appendField("}"); this.setInputsInline(true); },
 } as unknown as (typeof Blockly.Blocks)[string];
 
+Blockly.Blocks.python_print_many = {
+  init(this: any) {
+    this.setColour(colours.inputOutput);
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.appendDummyInput("HEAD").appendField("打印");
+    this.itemCount_ = 2;
+    this.updateShape_();
+    this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg));
+    this.setTooltip("打印多个值，可设置值之间的分隔符和结尾字符。使用积木上的变更按钮增减输出项。\n例如：print(姓名, 分数, sep=\" | \", end=\"\\n\")");
+  },
+  itemCount_: 2,
+  saveExtraState(this: any) { return { itemCount: this.itemCount_ }; },
+  loadExtraState(this: any, state: { itemCount?: number }) { this.itemCount_ = Math.max(1, state.itemCount ?? 2); this.updateShape_(); },
+  decompose: Blockly.Blocks.python_sequence_collection.decompose,
+  compose(this: any, container: Blockly.Block) {
+    const connections: Array<Blockly.Connection | null> = [];
+    let item = container.getInputTargetBlock("STACK");
+    while (item) {
+      if (!item.isInsertionMarker()) connections.push((item as Blockly.Block & { valueConnection_?: Blockly.Connection | null }).valueConnection_ ?? null);
+      item = item.getNextBlock();
+    }
+    for (let i = 0; i < this.itemCount_; i++) {
+      const target = this.getInput(`ITEM${i}`)?.connection?.targetConnection;
+      if (target && !connections.includes(target)) target.disconnect();
+    }
+    this.itemCount_ = Math.max(1, connections.length);
+    this.updateShape_();
+    connections.forEach((connection, index) => connection?.reconnect(this, `ITEM${index}`));
+  },
+  saveConnections(this: any, container: Blockly.Block) {
+    let item = container.getInputTargetBlock("STACK");
+    let index = 0;
+    while (item) {
+      if (!item.isInsertionMarker()) {
+        (item as Blockly.Block & { valueConnection_?: Blockly.Connection | null }).valueConnection_ = this.getInput(`ITEM${index}`)?.connection?.targetConnection;
+        index += 1;
+      }
+      item = item.getNextBlock();
+    }
+  },
+  updateShape_(this: any) {
+    for (let i = 0; this.getInput(`ITEM${i}`); i++) this.removeInput(`ITEM${i}`);
+    this.getInput("OPTIONS") && this.removeInput("OPTIONS");
+    for (let i = 0; i < this.itemCount_; i++) {
+      const input = this.appendValueInput(`ITEM${i}`);
+      if (i > 0) input.appendField(",");
+    }
+    this.appendDummyInput("OPTIONS")
+      .appendField("分隔")
+      .appendField(new Blockly.FieldTextInput(" "), "SEP")
+      .appendField("结尾")
+      .appendField(new Blockly.FieldTextInput("\\n"), "END");
+    this.setInputsInline(true);
+  },
+} as unknown as (typeof Blockly.Blocks)[string];
+
+const inputTypeOptions: Blockly.MenuOption[] = [["文本", "str"], ["整数", "int"], ["小数", "float"]];
+
+Blockly.Blocks.python_input_many_assign = {
+  init(this: any) {
+    this.setColour(colours.inputOutput);
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.variableNames_ = ["第一项", "第二项"];
+    this.itemCount_ = 2;
+    this.appendValueInput("PROMPT").setCheck("String").appendField("询问");
+    this.updateShape_();
+    this.setMutator(createMutatorIcon(["python_input_target_item"], this as Blockly.BlockSvg));
+    this.setTooltip("读取一行输入并按分隔符拆分，分别保存到多个变量。整数和小数会自动转换。\n分隔符留空时使用 Python 的默认空白分隔。\n使用积木上的变更按钮增减变量。\n");
+  },
+  itemCount_: 2,
+  variableNames_: ["第一项", "第二项"],
+  saveExtraState(this: any) { return { itemCount: this.itemCount_, variables: this.variableNames_ }; },
+  loadExtraState(this: any, state: { itemCount?: number; variables?: string[] }) {
+    this.itemCount_ = Math.max(1, state.itemCount ?? 2);
+    this.variableNames_ = Array.from({ length: this.itemCount_ }, (_, index) => state.variables?.[index] || `第${index + 1}项`);
+    this.updateShape_();
+  },
+  decompose(this: any, workspace: Blockly.WorkspaceSvg) {
+    const container = workspace.newBlock("python_input_target_container");
+    container.initSvg();
+    let connection = container.getInput("STACK")!.connection!;
+    for (let index = 0; index < this.itemCount_; index++) {
+      const item = workspace.newBlock("python_input_target_item");
+      item.initSvg();
+      item.setFieldValue(this.getFieldValue(`VAR${index}`) || this.variableNames_[index] || `第${index + 1}项`, "VAR");
+      connection.connect(item.previousConnection!);
+      connection = item.nextConnection!;
+    }
+    return container;
+  },
+  compose(this: any, container: Blockly.Block) {
+    const names: string[] = [];
+    let item = container.getInputTargetBlock("STACK");
+    while (item) {
+      if (!item.isInsertionMarker()) names.push(String(item.getFieldValue("VAR") || `第${names.length + 1}项`));
+      item = item.getNextBlock();
+    }
+    this.itemCount_ = Math.max(1, names.length);
+    this.variableNames_ = names.length ? names : ["第一项"];
+    this.updateShape_();
+  },
+  updateShape_(this: any) {
+    const separator = String(this.getFieldValue("SEP") ?? "");
+    const type = String(this.getFieldValue("TYPE") || "str");
+    this.getInput("TARGETS") && this.removeInput("TARGETS");
+    this.getInput("OPTIONS") && this.removeInput("OPTIONS");
+    const targets = this.appendDummyInput("TARGETS").appendField("保存到");
+    for (let index = 0; index < this.itemCount_; index++) {
+      targets.appendField(new Blockly.FieldVariable(this.variableNames_[index] || `第${index + 1}项`), `VAR${index}`);
+      if (index < this.itemCount_ - 1) targets.appendField(",");
+    }
+    this.appendDummyInput("OPTIONS")
+      .appendField("分隔")
+      .appendField(new Blockly.FieldTextInput(separator), "SEP")
+      .appendField("类型")
+      .appendField(new Blockly.FieldDropdown(inputTypeOptions), "TYPE");
+    this.setFieldValue(["str", "int", "float"].includes(type) ? type : "str", "TYPE");
+    this.setInputsInline(true);
+  },
+} as unknown as (typeof Blockly.Blocks)[string];
+Blockly.Blocks.python_input_target_container = { init(this: Blockly.Block) { this.setColour(colours.inputOutput); this.appendDummyInput().appendField("输入变量"); this.appendStatementInput("STACK"); this.contextMenu = false; } };
+Blockly.Blocks.python_input_target_item = { init(this: Blockly.Block) { this.setColour(colours.inputOutput); this.appendDummyInput().appendField(new Blockly.FieldVariable("变量"), "VAR"); this.setPreviousStatement(true); this.setNextStatement(true); this.contextMenu = false; } };
+
 type ParameterSpec = {
   kind: "positional_only" | "positional" | "default" | "args" | "keyword_only" | "keyword_only_default" | "kwargs";
   name: string;
@@ -721,8 +847,28 @@ const safeAnnotation = (input: string, fallback = "object") => isPythonAnnotatio
 const suite = (generator: typeof pythonGenerator, block: Blockly.Block, name: string) => generator.statementToCode(block, name) || `${generator.INDENT}pass\n`;
 
 pythonGenerator.forBlock.python_print = (block, generator) => `print(${value(generator, block, "VALUE", "''")})\n`;
+pythonGenerator.forBlock.python_print_many = (block, generator) => {
+  const count = Math.max(1, (block as Blockly.Block & { itemCount_?: number }).itemCount_ ?? 2);
+  const values = Array.from({ length: count }, (_, index) => value(generator, block, `ITEM${index}`, "None"));
+  const separator = JSON.stringify(String(block.getFieldValue("SEP") ?? " "));
+  const ending = JSON.stringify(String(block.getFieldValue("END") ?? "\\n"));
+  return `print(${values.join(", ")}, sep=${separator}, end=${ending})\n`;
+};
 pythonGenerator.forBlock.python_input = (block, generator) => [`input(${value(generator, block, "PROMPT", "''")})`, Order.FUNCTION_CALL];
 pythonGenerator.forBlock.python_input_assign = (block, generator) => `${variableName(generator, block, "VAR", "回答")} = input(${value(generator, block, "PROMPT", "''")})\n`;
+pythonGenerator.forBlock.python_input_typed_assign = (block, generator) => {
+  const type = ["int", "float", "str"].includes(block.getFieldValue("TYPE")) ? block.getFieldValue("TYPE") : "str";
+  return `${variableName(generator, block, "VAR", "回答")} = ${type}(input(${value(generator, block, "PROMPT", "''")}))\n`;
+};
+pythonGenerator.forBlock.python_input_many_assign = (block, generator) => {
+  const count = Math.max(1, (block as Blockly.Block & { itemCount_?: number }).itemCount_ ?? 2);
+  const names = Array.from({ length: count }, (_, index) => variableName(generator, block, `VAR${index}`, `第${index + 1}项`));
+  const separator = String(block.getFieldValue("SEP") ?? "");
+  const type = ["str", "int", "float"].includes(block.getFieldValue("TYPE")) ? block.getFieldValue("TYPE") : "str";
+  const split = `input(${value(generator, block, "PROMPT", "''")}).split(${separator ? JSON.stringify(separator) : ""})`;
+  const source = type === "str" ? split : `map(${type}, ${split})`;
+  return `${names.join(", ")} = ${source}\n`;
+};
 pythonGenerator.forBlock.python_import = (block) => `import ${safeIdentifier(block.getFieldValue("MODULE"), "module")}\n`;
 pythonGenerator.forBlock.python_from_import = (block) => `from ${safeIdentifier(block.getFieldValue("MODULE"), "module")} import ${safeIdentifier(block.getFieldValue("NAME"), "name")}\n`;
 pythonGenerator.forBlock.python_raw_expression = (block) => [block.getFieldValue("CODE") || "None", Order.ATOMIC];
@@ -1081,9 +1227,19 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
   kind: "categoryToolbox",
   contents: [
     { kind: "category", name: "输入输出", colour: "#2f9e8f", contents: [
+      toolboxSectionLabel("基础输出"),
       { kind: "block", type: "python_print", inputs: { VALUE: textShadow("你好，世界") } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("多值输出"),
+      { kind: "block", type: "python_print_many", extraState: { itemCount: 2 }, fields: { SEP: " | ", END: "\\n" }, inputs: { ITEM0: textShadow("姓名"), ITEM1: numberShadow(95) } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("用户输入"),
       { kind: "block", type: "python_input_assign", inputs: { PROMPT: textShadow("请输入：") } },
       { kind: "block", type: "python_input", inputs: { PROMPT: textShadow("请输入：") } },
+      { kind: "block", type: "python_input_typed_assign", fields: { TYPE: "int" }, inputs: { PROMPT: textShadow("请输入数字：") } },
+      { kind: "block", type: "python_input_many_assign", extraState: { itemCount: 2, variables: ["第一个数", "第二个数"] }, fields: { SEP: "", TYPE: "int" }, inputs: { PROMPT: textShadow("请输入两个数字：") } },
+      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("类型处理"),
       { kind: "block", type: "python_length", inputs: { VALUE: textShadow("示例文本") } },
       { kind: "block", type: "python_convert", fields: { TYPE: "int" }, inputs: { VALUE: textShadow("42") } },
     ] },

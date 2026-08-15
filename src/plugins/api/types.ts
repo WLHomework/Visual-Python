@@ -21,6 +21,11 @@ export interface PluginManifest {
     tools?: string[];
     fileTypes?: string[];
     detect?: "imports" | "content" | "project";
+    codegen?: {
+      entryBlock?: string;
+      statementInput?: string;
+      runtimeNames?: string[];
+    };
   };
 }
 

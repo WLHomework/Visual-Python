@@ -13,6 +13,14 @@
     "fileTypes": [
       ".py"
     ],
-    "detect": "imports"
+    "detect": "imports",
+    "codegen": {
+      "entryBlock": "visual_python_turtle_program",
+      "statementInput": "BODY",
+      "runtimeNames": [
+        "screen",
+        "pen"
+      ]
+    }
   }
 }

@@ -74,18 +74,27 @@ export function compactAgentAssistantMessage(content: string): string {
   return truncate(content.trim(), 1_200);
 }
 
-function compactResultValue(value: unknown, key = ""): unknown {
+function compactResultValue(value: unknown, key = "", stringLimit = 2_000, arrayLimit = 40): unknown {
   if (key === "__codeChange") return undefined;
-  if (typeof value === "string") return truncate(value, key === "code" ? 6_000 : 2_000);
-  if (Array.isArray(value)) return value.slice(0, 40).map((item) => compactResultValue(item));
+  if (typeof value === "string") return truncate(value, key === "code" ? stringLimit * 3 : stringLimit);
+  if (Array.isArray(value)) return value.slice(0, arrayLimit).map((item) => compactResultValue(item, "", stringLimit, arrayLimit));
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .map(([entryKey, entryValue]) => [entryKey, compactResultValue(entryValue, entryKey)] as const)
+    .map(([entryKey, entryValue]) => [entryKey, compactResultValue(entryValue, entryKey, stringLimit, arrayLimit)] as const)
     .filter(([, entryValue]) => entryValue !== undefined));
+}
+
+function boundedResultJson(result: Record<string, unknown>, max = 6_000): string {
+  for (const [stringLimit, arrayLimit] of [[2_000, 40], [1_000, 20], [500, 10], [200, 5]] as const) {
+    const serialized = JSON.stringify(compactResultValue(result, "", stringLimit, arrayLimit));
+    if (serialized.length <= max) return serialized;
+  }
+  return JSON.stringify({ message: "工具结果过大，已省略详细内容", truncated: true });
 }
 
 export function compactAgentToolResult(_toolName: string, result: Record<string, unknown>): string {
   try {
+    if (_toolName === "read_plugin_draft_file") return JSON.stringify(result);
     if (_toolName === "add_workspace_block") {
       const compact = Object.fromEntries([
         ["ok", result.ok],
@@ -95,9 +104,9 @@ export function compactAgentToolResult(_toolName: string, result: Record<string,
         ["error", result.error],
         ["detail", result.detail],
       ].filter(([, value]) => value !== undefined));
-      return truncate(JSON.stringify(compact), 2_000);
+      return boundedResultJson(compact, 2_000);
     }
-    return truncate(JSON.stringify(compactResultValue(result)), 6_000);
+    return boundedResultJson(result);
   } catch {
     return JSON.stringify({ ok: false, error: "工具返回结果无法序列化" });
   }

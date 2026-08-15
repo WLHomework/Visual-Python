@@ -1,9 +1,65 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import { AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, storeConversationState, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
+import { describe, expect, it, vi } from "vitest";
+import { AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
+import { parseAgentFollowUpSuggestions } from "./agentV2";
 import type { AiAgentActivity } from "./agentV2";
 
 describe("AI assistant Markdown", () => {
+  it("renders only the centered project-wide suggestion buttons in the welcome state", () => {
+    const html = renderToStaticMarkup(<AiAssistantWelcome onSelect={() => undefined}/>);
+
+    expect(html).toContain('class="ai-agent-empty"');
+    expect(html).toContain("创建一个基础程序");
+    expect(html).toContain("检查当前代码");
+    expect(html).toContain("修改当前文档");
+    expect(html).not.toContain("AI 编程助手");
+    expect(html).not.toContain("基于当前文档处理代码、运行和插件任务");
+    expect(html).not.toContain("勾股定理");
+  });
+
+  it("reuses the same suggestion buttons after a run finishes", () => {
+    const html = renderToStaticMarkup(<AiAssistantSuggestionButtons onSelect={() => undefined}/>);
+
+    expect(html.match(/<button/g)).toHaveLength(aiAssistantSuggestions.length);
+    expect(shouldShowAiFollowUpSuggestions([{ status: "running" }])).toBe(false);
+    expect(shouldShowAiFollowUpSuggestions([{ status: "done" }])).toBe(true);
+    expect(shouldShowAiFollowUpSuggestions([{ status: "error" }])).toBe(true);
+  });
+
+  it("fills and focuses the composer when a suggestion is selected", () => {
+    const setPrompt = vi.fn();
+    const focusPrompt = vi.fn();
+
+    applyAiAssistantSuggestion(aiAssistantSuggestions[1].prompt, setPrompt, focusPrompt);
+
+    expect(setPrompt).toHaveBeenCalledWith(aiAssistantSuggestions[1].prompt);
+    expect(focusPrompt).toHaveBeenCalledOnce();
+  });
+
+  it("uses model-provided follow-up suggestions without showing metadata", () => {
+    const parsed = parseAgentFollowUpSuggestions("已完成。\n<!-- visual-python-followups: [{\"label\":\"检查结果\",\"prompt\":\"检查当前结果\"},{\"label\":\"继续完善\",\"prompt\":\"继续完善当前结果\"}] -->");
+
+    expect(parsed.suggestions).toEqual([
+      { label: "检查结果", prompt: "检查当前结果" },
+      { label: "继续完善", prompt: "继续完善当前结果" },
+    ]);
+    expect(parsed.content).toBe("已完成。");
+  });
+
+  it("builds follow-up suggestions from the current work instead of fixed labels", () => {
+    const suggestions = buildAiFollowUpSuggestions({ activities: [{ id: "edit", kind: "tool", status: "done", title: "修改代码", toolName: "edit_code" }] }, "MainScene");
+
+    expect(suggestions).toHaveLength(3);
+    expect(suggestions[0].prompt).toContain("MainScene");
+    expect(suggestions.map(({ prompt }) => prompt)).not.toEqual(aiAssistantSuggestions.map(({ prompt }) => prompt));
+  });
+
+  it("calculates a moving thumb from the real scroll geometry", () => {
+    expect(getAiThreadScrollbarMetrics({ scrollTop: 0, scrollHeight: 1000, clientHeight: 200, trackHeight: 400 })).toEqual({ visible: true, thumbHeight: 80, thumbTop: 0, maxThumbTop: 320 });
+    expect(getAiThreadScrollbarMetrics({ scrollTop: 400, scrollHeight: 1000, clientHeight: 200, trackHeight: 400 })).toEqual({ visible: true, thumbHeight: 80, thumbTop: 160, maxThumbTop: 320 });
+    expect(getAiThreadScrollbarMetrics({ scrollTop: 0, scrollHeight: 200, clientHeight: 200, trackHeight: 400 })).toEqual({ visible: false, thumbHeight: 400, thumbTop: 0, maxThumbTop: 0 });
+  });
+
   it("clamps wheel scrolling to the AI thread bounds", () => {
     expect(nextAiThreadScrollTop(40, -100, 200, 600)).toBe(0);
     expect(nextAiThreadScrollTop(400, 300, 200, 600)).toBe(400);
@@ -34,6 +90,24 @@ describe("AI assistant Markdown", () => {
     expect(html).toContain("katex-display");
     expect(html).toContain("mfrac");
     expect(html).not.toContain("$\\frac");
+  });
+
+  it("renders Chinese text in math mode without flooding the console", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const html = renderToStaticMarkup(<MarkdownContent>{"$中文变量 + x = 1$"}</MarkdownContent>);
+
+    expect(html).toContain("katex");
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("unicodeTextInMathMode"));
+    warn.mockRestore();
+  });
+
+  it("does not warn for common Unicode punctuation inside math mode", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const html = renderToStaticMarkup(<MarkdownContent>{"$x — y$"}</MarkdownContent>);
+
+    expect(html).toContain("katex");
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("[unknownSymbol]"));
+    warn.mockRestore();
   });
 
   it("keeps LaTeX delimiters literal inside code fences", () => {
@@ -139,7 +213,7 @@ describe("AI assistant Markdown", () => {
     })).toBe("TypeError: Unexpected argument Circle passed to Scene.play().");
   });
 
-  it("does not expose malformed tool protocol or JSON fragments", () => {
+  it("keeps malformed tool protocol hidden but recovers a concrete truncated error", () => {
     expect(formatAgentToolResult({
       id: "protocol-error",
       kind: "tool",
@@ -155,7 +229,18 @@ describe("AI assistant Markdown", () => {
       title: "检查代码",
       toolName: "check_code",
       result: '{"ok":false,"error":"SyntaxError: invalid syntax"',
-    })).toBe("工具返回格式无效");
+    })).toBe("SyntaxError: invalid syntax");
+  });
+
+  it("does not show a format error for a truncated successful plugin draft result", () => {
+    expect(formatAgentToolResult({
+      id: "plugin-draft-update",
+      kind: "tool",
+      status: "done",
+      title: "修改插件草稿",
+      toolName: "update_plugin_draft",
+      result: '{"updated":true,"files":{"index.js":"export default { activate() {\n[结果已截断]',
+    })).toBeNull();
   });
 
   it("renders a failed tool once with its concise reason", () => {
@@ -407,6 +492,22 @@ describe("AI assistant activity grouping", () => {
       .toEqual(["thinking-1", "message-1"]);
   });
 
+  it("keeps reasoning from each Agent round in its own thinking panel", () => {
+    const activities: AiAgentActivity[] = [
+      { id: "message-1", kind: "message", channel: "message", status: "done", title: "先读取工程" },
+      { id: "thinking-1", kind: "message", channel: "thinking", status: "done", title: "先检查当前代码。" },
+      { id: "message-2", kind: "message", channel: "message", status: "running", title: "准备修改" },
+      { id: "thinking-2", kind: "message", channel: "thinking", status: "running", title: "根据检查结果进行修改。" },
+    ];
+
+    const grouped = groupAgentActivities(activities);
+    const thinking = grouped.filter((entry) => entry.kind === "activity" && entry.activity.channel === "thinking");
+
+    expect(thinking).toHaveLength(2);
+    expect(thinking.map((entry) => entry.kind === "activity" ? entry.activity.id : entry.id))
+      .toEqual(["thinking-1", "thinking-2"]);
+  });
+
   it("summarizes routine tools by stable agent stages", () => {
     const activities: AiAgentActivity[] = [
       { id: "1", kind: "tool", status: "done", title: "读取项目", toolName: "get_context" },
@@ -478,9 +579,64 @@ describe("AI assistant scroll position", () => {
     expect(scrollThreadToLatest(thread, true)).toBe(true);
     expect(thread.scrollTop).toBe(900);
   });
+
+  it("uses a non-passive wheel listener before preventing native scrolling", () => {
+    let listener: ((event: WheelEvent) => void) | undefined;
+    const thread = {
+      scrollTop: 100,
+      scrollHeight: 600,
+      clientHeight: 200,
+      addEventListener: vi.fn((_type: string, callback: (event: WheelEvent) => void) => { listener = callback; }),
+      removeEventListener: vi.fn(),
+    };
+    const onLeaveLatest = vi.fn();
+    const cleanup = attachAiThreadWheelHandler(thread, onLeaveLatest);
+    const event = { deltaY: 50, deltaMode: 0, preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as WheelEvent;
+
+    expect(thread.addEventListener).toHaveBeenCalledWith("wheel", expect.any(Function), { passive: false });
+    listener?.(event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(thread.scrollTop).toBe(150);
+    expect(onLeaveLatest).toHaveBeenCalledOnce();
+    cleanup();
+    expect(thread.removeEventListener).toHaveBeenCalledWith("wheel", expect.any(Function));
+  });
+
+  it("keeps wheel input at the bottom instead of escaping to the outer page", () => {
+    let listener: ((event: WheelEvent) => void) | undefined;
+    const thread = {
+      scrollTop: 400,
+      scrollHeight: 600,
+      clientHeight: 200,
+      addEventListener: vi.fn((_type: string, callback: (event: WheelEvent) => void) => { listener = callback; }),
+      removeEventListener: vi.fn(),
+    };
+    const onLeaveLatest = vi.fn();
+    attachAiThreadWheelHandler(thread, onLeaveLatest);
+    const event = { deltaY: 80, deltaMode: 0, preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as WheelEvent;
+
+    listener?.(event);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(thread.scrollTop).toBe(400);
+    expect(onLeaveLatest).not.toHaveBeenCalled();
+  });
 });
 
 describe("AI assistant conversation persistence", () => {
+  it("merges legacy mode conversations into one project conversation space", () => {
+    const merged = mergeAiConversationStates(
+      { activeId: "project", conversations: [{ id: "project", title: "新对话", createdAt: 3, updatedAt: 3, runs: [] }] },
+      [
+        { activeId: "code", conversations: [{ id: "code", title: "纯代码", createdAt: 1, updatedAt: 1, runs: [{ id: 1, prompt: "检查代码", mode: "agent", status: "done", activities: [] }] }] },
+        { activeId: "visual", conversations: [{ id: "visual", title: "图形化", createdAt: 2, updatedAt: 2, runs: [{ id: 2, prompt: "创建积木", mode: "agent", status: "done", activities: [] }] }] },
+      ],
+    );
+
+    expect(merged.conversations.map((conversation) => conversation.id)).toEqual(["code", "visual"]);
+    expect(merged.activeId).toBe("visual");
+  });
+
   const conversationState = (activity: AiAgentActivity) => ({
     activeId: "conversation-current",
     conversations: [{
@@ -497,6 +653,11 @@ describe("AI assistant conversation persistence", () => {
         result: { summary: "Done", toolCallCount: 1, lineCount: 10 },
       }],
     }],
+  });
+
+  it("persists completed and queued runs but skips rapidly changing running runs", () => {
+    expect(shouldPersistConversationRuns([{ status: "done" }, { status: "queued" }])).toBe(true);
+    expect(shouldPersistConversationRuns([{ status: "done" }, { status: "running" }])).toBe(false);
   });
 
   class MemoryStorage {

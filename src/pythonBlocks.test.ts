@@ -5,7 +5,7 @@ import { getManimVoiceoverContextWarning, getPythonCollectionTypeWarning, getPyt
 
 const variableFields: Record<string, string[]> = {
   variables_set: ["VAR"], variables_get: ["VAR"],
-  python_input_assign: ["VAR"], python_for_in: ["VAR"], python_for_enumerate: ["INDEX", "VALUE"], python_for_else: ["VAR"],
+  python_input_assign: ["VAR"], python_input_many_assign: ["VAR0", "VAR1", "VAR2"], python_csv_read: ["VAR"], python_for_in: ["VAR"], python_for_enumerate: ["INDEX", "VALUE"], python_for_else: ["VAR"],
   python_try_except: ["ALIAS"], python_try_full: ["ALIAS"], python_with: ["ALIAS"],
   python_variable_target: ["VAR"], python_annotated_assign: ["VAR"], python_walrus: ["VAR"],
   python_generator_expression: ["VAR"], python_with_two: ["ALIAS1", "ALIAS2"],
@@ -193,6 +193,48 @@ describe("Python block generators", () => {
     expect(generatePython(state(loop))).toContain("for item in range(3):\n  answer = input('请输入：')");
   });
 
+  it("generates typed input assignments", () => {
+    const input = { type: "python_input_typed_assign", fields: { VAR: { name: "age" }, TYPE: "int" }, inputs: { PROMPT: text("年龄：") } };
+    expect(generatePython(state(input))).toBe("age = int(input('年龄：'))\n");
+  });
+
+  it("generates multi-value print with separator and ending text", () => {
+    const printMany = {
+      type: "python_print_many",
+      extraState: { itemCount: 2 },
+      fields: { SEP: " | ", END: "\\n" },
+      inputs: { ITEM0: text("姓名"), ITEM1: expression("score") },
+    };
+    expect(generatePython(state(printMany))).toBe("print('姓名', score, sep=\" | \", end=\"\\\\n\")\n");
+  });
+
+  it("generates multi-value text and numeric input assignments", () => {
+    const numericInput = {
+      type: "python_input_many_assign",
+      extraState: { itemCount: 2, variables: ["x", "y"] },
+      fields: { SEP: "", TYPE: "int", VAR0: "x", VAR1: "y" },
+      inputs: { PROMPT: text("请输入两个数字：") },
+    };
+    expect(generatePython(state(numericInput))).toBe("x, y = map(int, input('请输入两个数字：').split())\n");
+
+    const textInput = {
+      type: "python_input_many_assign",
+      extraState: { itemCount: 2, variables: ["first", "second"] },
+      fields: { SEP: ",", TYPE: "str", VAR0: "first", VAR1: "second" },
+      inputs: { PROMPT: text("请输入姓名：") },
+    };
+    expect(generatePython(state(textInput))).toBe("first, second = input('请输入姓名：').split(\",\")\n");
+  });
+
+  it("groups input and output blocks with labels instead of nested categories", () => {
+    const inputOutput = (toolbox as any).contents.find((item: any) => item.name === "输入输出");
+    expect(inputOutput.contents.filter((item: any) => item.kind === "label").map((item: any) => item.text)).toEqual(["基础输出", "多值输出", "用户输入", "类型处理"]);
+    expect(inputOutput.contents.filter((item: any) => item.kind === "block").map((item: any) => item.type)).toEqual([
+      "python_print", "python_print_many", "python_input_assign", "python_input", "python_input_typed_assign", "python_input_many_assign", "python_length", "python_convert",
+    ]);
+    expect(inputOutput.contents.some((item: any) => item.kind === "category")).toBe(false);
+  });
+
   it("generates Python math and logical operators", () => {
     expect(generatePython(state({ type: "python_floor_divide", inputs: { A: number(7), B: number(2) } }))).toBe("7 // 2\n");
     expect(generatePython(state({ type: "python_bitwise", fields: { OP: "<<" }, inputs: { A: number(2), B: number(3) } }))).toBe("2 << 3\n");
@@ -280,6 +322,17 @@ describe("Python block generators", () => {
     expect(generatePython(state({ type: "python_json_loads", inputs: { TEXT: expression("payload") } }))).toBe(withImport("json", "json.loads(payload)\n"));
   });
 
+  it("generates structured output, command-line input and CSV file blocks", () => {
+    expect(generatePython(state({ type: "python_pprint", inputs: { VALUE: expression("data") } }))).toBe(withImport("pprint", "pprint.pprint(data)\n"));
+    expect(generatePython(state({ type: "python_sys_argv" }))).toBe(withImport("sys", "sys.argv\n"));
+    expect(generatePython(state({ type: "python_sys_exit", inputs: { CODE: number(1) } }))).toBe(withImport("sys", "sys.exit(1)\n"));
+
+    const csvRead = { type: "python_csv_read", fields: { VAR: { name: "rows" }, DELIMITER: "," }, inputs: { PATH: text("scores.csv") } };
+    expect(generatePython(state(csvRead))).toBe("import csv\n\nwith open('scores.csv', \"r\", newline=\"\", encoding=\"utf-8\") as 文件:\n  rows = list(csv.reader(文件, delimiter=\",\"))\n");
+    const csvWrite = { type: "python_csv_write", fields: { DELIMITER: ";" }, inputs: { PATH: text("scores.csv"), DATA: expression("rows") } };
+    expect(generatePython(state(csvWrite))).toBe(withImport("csv", "with open('scores.csv', \"w\", newline=\"\", encoding=\"utf-8\") as 文件:\n  csv.writer(文件, delimiter=\";\").writerows(rows)\n"));
+  });
+
   it("generates datetime, pathlib and os standard library blocks", () => {
     expect(generatePython(state({ type: "python_standard_library_import", fields: { MODULE: "datetime" } }))).toBe("import datetime\n");
     expect(generatePython(state({ type: "python_datetime_now", fields: { MODE: "now" } }))).toBe(withImport("datetime", "datetime.datetime.now()\n"));
@@ -287,6 +340,7 @@ describe("Python block generators", () => {
     expect(generatePython(state({ type: "python_datetime_parse", inputs: { TEXT: text("2026-07-16"), FORMAT: text("%Y-%m-%d") } }))).toBe(withImport("datetime", "datetime.datetime.strptime('2026-07-16', '%Y-%m-%d')\n"));
     expect(generatePython(state({ type: "python_datetime_format", inputs: { VALUE: expression("created_at"), FORMAT: text("%H:%M") } }))).toBe("created_at.strftime('%H:%M')\n");
     expect(generatePython(state({ type: "python_datetime_timedelta", inputs: { DAYS: number(2), HOURS: number(3) } }))).toBe(withImport("datetime", "datetime.timedelta(days=2, hours=3)\n"));
+    expect(generatePython(state({ type: "python_time_sleep", inputs: { SECONDS: number(2) } }))).toBe(withImport("time", "time.sleep(2)\n"));
     expect(generatePython(state({ type: "python_path_create", inputs: { VALUE: text("output") } }))).toBe(withImport("pathlib", "pathlib.Path('output')\n"));
     expect(generatePython(state({ type: "python_path_join", inputs: { BASE: expression("base_path"), CHILD: text("scene.py") } }))).toBe("base_path / 'scene.py'\n");
     expect(generatePython(state({ type: "python_path_check", fields: { METHOD: "is_file" }, inputs: { PATH: expression("path") } }))).toBe("path.is_file()\n");
@@ -924,7 +978,7 @@ describe("Python block generators", () => {
     expect(standardLibrary).toBeTruthy();
     expect(standardLibrary.contents.some((item: any) => item.kind === "category")).toBe(false);
     expect(standardLibrary.contents.filter((item: any) => item.kind === "label").map((item: any) => item.text)).toEqual([
-      "数学", "随机", "JSON", "日期与时间", "系统", "正则表达式", "集合工具",
+      "输入输出", "数学", "随机", "JSON", "日期与时间", "系统", "正则表达式", "集合工具",
     ]);
     expect(standardLibrary.contents.some((item: any) => item.type === "python_standard_library_import")).toBe(false);
     expect(JSON.stringify(toolbox)).toContain("你好，世界");
@@ -1137,6 +1191,8 @@ describe("Python block generators", () => {
 
     const timeDelta = workspace.newBlock("python_datetime_timedelta");
     expect(getPythonRequiredInputWarning(timeDelta)).toBeNull();
+    const timeSleep = workspace.newBlock("python_time_sleep");
+    expect(getPythonRequiredInputWarning(timeSleep)).toBe("缺少必填输入：等待秒数。");
     const listDirectory = workspace.newBlock("python_os_listdir");
     expect(getPythonRequiredInputWarning(listDirectory)).toBeNull();
     const readPath = workspace.newBlock("python_path_read_text");

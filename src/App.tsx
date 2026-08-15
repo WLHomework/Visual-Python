@@ -14,7 +14,8 @@ import { AiAssistantPanel } from "./AiAssistantPanel";
 import { AiModelSettings } from "./AiModelSettings";
 import { createVisualPythonHostAdapter, runVisualPythonAgent, type AgentActivityEvent, type AgentTokenUsage, type AiAgentActivity, type AiAgentMode, type AiAgentPermissionRequest, type AiAgentPlanStep, type AiAgentProgress, type AiAgentResult, type AiAgentToolName, type AiCodeChangeSnapshot, type AiConversationTurn, type AiTaskChangeSnapshot } from "./agentV2";
 import { blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockInputs } from "./agentV2/blocklyHost";
-import type { AiAgentPermissionMode } from "./aiConfig";
+import { createPluginDraftStore, validatePluginDraft, type PluginDraft } from "./agentV2/pluginAuthoring";
+import type { AiAgentPermissionMode, AiReasoningEffort } from "./aiConfig";
 import { createAiConversationScope } from "./aiConversationContext";
 import { inspectVoiceovers } from "./aiVoiceover";
 import { defaultVisualThemeId, findWorkspaceBlockCodeRange, generateWorkspacePython, generateWorkspacePythonWithBlockMap, registerUsedVariablesToolbox, starterState, toolbox, visualPythonThemes, type VisualThemeId } from "./pythonBlocks";
@@ -30,6 +31,7 @@ import { formatPyrightDiagnostic } from "./pyrightDiagnostics";
 import type { ExampleProject } from "./examples/types";
 import { ensureProjectPlugins, getActiveAgentCapabilities, getPluginEnabledPreference, isCorePlugin, pluginRegistry, setPluginEnabled } from "./plugins";
 import type { ExternalPluginDiscovery, ExternalPluginDiscoveryResponse, ExternalPluginEntry, PluginRecord, VisualPythonPlugin } from "./plugins/api/types";
+import { validatePluginGeneratedPython } from "./plugins/core/pluginGeneratedCodeValidation";
 import { getManimRenderConfig, setManimRenderConfig, subscribeManimRenderConfig, type ManimRenderConfig } from "./plugins/builtin/manim/renderConfig";
 import { createManimCapabilityExecutor } from "./plugins/builtin/manim/agentRuntime";
 import { manimPlugin } from "./plugins/builtin/manim";
@@ -1018,6 +1020,7 @@ export default function App() {
   const startupProjectRequest = useRef<Promise<string | null> | null>(null);
   const startupProjectOpened = useRef(false);
   const externalRestoreStarted = useRef(false);
+  const pluginDraftStoreRef = useRef(createPluginDraftStore());
   const packageInstallStopping = useRef(false);
   const [activePanel, setActivePanel] = useState<ConsolePanel>("output");
   const [aiAssistantOpen, setAiAssistantOpen] = useState(() => localStorage.getItem("visual-python:ai-assistant-open") === "true");
@@ -1796,6 +1799,7 @@ export default function App() {
       blockSearchDefinition.current = nextToolbox;
       blockSearchLabelCache.current.clear();
       ws.updateToolbox(nextToolbox);
+      ws.getToolbox()?.refreshSelection();
       requestAnimationFrame(() => {
         if (workspace.current !== ws) return;
         setBlockToolboxWidth(ws.getToolbox()?.getWidth() ?? 0);
@@ -1933,6 +1937,13 @@ export default function App() {
 
   const activeCode = workspaceMode === "code" ? sourceCode : code;
   const effectiveBottomPanelOpen = bottomPanelOpen;
+  const aiConversationScope = createAiConversationScope(projectId, "assistant");
+  const aiConversationMigrationScopes = [
+    createAiConversationScope(projectId, "workspace:visual"),
+    createAiConversationScope(projectId, "workspace:split"),
+    createAiConversationScope(projectId, "code:no-document"),
+    ...sceneDocuments.map((document) => createAiConversationScope(projectId, `code:${document.id}`)),
+  ];
 
   const openConsolePanel = useCallback((panel: ConsolePanel) => {
     setActivePanel(panel);
@@ -3309,11 +3320,11 @@ export default function App() {
 
   useEffect(() => { void detectPythonEnvironments(); }, []);
 
-  const loadExternalPlugin = useCallback(async (entry: ExternalPluginDiscovery, options: { promptForTrust: boolean; silent?: boolean }) => {
+  const loadExternalPlugin = useCallback(async (entry: ExternalPluginDiscovery, options: { promptForTrust: boolean; silent?: boolean; trustConfirmed?: boolean }) => {
     const pluginId = entry.manifest?.id;
     if (!entry.valid || !pluginId) return false;
     if (pluginRegistry.getRecord(pluginId)) return true;
-    if (!trustedExternalPlugins[pluginId]) {
+    if (!trustedExternalPlugins[pluginId] && !options.trustConfirmed) {
       if (!options.promptForTrust) return false;
       if (!(await requestConfirmation({ title: "信任并启用外部插件？", message: `“${entry.manifest?.name || pluginId}”将获得执行本地 JavaScript 代码的权限。请仅启用来源可信的插件。`, confirmLabel: "信任并启用", tone: "warning" }))) return false;
     }
@@ -4945,6 +4956,7 @@ export default function App() {
     prompt,
     history,
     agentMode,
+    reasoningEffort,
     onActivity,
     onProgress,
     permissionMode,
@@ -4954,6 +4966,7 @@ export default function App() {
     prompt: string;
     history: AiConversationTurn[];
     agentMode: AiAgentMode;
+    reasoningEffort: AiReasoningEffort;
     initialPlan?: AiAgentPlanStep[];
     onActivity: (activity: AiAgentActivity) => void;
     onProgress: (progress: AiAgentProgress) => void;
@@ -5014,6 +5027,7 @@ export default function App() {
         prompt,
         history,
         mode: agentMode,
+        reasoningEffort,
         onEvent: reportAgentV2Event,
         onProgress: reportAgentV2Progress,
         permissionMode,
@@ -5059,9 +5073,57 @@ export default function App() {
           saveProject,
           invoke,
           listen,
+          pluginDraftStore: pluginDraftStoreRef.current,
+          listInstalledPlugins: async () => {
+            const discovery = await invoke<ExternalPluginDiscoveryResponse>("discover_external_plugins");
+            return discovery.entries.flatMap((entry) => {
+              const manifest = entry.manifest;
+              if (!manifest) return [];
+              return [{
+                id: manifest.id,
+                name: manifest.name,
+                version: manifest.version,
+                active: pluginRegistry.getRecord(manifest.id)?.state === "active",
+                valid: entry.valid,
+                errors: entry.errors,
+              }];
+            });
+          },
+          readInstalledPluginFiles: (pluginId: string) => invoke<Record<string, string>>("read_external_plugin_files", { pluginId }),
+          installPluginDraft: async (draft: PluginDraft, draftSignal: AbortSignal) => {
+            if (draftSignal.aborted) throw new Error("已停止生成");
+            const draftValidation = validatePluginDraft(draft, {
+              availableCapabilities: getActiveAgentCapabilities().map((capability) => ({ id: capability.id, ...capability.codegen })),
+            });
+            const draftPluginId = draftValidation.manifest?.id;
+            if (!draftValidation.valid || !draftPluginId) throw new Error(`插件草稿验证失败：${draftValidation.issues.join("；")}`);
+            if (isCorePlugin(draftPluginId)) throw new Error(`插件 ID 与内置插件冲突：${draftPluginId}`);
+            const discovery = await invoke<ExternalPluginDiscovery>("install_external_plugin_draft", { files: draft.files });
+            await discoverExternalPlugins();
+            const pluginId = discovery.manifest?.id;
+            if (!pluginId) throw new Error("插件安装结果缺少插件 ID");
+            if (pluginId && pluginRegistry.getRecord(pluginId)) {
+              await setPluginEnabled(pluginId, false);
+              await pluginRegistry.unregister(pluginId);
+            }
+            const activated = await loadExternalPlugin(discovery, { promptForTrust: false, trustConfirmed: true });
+            if (!activated) throw new Error("插件已安装，但未能启用");
+            try {
+              await validatePluginGeneratedPython(
+                pluginRegistry.generatePythonSamples(pluginId),
+                (candidate) => invoke("validate_python_code", { code: candidate, pythonPath: pythonEnvironment?.path || null }),
+              );
+            } catch (error) {
+              await setPluginEnabled(pluginId, false);
+              await pluginRegistry.unregister(pluginId);
+              throw new Error(`插件生成的 Python 校验失败，已停用插件：${String(error)}`);
+            }
+            return { pluginId, name: discovery.manifest?.name, path: discovery.path, active: true };
+          },
           getPluginExecutionState: () => ({ [`${manimPlugin.manifest.id}.rendering`]: renderingManimRef.current || manimRenderAttempt.current !== null }),
           stopPluginExecutions: stopManimRender,
           agentCapabilities: getActiveAgentCapabilities(),
+          getAgentCapabilities: getActiveAgentCapabilities,
           assertActive: (toolSignal) => {
             if (toolSignal.aborted || aiAgentRunTokenRef.current !== agentRunToken) throw new Error("已停止生成");
             if (workspaceModeRef.current !== agentWorkspaceMode) throw new Error("工作区模式已改变，请重新提交任务");
@@ -5183,6 +5245,9 @@ export default function App() {
         mode: agentMode,
         intent: agentMode === "plan" ? "inspect" : "execute",
         clarification: agentResult.clarification,
+        ...(agentResult.followUpSuggestions?.length
+          ? { followUpSuggestions: agentResult.followUpSuggestions }
+          : {}),
       };
       const taskAfterDocuments = sceneDocumentsRef.current.map((document) => document.id === activeSceneIdRef.current
         ? { ...document, code: sourceCodeRef.current, name: resolveCodeDocumentName(sourceCodeRef.current, document.name) }
@@ -5681,7 +5746,7 @@ export default function App() {
       </section>
       <div className={`ai-panel-resizer ${aiAssistantVisible ? "" : "collapsed"}`} onPointerDown={startAiPanelResize} role="separator" aria-label="调整 AI 智能体宽度" aria-orientation="vertical" aria-valuemin={340} aria-valuemax={520} aria-valuenow={aiPanelWidth}/>
       <aside className={`ai-drawer ${aiAssistantVisible ? "open" : ""}`} aria-hidden={!aiAssistantVisible}>
-        <AiAssistantPanel key={createAiConversationScope(projectId, workspaceMode === "code" ? `code:${(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-document"}` : `workspace:${workspaceMode}`)} conversationScope={createAiConversationScope(projectId, workspaceMode === "code" ? `code:${(aiAgentBusy ? aiAgentSceneIdRef.current : activeSceneId) || "no-document"}` : `workspace:${workspaceMode}`)} conversationProjectId={projectId} workspaceEpoch={aiWorkspaceEpoch} lineCount={activeCode ? activeCode.split("\n").length : 0} contextName={workspaceMode === "code" ? sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前文档" : workspaceMode === "visual" ? "图形化工作区" : "图形化与代码"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onRevealProblem={revealAiProblem} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")} onClearConversationConfirm={() => requestConfirmation({ title: "清空当前 AI 对话？", message: "当前对话中的全部消息和任务记录都将被永久删除。", confirmLabel: "清空对话", tone: "danger" })}/>
+        <AiAssistantPanel key={aiConversationScope} conversationScope={aiConversationScope} conversationMigrationScopes={aiConversationMigrationScopes} workspaceEpoch={aiWorkspaceEpoch} lineCount={activeCode ? activeCode.split("\n").length : 0} contextName={workspaceMode === "code" ? sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前文档" : workspaceMode === "visual" ? "图形化工作区" : "图形化与代码"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onRevealProblem={revealAiProblem} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")} onClearConversationConfirm={() => requestConfirmation({ title: "清空当前 AI 对话？", message: "当前对话中的全部消息和任务记录都将被永久删除。", confirmLabel: "清空对话", tone: "danger" })}/>
       </aside>
     </section>
     <footer className="statusbar" onContextMenu={(event) => event.preventDefault()}><div className="python-environment-switcher" ref={pythonEnvironmentMenuRef}><button className="environment-status" aria-haspopup="menu" aria-expanded={pythonEnvironmentMenuOpen} disabled={running || renderingManim} onClick={() => { const next = !pythonEnvironmentMenuOpen; setPythonEnvironmentMenuOpen(next); if (next) void detectPythonEnvironments(); }}><span>{pythonEnvironment ? `Python ${pythonEnvironment.version}` : "未选择 Python"}</span></button>{pythonEnvironmentMenuOpen && <div className="python-environment-menu" role="menu" aria-label="切换 Python 解释器"><header><span><strong>Python 解释器</strong><small>{supportedPythonRangeLabel}</small></span><button className="python-environment-refresh" onClick={() => void detectPythonEnvironments()} disabled={detectingPython} title="重新检测" aria-label="重新检测 Python 解释器"><RefreshCw size={13} className={detectingPython ? "spin" : ""}/></button></header><div className="python-environment-options">{pythonEnvironments.length ? pythonEnvironments.map((environment) => { const selected = pythonEnvironment?.path.toLowerCase() === environment.path.toLowerCase(); return <button key={environment.path} className={`python-environment-option ${selected ? "selected" : ""}`} role="menuitemradio" aria-checked={selected} title={environment.path} onClick={() => selectPythonEnvironment(environment)}><span className="python-environment-option-check">{selected && <Check size={12}/>}</span><span><strong>Python {environment.version}</strong><small>{environment.implementation}{environment.virtual_env ? " · 虚拟环境" : ""}</small><code>{environment.path}</code></span></button>; }) : <div className="python-environment-empty"><Braces size={18}/><span>{detectingPython ? "正在检测 Python..." : `未检测到${supportedPythonRangeLabel}`}</span></div>}</div></div>}</div><span className="status-spacer"/>{workspaceMode === "code" && <div className="editor-status-items"><button onClick={() => runCodeEditorAction("editor.action.gotoLine")} title="跳转到行">行 {codeCursorPosition.lineNumber}，列 {codeCursorPosition.column}</button><span title="Python 缩进宽度">空格: {codeIndentSize}</span><span title="文件编码">UTF-8</span></div>}<span>{running ? "正在运行" : renderingManim ? "正在渲染" : "就绪"}</span></footer>
@@ -5717,7 +5782,7 @@ export default function App() {
     </div>}
     {formulaEditorRequest && <Suspense fallback={<div className="formula-editor-backdrop"><div className="formula-editor-loading"><Braces size={22}/><span>正在准备公式编辑器...</span></div></div>}><FormulaEditorDialog request={formulaEditorRequest} onClose={() => setFormulaEditorRequest(null)}/></Suspense>}
     {manimRenderSettingsOpen && <div className="settings-backdrop management-center">{renderManagementNavigation()}<section className="settings-dialog manim-render-settings-dialog management-page" role="region" aria-label="Manim 渲染配置">
-      <header><div><span className="settings-icon manim-settings-icon"><Film size={18}/></span><div><h2>Manim 渲染配置</h2><p>配置保存在当前工程中</p></div></div><button className="dialog-close" onClick={() => setManimRenderSettingsOpen(false)} title="关闭"><X size={18}/></button></header>
+      <header><div><span className="settings-icon manim-settings-icon"><Film size={18}/></span><div><h2>Manim 渲染配置</h2><p>常用偏好自动保存，工程配置优先</p></div></div><button className="dialog-close" onClick={() => setManimRenderSettingsOpen(false)} title="关闭"><X size={18}/></button></header>
       <div className="manim-settings-shell"><nav className="settings-navigation manim-settings-navigation" aria-label="Manim 渲染配置分类">{([
         { id: "output", label: "输出", detail: "类型与尺寸", icon: manimRenderConfig.outputType === "image" ? <ImageIcon size={18}/> : <Film size={18}/> },
         { id: "renderer", label: "渲染器", detail: "引擎与缓存", icon: <Settings size={18}/> },

@@ -49,6 +49,14 @@ describe("Manim plugin generators", () => {
     expect(manimAgentTools.find((tool) => tool.definition.function.name === "render_manim")).toMatchObject({ requiresPermission: true, longRunning: true });
   });
 
+  it("publishes its Blockly code generation contract", () => {
+    expect(manimPlugin.manifest.agent?.codegen).toEqual({
+      entryBlock: "visual_python_manim_scene",
+      statementInput: "BODY",
+      runtimeNames: ["self"],
+    });
+  });
+
   it("declares code validation for every Manim code mutation", () => {
     const mutations = manimAgentTools.filter((tool) => tool.mutation);
 

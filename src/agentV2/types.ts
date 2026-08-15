@@ -1,4 +1,4 @@
-import type { AiChatMessage, AiChatToolCall, AiChatToolDefinition } from "../aiConfig";
+import type { AiChatMessage, AiChatToolCall, AiChatToolDefinition, AiReasoningEffort } from "../aiConfig";
 import type { CodeDocument } from "../sceneDocuments";
 import type { WorkspaceMode } from "../workspaceMode";
 
@@ -91,6 +91,7 @@ export type AgentClarification = {
   options: string[];
 };
 export type AiClarification = AgentClarification;
+export type AiFollowUpSuggestion = { label: string; prompt: string };
 
 export type AiAgentPlanStep = { step: string; status: "pending" | "in_progress" | "completed" };
 export type AiAgentPermissionRequest = { id: string; toolName: AiAgentToolName; title: string; detail: string };
@@ -123,6 +124,7 @@ export type AiAgentResult = {
   taskPlan?: AiAgentPlanStep[];
   taskChange?: AiTaskChangeSnapshot;
   clarification?: AiClarification;
+  followUpSuggestions?: AiFollowUpSuggestion[];
 };
 
 export type AgentExecutionObservation = Record<string, unknown>;
@@ -163,6 +165,11 @@ export type AgentCapability = {
   tools?: string[];
   fileTypes?: string[];
   detect?: "imports" | "content" | "project";
+  codegen?: {
+    entryBlock?: string;
+    statementInput?: string;
+    runtimeNames?: string[];
+  };
   active?: boolean;
 };
 
@@ -171,6 +178,7 @@ export type AgentRunResult = {
   toolCallCount: number;
   tokenUsage: AgentTokenUsage;
   clarification?: AgentClarification;
+  followUpSuggestions?: AiFollowUpSuggestion[];
 };
 
 export type AgentProgress = {
@@ -183,6 +191,7 @@ export type RunVisualPythonAgentArgs = {
   prompt: string;
   history?: AgentConversationTurn[];
   mode?: AgentMode;
+  reasoningEffort?: AiReasoningEffort;
   host: AgentHost;
   onEvent: (event: AgentActivityEvent) => void;
   onProgress?: (progress: AgentProgress) => void;

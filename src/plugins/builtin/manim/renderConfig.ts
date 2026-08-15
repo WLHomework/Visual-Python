@@ -38,7 +38,9 @@ export const defaultManimRenderConfig: ManimRenderConfig = {
   outputFileName: "",
 };
 
-let currentConfig = { ...defaultManimRenderConfig };
+type ManimRenderPreferences = Omit<ManimRenderConfig, "selectedScene" | "outputFileName">;
+
+const storageKey = "visual-python:manim-render-config";
 const listeners = new Set<(config: ManimRenderConfig) => void>();
 
 const normalizeImageDimension = (value: unknown, fallback: number) => {
@@ -62,22 +64,62 @@ const normalizeConfig = (value: unknown): ManimRenderConfig => {
   return { outputType, transparentBackground: candidate?.transparentBackground === true, imageSizeMode, imageWidth, imageHeight, lockImageAspectRatio: candidate?.lockImageAspectRatio !== false, imageCaptureMode, imageAnimationStep, quality, fps, renderer, disableCaching: candidate?.disableCaching === true, selectedScene, outputFileName };
 };
 
+const renderPreferences = (config: ManimRenderConfig): ManimRenderPreferences => ({
+  outputType: config.outputType,
+  transparentBackground: config.transparentBackground,
+  imageSizeMode: config.imageSizeMode,
+  imageWidth: config.imageWidth,
+  imageHeight: config.imageHeight,
+  lockImageAspectRatio: config.lockImageAspectRatio,
+  imageCaptureMode: config.imageCaptureMode,
+  imageAnimationStep: config.imageAnimationStep,
+  quality: config.quality,
+  fps: config.fps,
+  renderer: config.renderer,
+  disableCaching: config.disableCaching,
+});
+
+const readRenderPreferences = (): Partial<ManimRenderPreferences> => {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const value = JSON.parse(localStorage.getItem(storageKey) || "null");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeRenderPreferences = (patch: Partial<ManimRenderConfig>) => {
+  if (typeof localStorage === "undefined") return;
+  const preferencePatch = Object.fromEntries(Object.entries(patch).filter(([key]) => key !== "selectedScene" && key !== "outputFileName"));
+  if (!Object.keys(preferencePatch).length) return;
+  const preferences = renderPreferences(normalizeConfig({ ...defaultManimRenderConfig, ...readRenderPreferences(), ...preferencePatch }));
+  try { localStorage.setItem(storageKey, JSON.stringify(preferences)); }
+  catch { /* Persistence is optional when browser storage is unavailable. */ }
+};
+
+const configFromPreferences = () => normalizeConfig({ ...defaultManimRenderConfig, ...readRenderPreferences() });
+
+let currentConfig = configFromPreferences();
+
 const emit = () => listeners.forEach((listener) => listener({ ...currentConfig }));
 
 export const getManimRenderConfig = () => ({ ...currentConfig });
 
 export const setManimRenderConfig = (patch: Partial<ManimRenderConfig>) => {
   currentConfig = normalizeConfig({ ...currentConfig, ...patch });
+  writeRenderPreferences(patch);
   emit();
 };
 
 export const resetManimRenderConfig = () => {
-  currentConfig = { ...defaultManimRenderConfig };
+  currentConfig = configFromPreferences();
   emit();
 };
 
 export const loadManimRenderConfig = (value: unknown) => {
-  currentConfig = normalizeConfig(value);
+  const projectConfig = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  currentConfig = normalizeConfig({ ...defaultManimRenderConfig, ...readRenderPreferences(), ...projectConfig });
   emit();
 };
 

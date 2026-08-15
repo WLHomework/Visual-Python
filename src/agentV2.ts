@@ -3,9 +3,9 @@ import { coreAgentTools } from "./agentV2/toolRegistry";
 import { createAgentMemory, rememberAgentDecision, rememberAgentEvidence, serializeAgentMemory } from "./agentV2/memory";
 import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext } from "./agentV2/context";
 import { createAgentTokenUsage, mergeProviderTokenUsage, recordAgentRequest, recordAgentToolResult } from "./agentV2/tokenLedger";
-import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
+import type { AgentActivityEvent, AgentClarification, AiFollowUpSuggestion, AgentProgress, AgentRunResult, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
 
-export type { AgentActivityEvent, AgentCapability, AgentCodeChange, AgentConversationTurn, AgentHost, AgentMode, AgentProgress, AgentRunResult, AgentTokenUsage, AgentTool, RunVisualPythonAgentArgs, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiCodeEdit, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
+export type { AgentActivityEvent, AgentCapability, AgentCodeChange, AgentConversationTurn, AgentHost, AgentMode, AgentProgress, AgentRunResult, AgentTokenUsage, AgentTool, RunVisualPythonAgentArgs, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiCodeEdit, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2/types";
 export { coreAgentTools, visualPythonTools } from "./agentV2/toolRegistry";
 export { createAgentMemory, rememberAgentDecision, rememberAgentEvidence, serializeAgentMemory } from "./agentV2/memory";
 export { createVisualPythonHostAdapter, type VisualPythonHostServices } from "./agentV2/hostAdapter";
@@ -14,12 +14,36 @@ export { applyExactCodeEdits, createCodeChangePreview, restoreMissingBaseIndent 
 export const AGENT_SOFT_ROUND_LIMIT = 12;
 export const AGENT_HARD_ROUND_LIMIT = 48;
 const noProgressRoundLimitAfterSoftBudget = 4;
-// Keep each decision turn bounded. This is the portable Chat Completions control;
-// provider-specific reasoning fields are intentionally not sent.
+// Keep each decision turn bounded independently from the selected reasoning effort.
 const maxTokensPerRequest = 8_192;
+const streamUiUpdateIntervalMs = 80;
 const maxToolResultCharacters = 6000;
 const stopError = "任务已停止";
+const truncatedContinuationPrompt = "上一轮响应达到本轮输出上限。请从中断位置继续，不要重复已经完成的内容；如果需要调用工具，请输出完整的工具调用。";
 const toolByName = (tools: AgentTool[], name: string) => tools.find((tool) => tool.definition.function.name === name);
+const followUpSuggestionsMarker = /<!--\s*visual-python-followups\s*:\s*([\s\S]*?)\s*-->/i;
+
+export function parseAgentFollowUpSuggestions(content: string): { content: string; suggestions: AiFollowUpSuggestion[] } {
+  const match = content.match(followUpSuggestionsMarker);
+  if (!match) return { content: content.trim(), suggestions: [] };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[1]);
+  } catch {
+    return { content: content.replace(match[0], "").trim(), suggestions: [] };
+  }
+  const seen = new Set<string>();
+  const suggestions = (Array.isArray(parsed) ? parsed : []).flatMap((item): AiFollowUpSuggestion[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const label = typeof record.label === "string" ? record.label.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    const prompt = typeof record.prompt === "string" ? record.prompt.replace(/\s+/g, " ").trim().slice(0, 400) : "";
+    if (!label || !prompt || seen.has(prompt)) return [];
+    seen.add(prompt);
+    return [{ label, prompt }];
+  }).slice(0, 3);
+  return { content: content.replace(match[0], "").trim(), suggestions };
+}
 
 const systemRules = `你是 Visual Python 的通用软件智能体。你通过工具直接操控当前工程，而不是只在聊天中给出代码。
 
@@ -35,11 +59,12 @@ const systemRules = `你是 Visual Python 的通用软件智能体。你通过�
 9. 需要用户决定时调用 ask_user，并提供 2 到 4 个简洁编号选项；不确定的关键选择不要擅自执行。
 10. 工具声明需要确认时，由宿主提供唯一的执行确认。不要在调用前再用 ask_user 重复询问；只有目标或参数存在真实歧义时才询问。
 11. 不要输出 XML、DSML、伪工具标签或原始 JSON 作为用户可见回复。
+12. 每次任务完成后，在最终 Markdown 末尾附加一行隐藏元数据，格式为 <!-- visual-python-followups: [{"label":"按钮文字","prompt":"可执行的下一步指令"}] -->，最多三个建议；正文不要解释这行元数据。建议必须结合当前工程结果，不能使用空泛的固定选项。
 
 平台工作方式：
 - Visual Python 工程可以包含普通 Python 文档、插件文档、图形化工作区、资源和多个运行目标。不要把整个工程默认当成某个插件工程。
 - 纯代码文档是独立文件。除非当前插件明确要求，不要自动添加 import、基类、construct 或其它专用模板。
-- 当前编辑器状态由宿主管理。get_context 用于读取项目、当前文档、文件列表、运行状态和已启用插件；需要其它文档时先用 list_documents，再用 get_document 读取真实 ID。
+- 当前编辑器状态由宿主管理。get_context 用于读取项目、当前文档、文件列表、运行状态和已启用插件；get_diagnostics 用于按需读取左侧输出和问题面板；需要其它文档时先用 list_documents，再用 get_document 读取真实 ID。
 - 文档切换前先用 list_documents 取得真实 ID，再调用 switch_document；create_document 只创建空白普通 Python 文档，插件专用文档使用插件提供的创建工具。
 - 代码修改首选 edit_code、insert_statements、replace_function_body 和 add_import。oldText 必须来自当前真实代码且精确匹配；修改失败后重新读取相关代码，不要猜测缩进或文本。
 - replace_code 只适用于空文档、全新文档或用户明确要求整体重写。已有代码的局部需求不得整文件替换。
@@ -53,20 +78,50 @@ const systemRules = `你是 Visual Python 的通用软件智能体。你通过�
 - ask_user 只用于会显著改变结果的真实歧义。颜色、布局、动画节奏等普通实现细节由你专业判断，避免不必要的往返。
 - 最终回复只总结实际完成内容、验证结果和需要用户决定的事项。不要复述全部工具调用或输出未经处理的内部数据。`;
 
+const pluginAuthoringRules = `
+
+插件开发规则：
+- 用户要求开发新插件时使用 create_plugin_draft；修改已有插件时先用 list_installed_plugins 找到准确 ID，再用 import_installed_plugin_draft 导入原始文件，并用 read_plugin_draft_file 分页读取需要修改的真实源码。后续始终用 update_plugin_draft 更新同一草稿，不要把插件代码写入当前普通 Python 文档。
+- 创建草稿前先读取当前能力。如果需求是在扩展某个已启用插件，先调用该能力的只读检查工具，取得真实入口积木、输入名、运行对象和代码生成约定；没有可验证的能力契约时必须创建自包含插件。
+- 每个草稿必须维护 codegen.json。standalone 模式必须自行生成所需 import、初始化和结束逻辑；extension 模式必须声明 provider 和 runtimeNames，并严格使用提供方公开的入口与运行对象。
+- codegen.json 只是代码生成契约，不会被宿主自动转换成积木。所有积木定义和 Python 生成器必须在入口模块的 activate(context) 中通过 context.registerBlock() 注册，并通过 context.registerToolboxCategory() 放入工具箱。
+- 不得让 activate() 只返回 codegen.json 路径或空对象。插件只有实际注册了积木、工具箱、设置、命令、文档处理器或 Agent 工具后才算激活成功。
+- 所有积木生成的 Python 必须形成完整、可解释的程序结构，不得引用未导入、未初始化或未由扩展契约声明的运行对象；不得凭空创造变量名、入口名或宿主 API。
+- Python 生成器必须使用 generator.statementToCode() 和 generator.INDENT 处理嵌套语句；生成代码统一使用 4 个空格缩进，禁止 Tab，不要手工拼接不一致的嵌套缩进。安装时宿主会逐个实例化插件积木并执行真实 Python 语法检查。
+- 先创建或更新同一个插件草稿，再调用 validate_plugin_draft 验证；验证失败时根据 issues 修改草稿后重新验证，不要重复创建相同插件。
+- 插件安装、加载或运行失败后，在再次修改草稿前调用 get_diagnostics，结合工具错误、输出和问题定位原因；不要在未读取诊断时猜测修改。
+- install_plugin_draft 会写入本地插件目录并执行插件 JavaScript。只有用户明确确认安装后才调用；宿主会提供唯一的安装确认，不要用 ask_user 重复确认。
+- 插件草稿验证通过后，向用户说明已准备安装并等待确认；未确认时不要安装。
+`;
+
 function createId(prefix: string, index: number): string {
   return `${prefix}-${Date.now().toString(36)}-${index}`;
 }
 
-function truncate(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max)}\n[结果已截断]` : value;
-}
-
 function serializeResult(result: Record<string, unknown>): string {
   try {
-    return truncate(JSON.stringify(result), maxToolResultCharacters);
+    const serialized = JSON.stringify(result);
+    if (serialized.length <= maxToolResultCharacters) return serialized;
+    const compact = JSON.parse(compactAgentToolResult("activity", result)) as Record<string, unknown>;
+    return JSON.stringify({ ...compact, truncated: true });
   } catch {
-    return "工具返回了无法序列化的结果";
+    return JSON.stringify({ ok: false, error: "工具返回了无法序列化的结果" });
   }
+}
+
+function appendTruncatedContinuation(messages: AiChatMessage[], content: string): AiChatMessage[] {
+  const base = [...messages];
+  const previousPrompt = base.at(-1);
+  const previousFragment = base.at(-2);
+  if (previousPrompt?.role === "user" && previousPrompt.content === truncatedContinuationPrompt && previousFragment?.role === "assistant" && !previousFragment.toolCalls?.length) {
+    base.splice(-2);
+  }
+  const normalized = content.trim() || "本轮响应尚未完成。";
+  const fragment = normalized.length > 6_000 ? `[仅保留最近的续写内容]\n${normalized.slice(-6_000)}` : normalized;
+  return appendAgentTurn(base, [
+    { role: "assistant", content: fragment },
+    { role: "user", content: truncatedContinuationPrompt },
+  ]);
 }
 
 function parseDsmlAttributes(source: string): Record<string, string> {
@@ -225,23 +280,45 @@ function failureDetail(result: Record<string, unknown>): string | undefined {
     const value = result[key];
     if (typeof value === "string" && value.trim()) return value;
   }
+  const validation = result.validation;
+  if (validation && typeof validation === "object" && !Array.isArray(validation)) {
+    const record = validation as Record<string, unknown>;
+    for (const key of ["error", "warning", "message"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) return value;
+    }
+    const issues = Array.isArray(record.issues) ? record.issues : Array.isArray(record.errors) ? record.errors : [];
+    const messages = issues.map((issue) => {
+      if (typeof issue === "string") return issue.trim();
+      if (!issue || typeof issue !== "object" || Array.isArray(issue)) return "";
+      const message = (issue as Record<string, unknown>).message;
+      return typeof message === "string" ? message.trim() : "";
+    }).filter(Boolean);
+    if (messages.length) return messages.join("；");
+  }
   return undefined;
 }
 
-export async function runVisualPythonAgent({ prompt, history = [], mode = "agent", host, onEvent, onProgress, onPermissionRequest, signal }: RunVisualPythonAgentArgs): Promise<AgentRunResult> {
+function isFailedToolResult(result: Record<string, unknown>): boolean {
+  if (result.ok === false || result.valid === false || result.success === false || result.saved === false || result.installed === false) return true;
+  const validation = result.validation;
+  return Boolean(validation && typeof validation === "object" && !Array.isArray(validation) && (validation as Record<string, unknown>).valid === false);
+}
+
+export async function runVisualPythonAgent({ prompt, history = [], mode = "agent", reasoningEffort = "high", host, onEvent, onProgress, onPermissionRequest, signal }: RunVisualPythonAgentArgs): Promise<AgentRunResult> {
   if (!prompt.trim()) throw new Error("请输入任务");
   const memory = createAgentMemory(history);
   const capabilities = host.getCapabilities?.() ?? [];
   const snapshot = host.getSnapshot();
   const workspaceMode = snapshot.workspaceMode === "visual" || snapshot.workspaceMode === "split" || snapshot.workspaceMode === "code" ? snapshot.workspaceMode : "code";
   const capabilityRules = capabilities.length
-    ? `\n\n当前可用能力：\n${capabilities.map((capability) => `- ${capability.name}（${capability.id}）：${capability.description}${capability.tools?.length ? `；专用工具：${capability.tools.join(", ")}` : ""}${capability.fileTypes?.length ? `；文件类型：${capability.fileTypes.join(", ")}` : ""}${capability.detect ? `；检测方式：${capability.detect}` : ""}`).join("\n")}`
+    ? `\n\n当前可用能力：\n${capabilities.map((capability) => `- ${capability.name}（${capability.id}）：${capability.description}${capability.tools?.length ? `；专用工具：${capability.tools.join(", ")}` : ""}${capability.fileTypes?.length ? `；文件类型：${capability.fileTypes.join(", ")}` : ""}${capability.detect ? `；检测方式：${capability.detect}` : ""}${capability.codegen ? `；代码生成契约：入口 ${capability.codegen.entryBlock || "未声明"}，语句输入 ${capability.codegen.statementInput || "未声明"}，运行对象 ${(capability.codegen.runtimeNames || []).join(", ") || "无"}` : ""}`).join("\n")}`
     : "\n\n当前没有插件提供额外的 Agent 能力；按通用 Python 工程处理。";
   const workspaceConstructionRules = workspaceMode === "visual" || workspaceMode === "split"
     ? `\n\nBlockly construction protocol:\n- Build complex visual tasks incrementally: create the entry block first, then add exactly one block per add_workspace_block call.\n- Use the returned real block id for the next connection. Use parentBlockId and the exact inputName from the template for nested blocks, or afterBlockId for statement order.\n- Do not create a batch of disconnected top-level blocks and connect them later. Do not guess input names.\n- Use apply_workspace only for a small complete structure or when the user explicitly asks to replace the whole workspace.`
     : "";
   const requestContext = createAgentRequestContext({
-    system: `${systemRules}${capabilityRules}${workspaceConstructionRules}\n\n当前模式：${mode === "plan" ? "计划模式，只能读取和分析，不得修改工程" : "智能体模式，可以执行必要的工程操作"}`,
+    system: `${systemRules}${pluginAuthoringRules}${capabilityRules}${workspaceConstructionRules}\n\n当前模式：${mode === "plan" ? "计划模式，只能读取和分析，不得修改工程" : "智能体模式，可以执行必要的工程操作"}`,
     history,
     prompt,
     snapshot,
@@ -249,14 +326,15 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
   });
   const usage = createAgentTokenUsage();
   let requestMessages = buildAgentRequestMessages(requestContext);
-  const allTools = [...coreAgentTools, ...(host.getTools?.() ?? [])];
-  const activeTools = allTools.filter((tool) => !tool.workspaceModes?.length || tool.workspaceModes.includes(workspaceMode as "visual" | "split" | "code"));
-  const taskAgentTools = mode === "plan" ? activeTools.filter((tool) => tool.readOnly) : activeTools;
-  const taskTools = taskAgentTools.map((tool) => tool.definition);
+  const getTaskAgentTools = () => {
+    const allTools = [...coreAgentTools, ...(host.getTools?.() ?? [])];
+    const activeTools = allTools.filter((tool) => !tool.workspaceModes?.length || tool.workspaceModes.includes(workspaceMode as "visual" | "split" | "code"));
+    return mode === "plan" ? activeTools.filter((tool) => tool.readOnly) : activeTools;
+  };
+  let taskAgentTools = getTaskAgentTools();
   const toolLabel = (name: string) => toolByName(taskAgentTools, name)?.label || name;
   let toolCallCount = 0;
   let sequence = 0;
-  let truncatedContinuations = 0;
   let finalSummary = "";
   let clarification: AgentClarification | undefined;
   let stateVersion = 0;
@@ -290,29 +368,38 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
 
   for (let round = 1; round <= AGENT_HARD_ROUND_LIMIT; round += 1) {
     if (signal.aborted) throw new Error(stopError);
+    // Plugins can be installed or activated by the previous round. Rebuild the
+    // tool schema before every model decision so the next round sees it.
+    taskAgentTools = getTaskAgentTools();
+    const taskTools = taskAgentTools.map((tool) => tool.definition);
     const messageId = `message-${round}`;
     let content = "";
     let reasoning = "";
     let thinkingEmitted = false;
+    let lastContentUiUpdate = Number.NEGATIVE_INFINITY;
+    let lastReasoningUiUpdate = Number.NEGATIVE_INFINITY;
     let roundProgressed = false;
     recordAgentRequest(usage, requestMessages, taskTools, round);
     reportProgress({ phase: "thinking", label: round === 1 ? "分析当前请求和工程状态" : "根据执行结果决定下一步" });
     emit({ id: messageId, kind: "message", status: "running", title: "", markdown: "" });
     const completion = await streamAiChat(requestMessages, (delta) => {
       content += delta;
+      const now = Date.now();
+      if (now - lastContentUiUpdate < streamUiUpdateIntervalMs) return;
+      lastContentUiUpdate = now;
       emit({ id: messageId, kind: "message", status: "running", title: content, markdown: content });
     }, {
       maxTokens: maxTokensPerRequest,
+      reasoningEffort,
       signal,
       tools: taskTools,
       toolChoice: "auto",
       onReasoningDelta: (delta) => {
         reasoning += delta;
-        if (!thinkingEmitted) {
-          thinkingEmitted = true;
-          emit({ id: `thinking-${round}`, kind: "thinking", status: "running", title: "思考过程", markdown: reasoning });
-          return;
-        }
+        const now = Date.now();
+        if (thinkingEmitted && now - lastReasoningUiUpdate < streamUiUpdateIntervalMs) return;
+        thinkingEmitted = true;
+        lastReasoningUiUpdate = now;
         emit({ id: `thinking-${round}`, kind: "thinking", status: "running", title: "思考过程", markdown: reasoning });
       },
     });
@@ -322,12 +409,7 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
     const parsedCalls = completion.toolCalls.length ? completion.toolCalls : parseTextToolCalls(content);
     const calls = normalizeAiToolCalls(parsedCalls).filter((call) => taskTools.some((tool) => tool.function.name === call.function.name));
     if (completion.truncated && (!calls.length || !hasCompleteToolCalls(calls))) {
-      truncatedContinuations += 1;
-      if (truncatedContinuations > 3) throw new Error("模型连续多轮达到输出上限，已停止重复生成");
-      requestMessages = appendAgentTurn(requestMessages, [
-        { role: "assistant", content: content.trim() || "本轮响应尚未完成。" },
-        { role: "user", content: "上一轮响应达到本轮输出上限。请从中断位置继续，不要重复已经完成的内容；如果需要调用工具，请输出完整的工具调用。" },
-      ]);
+      requestMessages = appendTruncatedContinuation(requestMessages, content);
       reportProgress({ phase: "thinking", label: "继续整理响应" });
       continue;
     }
@@ -345,11 +427,12 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
         reportProgress({ phase: "thinking", label: "根据失败结果继续处理" });
         continue;
       }
-      finalSummary = content.trim() || "任务已完成。";
+      const finalResponse = parseAgentFollowUpSuggestions(content);
+      finalSummary = finalResponse.content || "任务已完成。";
       reportProgress({ phase: "responding", label: "整理已验证的结果" });
       emit({ id: messageId, kind: "message", status: "done", title: finalSummary, markdown: finalSummary });
       reportProgress({ phase: "completed", label: "任务完成" });
-      return { summary: finalSummary, toolCallCount, tokenUsage: usage };
+      return { summary: finalSummary, toolCallCount, tokenUsage: usage, ...(finalResponse.suggestions.length ? { followUpSuggestions: finalResponse.suggestions } : {}) };
     }
     emit({ id: messageId, kind: "message", status: "done", title: content.trim(), markdown: content.trim() });
     const turnMessages: AiChatMessage[] = [{ role: "assistant", content: compactAgentAssistantMessage(content), toolCalls: calls }];
@@ -399,7 +482,14 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
       }
       consecutiveNoProgress = 0;
       const permissionDenied = currentTool?.requiresPermission
-        && (!onPermissionRequest || !(await onPermissionRequest({ id: toolId, toolName: call.function.name, title: `需要确认：${toolLabel(call.function.name)}`, detail: "该操作会修改工程或启动任务。" })));
+        && (!onPermissionRequest || !(await onPermissionRequest({
+          id: toolId,
+          toolName: call.function.name,
+          title: `需要确认：${toolLabel(call.function.name)}`,
+          detail: call.function.name === "install_plugin_draft"
+            ? "该操作会写入本地插件目录并执行插件 JavaScript。"
+            : "该操作会修改工程或启动任务。",
+        })));
       if (mode === "plan" || permissionDenied) {
         const denied = { ok: false, error: mode === "plan" ? "计划模式禁止执行修改或运行操作" : "用户拒绝了这次操作" };
         recordFailure(fingerprint, call.function.name, denied.error, false);
@@ -414,7 +504,7 @@ export async function runVisualPythonAgent({ prompt, history = [], mode = "agent
         const resultText = serializeResult(result);
         let combinedToolResponse = compactAgentToolResult(call.function.name, result);
         rememberAgentEvidence(memory, toolLabel(call.function.name), combinedToolResponse);
-        const resultFailed = result.ok === false || result.valid === false || result.success === false || result.saved === false;
+        const resultFailed = isFailedToolResult(result);
         if (resultFailed) recordFailure(fingerprint, call.function.name, failureDetail(result) || "工具返回失败");
         else {
           roundProgressed = true;

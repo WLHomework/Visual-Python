@@ -1854,6 +1854,20 @@ fn should_disable_ai_thinking(base_url: &str, model: &str) -> bool {
     is_aliyun && (model.starts_with("qwen") || model.starts_with("qwq"))
 }
 
+fn apply_ai_reasoning_effort(
+    body: &mut Value,
+    reasoning_effort: Option<&str>,
+) -> Result<(), String> {
+    let Some(effort) = reasoning_effort else {
+        return Ok(());
+    };
+    if !matches!(effort, "low" | "medium" | "high" | "xhigh") {
+        return Err("AI 思考强度无效".into());
+    }
+    body["reasoning_effort"] = Value::String(effort.into());
+    Ok(())
+}
+
 fn supports_ai_stream_usage(base_url: &str) -> bool {
     url::Url::parse(base_url)
         .ok()
@@ -1950,6 +1964,7 @@ async fn perform_ai_chat_completion(
     omit_tool_choice: bool,
     api_key: Option<String>,
     max_tokens: u32,
+    reasoning_effort: Option<String>,
     stream_target: Option<AiStreamTarget>,
 ) -> Result<AiChatCompletionResult, String> {
     let base_url = validate_ai_base_url(&config.base_url)?;
@@ -2074,6 +2089,7 @@ async fn perform_ai_chat_completion(
         "max_tokens": max_tokens,
         "stream": stream_target.is_some()
     });
+    apply_ai_reasoning_effort(&mut request_body, reasoning_effort.as_deref())?;
     if should_disable_ai_thinking(&base_url, model) {
         request_body["enable_thinking"] = Value::Bool(false);
     }
@@ -2377,6 +2393,7 @@ async fn test_ai_connection(
         api_key,
         32,
         None,
+        None,
     )
     .await
 }
@@ -2387,7 +2404,7 @@ async fn ai_chat_completion(
     messages: Vec<AiChatMessage>,
     tools: Option<Vec<Value>>,
 ) -> Result<AiChatCompletionResult, String> {
-    perform_ai_chat_completion(config, messages, tools, None, false, None, 1200, None).await
+    perform_ai_chat_completion(config, messages, tools, None, false, None, 1200, None, None).await
 }
 
 #[tauri::command]
@@ -2401,6 +2418,7 @@ async fn ai_chat_completion_stream(
     tool_choice: Option<Value>,
     omit_tool_choice: Option<bool>,
     max_tokens: Option<u32>,
+    reasoning_effort: Option<String>,
 ) -> Result<AiChatCompletionResult, String> {
     if request_id.trim().is_empty() || request_id.len() > 100 {
         return Err("AI 流式请求 ID 无效".into());
@@ -2428,6 +2446,7 @@ async fn ai_chat_completion_stream(
         omit_tool_choice.unwrap_or(false),
         None,
         max_tokens,
+        reasoning_effort,
         Some(AiStreamTarget {
             app,
             request_id: request_id.clone(),
@@ -3270,11 +3289,20 @@ struct PluginPythonManifest {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PluginAgentCodegenManifest {
+    entry_block: Option<String>,
+    statement_input: Option<String>,
+    runtime_names: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct PluginAgentManifest {
     description: String,
     tools: Option<Vec<String>>,
     file_types: Option<Vec<String>>,
     detect: Option<String>,
+    codegen: Option<PluginAgentCodegenManifest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -3522,6 +3550,29 @@ fn validate_plugin_manifest_value(value: &Value) -> Result<PluginManifest, Vec<S
         {
             errors.push("agent detect must be one of: imports, content, project".into());
         }
+        if let Some(codegen) = &agent.codegen {
+            if codegen
+                .entry_block
+                .as_deref()
+                .is_some_and(|entry_block| entry_block.trim().is_empty())
+            {
+                errors.push("agent codegen entry block cannot be empty".into());
+            }
+            if codegen
+                .statement_input
+                .as_deref()
+                .is_some_and(|statement_input| statement_input.trim().is_empty())
+            {
+                errors.push("agent codegen statement input cannot be empty".into());
+            }
+            if codegen.runtime_names.as_ref().is_some_and(|runtime_names| {
+                runtime_names
+                    .iter()
+                    .any(|runtime_name| runtime_name.trim().is_empty())
+            }) {
+                errors.push("agent codegen runtime names cannot contain empty values".into());
+            }
+        }
     }
 
     if errors.is_empty() {
@@ -3732,6 +3783,209 @@ fn install_external_plugin_zip_file(
         valid: true,
         errors: Vec::new(),
     })
+}
+
+fn install_external_plugin_draft_files(
+    files: HashMap<String, String>,
+    plugins_dir: &Path,
+) -> Result<ExternalPluginDiscovery, String> {
+    const MAX_FILES: usize = 24;
+    const MAX_FILE_BYTES: usize = 256 * 1024;
+    const MAX_TOTAL_BYTES: usize = 2 * 1024 * 1024;
+
+    if files.is_empty() {
+        return Err("plugin draft is empty".into());
+    }
+    if files.len() > MAX_FILES {
+        return Err(format!("plugin draft has too many files: {}", files.len()));
+    }
+    let manifest_text = files
+        .get("plugin.json")
+        .ok_or("plugin draft is missing plugin.json")?;
+    let manifest_value = serde_json::from_str::<Value>(manifest_text)
+        .map_err(|error| format!("plugin.json is not valid JSON: {error}"))?;
+    let manifest =
+        validate_plugin_manifest_value(&manifest_value).map_err(|errors| errors.join("; "))?;
+    let entry = manifest
+        .entry
+        .as_deref()
+        .ok_or("entry must be provided for external plugins")?;
+    if !files.contains_key(entry) {
+        return Err(format!("plugin draft is missing entry file: {entry}"));
+    }
+
+    let mut total_bytes = 0_usize;
+    let mut relative_files = Vec::with_capacity(files.len());
+    for (name, contents) in files {
+        let components = name.split('/').collect::<Vec<_>>();
+        if components.is_empty()
+            || components
+                .iter()
+                .any(|component| component.is_empty() || *component == "." || *component == "..")
+        {
+            return Err(format!("unsafe plugin draft path: {name}"));
+        }
+        if name.contains('\\') || Path::new(&name).is_absolute() {
+            return Err(format!("unsafe plugin draft path: {name}"));
+        }
+        if contents.len() > MAX_FILE_BYTES {
+            return Err(format!("plugin draft file is too large: {name}"));
+        }
+        total_bytes = total_bytes.saturating_add(contents.len());
+        if total_bytes > MAX_TOTAL_BYTES {
+            return Err("plugin draft is too large".into());
+        }
+        relative_files.push((PathBuf::from(name), contents));
+    }
+
+    fs::create_dir_all(plugins_dir)
+        .map_err(|error| format!("cannot create plugins directory: {error}"))?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let temp_dir = plugins_dir.join(format!(".draft-{}-{stamp}", manifest.id));
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)
+            .map_err(|error| format!("cannot clean temp plugin directory: {error}"))?;
+    }
+    fs::create_dir_all(&temp_dir)
+        .map_err(|error| format!("cannot create temp plugin directory: {error}"))?;
+    for (relative, contents) in relative_files {
+        let output_path = temp_dir.join(relative);
+        if let Some(parent) = output_path.parent() {
+            if let Err(error) = fs::create_dir_all(parent) {
+                let _ = fs::remove_dir_all(&temp_dir);
+                return Err(format!("cannot create plugin directory: {error}"));
+            }
+        }
+        if let Err(error) = fs::write(&output_path, contents) {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(format!("cannot write plugin draft file: {error}"));
+        }
+    }
+
+    let destination = plugins_dir.join(&manifest.id);
+    let backup = plugins_dir.join(format!(".backup-{}-{stamp}", manifest.id));
+    let had_destination = destination.exists();
+    if backup.exists() {
+        fs::remove_dir_all(&backup)
+            .map_err(|error| format!("cannot clean plugin backup directory: {error}"))?;
+    }
+    if had_destination {
+        if let Err(error) = fs::rename(&destination, &backup) {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(format!(
+                "cannot prepare existing plugin for replacement: {error}"
+            ));
+        }
+    }
+    if let Err(error) = fs::rename(&temp_dir, &destination) {
+        let _ = fs::remove_dir_all(&temp_dir);
+        if had_destination {
+            let _ = fs::rename(&backup, &destination);
+        }
+        return Err(format!("cannot install plugin draft: {error}"));
+    }
+    if had_destination {
+        let _ = fs::remove_dir_all(&backup);
+    }
+    Ok(ExternalPluginDiscovery {
+        path: destination.to_string_lossy().into_owned(),
+        manifest: Some(manifest),
+        valid: true,
+        errors: Vec::new(),
+    })
+}
+
+fn read_external_plugin_files_from_dir(
+    plugin_id: &str,
+    plugins_dir: &Path,
+) -> Result<HashMap<String, String>, String> {
+    const MAX_FILES: usize = 24;
+    const MAX_FILE_BYTES: u64 = 256 * 1024;
+    const MAX_TOTAL_BYTES: u64 = 2 * 1024 * 1024;
+
+    if !is_valid_plugin_id(plugin_id) {
+        return Err("invalid plugin id".into());
+    }
+    let plugins_dir = fs::canonicalize(plugins_dir)
+        .map_err(|error| format!("plugins directory is unavailable: {error}"))?;
+    let requested_dir = plugins_dir.join(plugin_id);
+    let requested_metadata = fs::symlink_metadata(&requested_dir)
+        .map_err(|error| format!("plugin directory is unavailable: {error}"))?;
+    if requested_metadata.file_type().is_symlink() || !requested_metadata.is_dir() {
+        return Err("plugin directory must be a regular directory".into());
+    }
+    let plugin_dir = fs::canonicalize(&requested_dir)
+        .map_err(|error| format!("plugin directory is unavailable: {error}"))?;
+    if plugin_dir.parent() != Some(plugins_dir.as_path()) {
+        return Err("plugin directory is outside the plugins folder".into());
+    }
+
+    let mut pending = vec![(plugin_dir.clone(), PathBuf::new())];
+    let mut files = HashMap::new();
+    let mut total_bytes = 0_u64;
+    while let Some((directory, relative_dir)) = pending.pop() {
+        let mut entries = fs::read_dir(&directory)
+            .map_err(|error| format!("cannot read plugin directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("cannot read plugin directory entry: {error}"))?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let metadata = fs::symlink_metadata(entry.path())
+                .map_err(|error| format!("cannot inspect plugin file: {error}"))?;
+            if metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "plugin file cannot be a symlink: {}",
+                    entry.path().display()
+                ));
+            }
+            let relative = relative_dir.join(entry.file_name());
+            if metadata.is_dir() {
+                pending.push((entry.path(), relative));
+                continue;
+            }
+            if !metadata.is_file() {
+                return Err(format!(
+                    "unsupported plugin file type: {}",
+                    entry.path().display()
+                ));
+            }
+            if files.len() >= MAX_FILES {
+                return Err(format!("plugin has more than {MAX_FILES} files"));
+            }
+            if metadata.len() > MAX_FILE_BYTES {
+                return Err(format!("plugin file is too large: {}", relative.display()));
+            }
+            total_bytes = total_bytes.saturating_add(metadata.len());
+            if total_bytes > MAX_TOTAL_BYTES {
+                return Err("plugin files are too large".into());
+            }
+            let bytes = fs::read(entry.path())
+                .map_err(|error| format!("cannot read plugin file: {error}"))?;
+            let contents = String::from_utf8(bytes)
+                .map_err(|_| format!("plugin file is not UTF-8 text: {}", relative.display()))?;
+            let name = relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            files.insert(name, contents);
+        }
+    }
+
+    let manifest_text = files
+        .get("plugin.json")
+        .ok_or("plugin is missing plugin.json")?;
+    let manifest_value = serde_json::from_str::<Value>(manifest_text)
+        .map_err(|error| format!("plugin.json is not valid JSON: {error}"))?;
+    let manifest =
+        validate_plugin_manifest_value(&manifest_value).map_err(|errors| errors.join("; "))?;
+    if manifest.id != plugin_id {
+        return Err("plugin manifest id does not match requested plugin id".into());
+    }
+    Ok(files)
 }
 
 fn delete_external_plugin_dir(plugin_path: &Path, plugins_dir: &Path) -> Result<(), String> {
@@ -4754,6 +5008,19 @@ fn read_external_plugin_entry(
 }
 
 #[tauri::command]
+fn read_external_plugin_files(
+    app: AppHandle,
+    plugin_id: String,
+) -> Result<HashMap<String, String>, String> {
+    let plugins_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("plugins");
+    read_external_plugin_files_from_dir(&plugin_id, &plugins_dir)
+}
+
+#[tauri::command]
 fn install_external_plugin_zip(
     app: AppHandle,
     zip_path: String,
@@ -4764,6 +5031,19 @@ fn install_external_plugin_zip(
         .map_err(|error| error.to_string())?
         .join("plugins");
     install_external_plugin_zip_file(Path::new(&zip_path), &plugins_dir)
+}
+
+#[tauri::command]
+fn install_external_plugin_draft(
+    app: AppHandle,
+    files: HashMap<String, String>,
+) -> Result<ExternalPluginDiscovery, String> {
+    let plugins_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("plugins");
+    install_external_plugin_draft_files(files, &plugins_dir)
 }
 
 #[tauri::command]
@@ -5798,7 +6078,9 @@ pub fn run() {
             stop_package_install,
             discover_external_plugins,
             read_external_plugin_entry,
+            read_external_plugin_files,
             install_external_plugin_zip,
+            install_external_plugin_draft,
             delete_external_plugin,
             start_pyright_language_server,
             send_pyright_message,
@@ -6075,6 +6357,15 @@ mod tests {
         let finished = json!({ "choices": [{ "delta": {}, "finish_reason": "length" }] });
         assert_eq!(ai_stream_reasoning_delta(&reasoning), Some("thinking"));
         assert_eq!(ai_stream_finish_reason(&finished), Some("length"));
+    }
+
+    #[test]
+    fn ai_reasoning_effort_uses_openai_values() {
+        let mut body = json!({ "model": "reasoning-model" });
+        apply_ai_reasoning_effort(&mut body, Some("xhigh")).unwrap();
+        assert_eq!(body["reasoning_effort"], "xhigh");
+
+        assert!(apply_ai_reasoning_effort(&mut body, Some("extra-high")).is_err());
     }
 
     #[test]
@@ -6718,7 +7009,12 @@ mod tests {
             "description": "处理示例项目",
             "tools": ["inspect_sample"],
             "fileTypes": [".sample"],
-            "detect": "content"
+            "detect": "content",
+            "codegen": {
+              "entryBlock": "visual_python_sample_program",
+              "statementInput": "BODY",
+              "runtimeNames": ["workspace", "actor"]
+            }
           }
         }))
         .expect("valid manifest");
@@ -6739,6 +7035,16 @@ mod tests {
                 .unwrap(),
             &[".sample"]
         );
+        let codegen = manifest.agent.as_ref().unwrap().codegen.as_ref().unwrap();
+        assert_eq!(
+            codegen.entry_block.as_deref(),
+            Some("visual_python_sample_program")
+        );
+        assert_eq!(codegen.statement_input.as_deref(), Some("BODY"));
+        assert_eq!(
+            codegen.runtime_names.as_ref().unwrap(),
+            &["workspace", "actor"]
+        );
     }
 
     #[test]
@@ -6753,7 +7059,12 @@ mod tests {
             "description": "",
             "tools": [""],
             "fileTypes": [""],
-            "detect": "unknown"
+            "detect": "unknown",
+            "codegen": {
+              "entryBlock": "",
+              "statementInput": "",
+              "runtimeNames": [""]
+            }
           }
         }))
         .expect_err("invalid agent manifest");
@@ -6770,6 +7081,18 @@ mod tests {
         assert!(errors
             .iter()
             .any(|error| error.contains("agent detect must be one of")));
+        assert!(errors
+            .iter()
+            .any(|error| error.contains("agent codegen entry block cannot be empty")));
+        assert!(errors
+            .iter()
+            .any(|error| error.contains("agent codegen statement input cannot be empty")));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error
+                    .contains("agent codegen runtime names cannot contain empty values"))
+        );
     }
 
     #[test]
@@ -6881,6 +7204,109 @@ mod tests {
             .join("index.js")
             .exists());
 
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn installs_external_plugin_draft_files_safely() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("visual-python-plugin-draft-test-{suffix}"));
+        let plugins_dir = root.join("plugins");
+        fs::create_dir_all(&root).unwrap();
+        let files = HashMap::from([
+            ("plugin.json".to_owned(), r#"{"id":"visual-python.draft-demo","name":"Draft Demo","version":"1.0.0","apiVersion":"1","entry":"index.js"}"#.to_owned()),
+            ("index.js".to_owned(), "export default { activate() {} };".to_owned()),
+            ("docs/README.md".to_owned(), "# Draft Demo\n".to_owned()),
+        ]);
+
+        let discovery =
+            install_external_plugin_draft_files(files, &plugins_dir).expect("installed draft");
+        assert!(discovery.valid);
+        assert!(plugins_dir
+            .join("visual-python.draft-demo")
+            .join("docs/README.md")
+            .exists());
+
+        let replacement_files = HashMap::from([
+            ("plugin.json".to_owned(), r#"{"id":"visual-python.draft-demo","name":"Draft Demo Updated","version":"1.0.1","apiVersion":"1","entry":"index.js"}"#.to_owned()),
+            ("index.js".to_owned(), "export default { activate() {} };".to_owned()),
+            ("README.md".to_owned(), "# Updated\n".to_owned()),
+        ]);
+        install_external_plugin_draft_files(replacement_files, &plugins_dir)
+            .expect("replaced draft");
+        assert_eq!(
+            fs::read_to_string(
+                plugins_dir
+                    .join("visual-python.draft-demo")
+                    .join("README.md")
+            )
+            .unwrap(),
+            "# Updated\n"
+        );
+        assert!(!fs::read_dir(&plugins_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().starts_with(".backup-")));
+
+        let unsafe_files = HashMap::from([
+            ("plugin.json".to_owned(), r#"{"id":"visual-python.unsafe","name":"Unsafe","version":"1.0.0","apiVersion":"1","entry":"index.js"}"#.to_owned()),
+            ("../outside.js".to_owned(), "bad".to_owned()),
+            ("index.js".to_owned(), "export default { activate() {} };".to_owned()),
+        ]);
+        assert!(install_external_plugin_draft_files(unsafe_files, &plugins_dir).is_err());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn reads_installed_plugin_text_files_by_id() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("visual-python-plugin-read-test-{suffix}"));
+        let plugins_dir = root.join("plugins");
+        let plugin_dir = plugins_dir.join("visual-python.read-demo");
+        fs::create_dir_all(plugin_dir.join("docs")).unwrap();
+        fs::write(plugin_dir.join("plugin.json"), r#"{"id":"visual-python.read-demo","name":"Read Demo","version":"1.0.0","apiVersion":"1","entry":"index.js"}"#).unwrap();
+        fs::write(
+            plugin_dir.join("index.js"),
+            "export default { activate() {} };\n",
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("docs").join("guide.txt"), "guide\n").unwrap();
+
+        let files = read_external_plugin_files_from_dir("visual-python.read-demo", &plugins_dir)
+            .expect("read plugin files");
+
+        assert_eq!(
+            files.get("docs/guide.txt").map(String::as_str),
+            Some("guide\n")
+        );
+        assert!(read_external_plugin_files_from_dir("../outside", &plugins_dir).is_err());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn rejects_binary_installed_plugin_files() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("visual-python-plugin-binary-test-{suffix}"));
+        let plugins_dir = root.join("plugins");
+        let plugin_dir = plugins_dir.join("visual-python.binary-demo");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(plugin_dir.join("plugin.json"), r#"{"id":"visual-python.binary-demo","name":"Binary Demo","version":"1.0.0","apiVersion":"1","entry":"index.js"}"#).unwrap();
+        fs::write(plugin_dir.join("index.js"), [0xff, 0xfe, 0xfd]).unwrap();
+
+        let error = read_external_plugin_files_from_dir("visual-python.binary-demo", &plugins_dir)
+            .expect_err("binary file must be rejected");
+
+        assert!(error.contains("UTF-8"));
         fs::remove_dir_all(&root).unwrap();
     }
 

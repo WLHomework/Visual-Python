@@ -92,6 +92,30 @@ describe("Agent context compression", () => {
     expect(result).not.toContain("x".repeat(500));
   });
 
+  it("keeps oversized plugin tool results as valid compact JSON", () => {
+    const result = compactAgentToolResult("update_plugin_draft", {
+      updated: true,
+      draftId: "draft-1",
+      files: Object.fromEntries(Array.from({ length: 6 }, (_, index) => [`file-${index}.js`, "x".repeat(20_000)])),
+    });
+
+    expect(() => JSON.parse(result)).not.toThrow();
+    expect(result.length).toBeLessThanOrEqual(6_000);
+  });
+
+  it("preserves a bounded plugin source page", () => {
+    const result = compactAgentToolResult("read_plugin_draft_file", {
+      path: "index.js",
+      offset: 0,
+      content: "x".repeat(5_000),
+      totalChars: 8_000,
+      truncated: true,
+      nextOffset: 5_000,
+    });
+
+    expect(JSON.parse(result)).toMatchObject({ content: "x".repeat(5_000), nextOffset: 5_000 });
+  });
+
   it("compacts only verbose assistant narration in the model-history copy", () => {
     expect(compactAgentAssistantMessage("说明".repeat(1000))).toContain("[内容已截断]");
   });

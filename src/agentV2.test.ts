@@ -4,9 +4,9 @@ const mocks = vi.hoisted(() => ({ streamAiChat: vi.fn() }));
 
 vi.mock("./aiConfig", () => ({ streamAiChat: mocks.streamAiChat }));
 
-import { normalizeAiToolCalls, parseTextToolCalls, runVisualPythonAgent, type AgentActivityEvent, type AgentHost } from "./agentV2";
+import { normalizeAiToolCalls, parseTextToolCalls, runVisualPythonAgent, type AgentActivityEvent, type AgentHost, type AgentTool } from "./agentV2";
 import type { AiChatMessage } from "./aiConfig";
-import { coreAgentTools, requiresPermission } from "./agentV2/toolRegistry";
+import { coreAgentTools, requiresPermission, toolsForAgentMode } from "./agentV2/toolRegistry";
 import { manimAgentTools } from "./plugins/builtin/manim/agentTools";
 
 const toolCall = (id: string, name: string, args: Record<string, unknown> = {}) => ({
@@ -43,6 +43,123 @@ describe("Visual Python Agent v2", () => {
     expect(coreAgentTools.some((tool) => ["validate_scene", "render_manim", "get_voiceover_context"].includes(tool.definition.function.name))).toBe(false);
   });
 
+  it("exposes permission-gated plugin authoring tools in the core set", () => {
+    const names = coreAgentTools.map((tool) => tool.definition.function.name);
+    expect(names).toEqual(expect.arrayContaining(["list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft_file", "create_plugin_draft", "update_plugin_draft", "validate_plugin_draft", "install_plugin_draft"]));
+    expect(requiresPermission("install_plugin_draft")).toBe(true);
+    expect(coreAgentTools.find((tool) => tool.definition.function.name === "install_plugin_draft")).toMatchObject({ requiresPermission: true, changesState: true });
+  });
+
+  it("exposes diagnostics as a read-only tool in every workspace and plan mode", () => {
+    const diagnostics = coreAgentTools.find((tool) => tool.definition.function.name === "get_diagnostics");
+    expect(diagnostics).toMatchObject({ readOnly: true });
+    expect(diagnostics?.workspaceModes).toBeUndefined();
+    expect(toolsForAgentMode("plan").some((tool) => tool.function.name === "get_diagnostics")).toBe(true);
+  });
+
+  it("refreshes plugin tools between Agent rounds", async () => {
+    const pluginTool: AgentTool = {
+      definition: { type: "function", function: { name: "inspect_numpy", description: "Inspect NumPy", parameters: { type: "object", properties: {} } } },
+      label: "查看 NumPy",
+      readOnly: true,
+    };
+    let installed = false;
+    mocks.streamAiChat
+      .mockImplementationOnce(async (_messages, _onDelta, options: { tools?: Array<{ function: { name: string } }> }) => {
+        expect(options.tools?.some((tool) => tool.function.name === "inspect_numpy")).toBe(false);
+        return completion("安装插件", [toolCall("install-1", "install_plugin_draft", { draftId: "draft-1" })]);
+      })
+      .mockImplementationOnce(async (_messages, _onDelta, options: { tools?: Array<{ function: { name: string } }> }) => {
+        expect(options.tools?.some((tool) => tool.function.name === "inspect_numpy")).toBe(true);
+        return completion("读取插件能力", [toolCall("inspect-1", "inspect_numpy")]);
+      })
+      .mockResolvedValueOnce(completion("完成"));
+    const executeTool = vi.fn()
+      .mockImplementationOnce(async () => { installed = true; return { installed: true, changed: true }; })
+      .mockResolvedValueOnce({ ok: true, numpy: "available" });
+
+    await runVisualPythonAgent({
+      prompt: "安装并检查 NumPy 插件",
+      host: createHost({ getTools: () => installed ? [pluginTool] : [], executeTool }),
+      onPermissionRequest: vi.fn().mockResolvedValue(true),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    expect(executeTool).toHaveBeenNthCalledWith(2, "inspect_numpy", {}, expect.any(AbortSignal));
+  });
+
+  it("teaches the model the plugin authoring workflow", async () => {
+    mocks.streamAiChat.mockImplementationOnce(async (messages) => {
+      const system = (messages as AiChatMessage[]).find((message) => message.role === "system")?.content || "";
+      expect(system).toContain("create_plugin_draft");
+      expect(system).toContain("list_installed_plugins");
+      expect(system).toContain("import_installed_plugin_draft");
+      expect(system).toContain("read_plugin_draft_file");
+      expect(system).toContain("update_plugin_draft");
+      expect(system).toContain("validate_plugin_draft");
+      expect(system).toContain("install_plugin_draft");
+      expect(system).toContain("不要把插件代码写入当前普通 Python 文档");
+      expect(system).toContain("只有用户明确确认安装");
+      expect(system).toContain("codegen.json");
+      expect(system).toContain("先调用该能力的只读检查工具");
+      expect(system).toContain("不得引用未导入、未初始化或未由扩展契约声明的运行对象");
+      expect(system).toContain("get_diagnostics");
+      expect(system).toContain("4 个空格缩进");
+      return completion("已了解插件开发流程。");
+    });
+
+    await runVisualPythonAgent({
+      prompt: "开发一个插件",
+      host: createHost(),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+  });
+
+  it("keeps large activity results as valid JSON", async () => {
+    mocks.streamAiChat
+      .mockResolvedValueOnce(completion("", [toolCall("update-1", "update_plugin_draft", { draftId: "draft-1", files: { "index.js": "source" } })]))
+      .mockResolvedValueOnce(completion("草稿已更新"));
+    const events: AgentActivityEvent[] = [];
+
+    await runVisualPythonAgent({
+      prompt: "更新插件草稿",
+      host: createHost({ executeTool: vi.fn().mockResolvedValue({ updated: true, files: { "index.js": "x".repeat(10_000) } }) }),
+      onEvent: (event) => events.push(event),
+      signal: new AbortController().signal,
+    });
+
+    const activity = events.find((event) => event.toolName === "update_plugin_draft" && event.status === "done");
+    expect(() => JSON.parse(activity?.resultText || "")).not.toThrow();
+    expect(JSON.parse(activity?.resultText || "{}")).toMatchObject({ updated: true, truncated: true });
+  });
+
+  it("treats nested plugin validation issues as an installation failure", async () => {
+    mocks.streamAiChat
+      .mockResolvedValueOnce(completion("", [toolCall("install-1", "install_plugin_draft", { draftId: "draft-1" })]))
+      .mockResolvedValueOnce(completion("安装完成"))
+      .mockResolvedValueOnce(completion("先读取诊断", [toolCall("diagnostics-1", "get_diagnostics")]))
+      .mockResolvedValueOnce(completion("根据诊断修改草稿", [toolCall("update-1", "update_plugin_draft", { draftId: "draft-1", files: { "plugin.json": "{}" } })]))
+      .mockResolvedValueOnce(completion("插件未安装，验证失败"));
+    const executeTool = vi.fn()
+      .mockResolvedValueOnce({ installed: false, validation: { valid: false, issues: ["plugin.json 缺少入口"] } })
+      .mockResolvedValueOnce({ output: [], problems: [], hasErrors: false })
+      .mockResolvedValueOnce({ updated: true, changed: true });
+    const events: AgentActivityEvent[] = [];
+
+    await runVisualPythonAgent({
+      prompt: "安装插件草稿",
+      host: createHost({ executeTool }),
+      onPermissionRequest: vi.fn().mockResolvedValue(true),
+      onEvent: (event) => events.push(event),
+      signal: new AbortController().signal,
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({ toolName: "install_plugin_draft", status: "error" }));
+    const secondRequest = mocks.streamAiChat.mock.calls[1][0] as Array<{ role: string; content?: string }>;
+    expect(secondRequest.some((message) => message.role === "tool" && message.content?.includes("plugin.json 缺少入口"))).toBe(true);
+  });
+
   it("uses the host confirmation as the only confirmation for explicit rendering", () => {
     const renderTool = manimAgentTools.find((tool) => tool.definition.function.name === "render_manim")?.definition;
     expect(renderTool?.function.description).toContain("不要先用 ask_user 询问是否渲染");
@@ -55,6 +172,8 @@ describe("Visual Python Agent v2", () => {
       expect(system).toContain("sample.inspect");
       expect(system).toContain(".sample");
       expect(system).toContain("content");
+      expect(system).toContain("sample_program");
+      expect(system).toContain("workspace, actor");
       expect((options.tools as Array<{ function: { name: string } }>).some((tool) => tool.function.name === "switch_document")).toBe(true);
       onDelta("已读取当前项目。");
       return completion("已读取当前项目。");
@@ -63,7 +182,7 @@ describe("Visual Python Agent v2", () => {
     await runVisualPythonAgent({
       prompt: "查看当前项目",
       host: createHost({
-        getCapabilities: () => [{ id: "sample", name: "Sample Plugin", description: "处理示例文档", tools: ["sample.inspect"], fileTypes: [".sample"], detect: "content" }],
+        getCapabilities: () => [{ id: "sample", name: "Sample Plugin", description: "处理示例文档", tools: ["sample.inspect"], fileTypes: [".sample"], detect: "content", codegen: { entryBlock: "sample_program", statementInput: "BODY", runtimeNames: ["workspace", "actor"] } }],
       }),
       onEvent: () => undefined,
       signal: new AbortController().signal,
@@ -110,6 +229,7 @@ describe("Visual Python Agent v2", () => {
     const events: AgentActivityEvent[] = [];
     const result = await runVisualPythonAgent({
       prompt: "添加一个圆，不要渲染。",
+      reasoningEffort: "medium",
       host: createHost(),
       onEvent: (event) => events.push(event),
       signal: new AbortController().signal,
@@ -117,6 +237,7 @@ describe("Visual Python Agent v2", () => {
 
     expect(mocks.streamAiChat).toHaveBeenCalledTimes(2);
     expect(mocks.streamAiChat.mock.calls[0][2]).toEqual(expect.objectContaining({ maxTokens: 8_192 }));
+    expect(mocks.streamAiChat.mock.calls.every((call) => call[2]?.reasoningEffort === "medium")).toBe(true);
     expect((mocks.streamAiChat.mock.calls[0][2].tools as Array<{ function: { name: string } }>).some((tool) => tool.function.name === "save_project")).toBe(true);
     expect(events.some((event) => event.kind === "thinking" && event.status === "done")).toBe(true);
     expect(events.some((event) => event.kind === "tool" && event.toolName === "get_context")).toBe(true);
@@ -126,6 +247,28 @@ describe("Visual Python Agent v2", () => {
     expect(toolEvents.at(-1)?.detail).toBeUndefined();
     expect(events.at(-1)).toMatchObject({ kind: "message", status: "done" });
     expect(result.summary).toContain("已完成修改");
+  });
+
+  it("coalesces rapid long-response deltas before updating the UI", async () => {
+    const content = "回复".repeat(2_000);
+    const reasoning = "分析".repeat(1_000);
+    mocks.streamAiChat.mockImplementationOnce(async (_messages, onDelta, options) => {
+      for (const character of reasoning) options.onReasoningDelta?.(character);
+      for (const character of content) onDelta(character);
+      return completion(content);
+    });
+    const events: AgentActivityEvent[] = [];
+
+    const result = await runVisualPythonAgent({
+      prompt: "详细说明当前代码",
+      host: createHost(),
+      onEvent: (event) => events.push(event),
+      signal: new AbortController().signal,
+    });
+
+    expect(events.filter((event) => event.id === "message-1" && event.status === "running").length).toBeLessThan(10);
+    expect(events.filter((event) => event.id === "thinking-1" && event.status === "running").length).toBeLessThan(10);
+    expect(result.summary).toBe(content);
   });
 
   it("keeps the initial request as an exact prefix while omitting full mutation snapshots", async () => {
@@ -296,6 +439,32 @@ describe("Visual Python Agent v2", () => {
     expect(continuedMessages.at(-1)?.content).toContain("上一轮响应达到本轮输出上限");
   });
 
+  it("keeps continuing after repeated output-limit truncation", async () => {
+    mocks.streamAiChat
+      .mockResolvedValueOnce(completion("", [], true))
+      .mockResolvedValueOnce(completion("", [], true))
+      .mockResolvedValueOnce(completion("", [], true))
+      .mockResolvedValueOnce(completion("", [], true))
+      .mockResolvedValueOnce(completion("", [], true))
+      .mockImplementationOnce(async (_messages, onDelta) => {
+        onDelta("长任务已完成");
+        return completion();
+      });
+
+    const result = await runVisualPythonAgent({
+      prompt: "完成一个需要多轮输出的长任务",
+      host: createHost(),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.summary).toBe("长任务已完成");
+    expect(mocks.streamAiChat).toHaveBeenCalledTimes(6);
+    const finalMessages = mocks.streamAiChat.mock.calls[5][0] as Array<{ role: string; content?: string }>;
+    expect(finalMessages.filter((message) => message.content?.includes("上一轮响应达到本轮输出上限"))).toHaveLength(1);
+    expect(finalMessages).toHaveLength(4);
+  });
+
   it("does not execute an incomplete tool call from a truncated response", async () => {
     const incomplete = toolCall("truncated-call", "get_context");
     incomplete.function.arguments = "{\"includeResources\":";
@@ -340,6 +509,26 @@ describe("Visual Python Agent v2", () => {
 
     expect(permissionRequest).toHaveBeenCalledWith(expect.objectContaining({ toolName: "render_manim" }));
     expect(executeTool).toHaveBeenCalledWith("render_manim", { outputType: "video" }, expect.any(AbortSignal));
+  });
+
+  it("explains the local JavaScript impact before installing a plugin", async () => {
+    const permissionRequest = vi.fn().mockResolvedValue(false);
+    mocks.streamAiChat
+      .mockResolvedValueOnce(completion("", [toolCall("install-1", "install_plugin_draft", { draftId: "draft-1" })]))
+      .mockResolvedValueOnce(completion("暂不安装"));
+
+    await runVisualPythonAgent({
+      prompt: "安装插件草稿",
+      onPermissionRequest: permissionRequest,
+      host: createHost(),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+
+    expect(permissionRequest).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: "install_plugin_draft",
+      detail: expect.stringContaining("插件目录"),
+    }));
   });
 
   it("does not execute a high-impact tool when the confirmation handler is unavailable", async () => {

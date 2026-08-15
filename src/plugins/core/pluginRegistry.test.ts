@@ -15,6 +15,24 @@ describe("PluginRegistry", () => {
     })).toThrow("插件 API 不兼容");
   });
 
+  it("generates a Python sample for every registered plugin block", async () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      manifest: { id: "test.samples", name: "Samples", version: "1.0.0", apiVersion: "1" },
+      activate(context) {
+        context.registerBlock({ type: "test_samples_loop", message0: "loop %1", args0: [{ type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null }, (_block, generator) => `for _ in range(2):\n${generator.INDENT}pass\n`);
+        context.registerToolboxCategory({ id: "test.samples.toolbox", name: "Samples", colour: "#397ca5", contents: [{ kind: "block", type: "test_samples_loop" }] });
+      },
+    });
+    await registry.activate("test.samples");
+
+    expect(registry.generatePythonSamples("test.samples")).toEqual([
+      { blockType: "test_samples_loop", code: "for _ in range(2):\n    pass\n" },
+    ]);
+
+    await registry.unregister("test.samples");
+  });
+
   it("activates namespaced block and toolbox contributions", async () => {
     const registry = new PluginRegistry();
     let loadedState: unknown;
@@ -58,6 +76,35 @@ describe("PluginRegistry", () => {
     await registry.activate("test.namespace");
     expect(registry.getRecords()[0].state).toBe("error");
     expect(registry.getProblems()[0].detail).toContain("积木类型必须以 test_namespace_ 开头");
+  });
+
+  it("does not mark a plugin active when activate registers no contributions", async () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      manifest: { id: "test.empty", name: "Empty", version: "1.0.0", apiVersion: PLUGIN_API_VERSION },
+      activate() { return; },
+    });
+
+    await registry.activate("test.empty");
+
+    expect(registry.getRecord("test.empty")).toMatchObject({ state: "error" });
+    expect(registry.getRecord("test.empty")?.error).toContain("未注册任何插件能力");
+  });
+
+  it("does not activate blocks that are absent from every toolbox category", async () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      manifest: { id: "test.hidden", name: "Hidden", version: "1.0.0", apiVersion: PLUGIN_API_VERSION },
+      activate(context) {
+        context.registerBlock({ type: "test_hidden_value", message0: "value", output: null }, () => ["1", Order.ATOMIC]);
+      },
+    });
+
+    await registry.activate("test.hidden");
+
+    expect(registry.getRecord("test.hidden")).toMatchObject({ state: "error" });
+    expect(registry.getRecord("test.hidden")?.error).toContain("没有注册工具箱分类");
+    expect(Blockly.Blocks.test_hidden_value).toBeUndefined();
   });
   it("registers and executes namespaced Agent tools only while active", async () => {
     const registry = new PluginRegistry();

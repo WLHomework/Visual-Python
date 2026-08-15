@@ -11,14 +11,14 @@ import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import ReactMarkdown from "react-markdown";
-import rehypeKatex from "rehype-katex";
+import rehypeKatex, { type Options as RehypeKatexOptions } from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { createCodeChangePreview } from "./agentV2";
-import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2";
-import { getAiAgentPermissionMode, type AiAgentPermissionMode } from "./aiConfig";
-import { buildAiConversationHistory, createAiConversationScope } from "./aiConversationContext";
+import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2";
+import { getAiAgentPermissionMode, getAiReasoningEffort, saveAiReasoningEffort, type AiAgentPermissionMode, type AiReasoningEffort } from "./aiConfig";
+import { buildAiConversationHistory } from "./aiConversationContext";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
 
 hljs.registerLanguage("bash", bash);
@@ -30,10 +30,15 @@ hljs.registerLanguage("python", python);
 hljs.registerLanguage("typescript", typescript);
 hljs.registerLanguage("xml", xml);
 
+const markdownKatexOptions: RehypeKatexOptions = {
+  strict: (errorCode) => ["unicodeTextInMathMode", "unknownSymbol"].includes(errorCode) ? "ignore" : "warn",
+};
+
 type RunAgentArgs = {
   prompt: string;
   history: AiConversationTurn[];
   agentMode: AiAgentMode;
+  reasoningEffort: AiReasoningEffort;
   initialPlan?: AiAgentPlanStep[];
   onActivity: (activity: AiAgentActivity) => void;
   onProgress: (progress: AiAgentProgress) => void;
@@ -46,7 +51,7 @@ type AiAssistantPanelProps = {
   lineCount: number;
   contextName: string;
   conversationScope: string;
-  conversationProjectId?: string;
+  conversationMigrationScopes?: string[];
   workspaceEpoch: number;
   onOpenSettings: () => void;
   onClose: () => void;
@@ -83,7 +88,7 @@ type AiConversation = {
   runs: AgentRun[];
 };
 
-type AiConversationState = {
+export type AiConversationState = {
   activeId: string;
   conversations: AiConversation[];
 };
@@ -106,6 +111,12 @@ let conversationSequence = 1;
 
 const aiHistoryStorageKey = (scope: string) => `${legacyAiHistoryStorageKey}:${encodeURIComponent(scope)}`;
 const aiConversationsStorageKey = (scope: string) => `visual-python:ai-conversations:${encodeURIComponent(scope)}`;
+const reasoningEffortLabels: Record<AiReasoningEffort, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+};
 
 function createConversationId() {
   return `conversation-${Date.now().toString(36)}-${conversationSequence++}`;
@@ -159,7 +170,7 @@ function loadStoredRuns(scope: string): AgentRun[] {
   }
 }
 
-function loadConversationState(scope: string): AiConversationState {
+function readConversationState(scope: string): AiConversationState {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(aiConversationsStorageKey(scope)) || "null");
     if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -189,6 +200,31 @@ function loadConversationState(scope: string): AiConversationState {
   }
   const conversation = createConversation(loadStoredRuns(scope));
   return { activeId: conversation.id, conversations: [conversation] };
+}
+
+export function mergeAiConversationStates(primary: AiConversationState, imported: AiConversationState[]): AiConversationState {
+  const candidates = [
+    ...primary.conversations.filter((conversation) => conversation.runs.length),
+    ...imported.flatMap((state) => state.conversations.filter((conversation) => conversation.runs.length)),
+  ];
+  const seen = new Set<string>();
+  const conversations = candidates
+    .filter((conversation) => {
+      if (seen.has(conversation.id)) return false;
+      seen.add(conversation.id);
+      return true;
+    })
+    .sort((left, right) => left.updatedAt - right.updatedAt)
+    .slice(-maxStoredConversations);
+  if (!conversations.length) return primary;
+  const primaryActive = conversations.some((conversation) => conversation.id === primary.activeId);
+  return { activeId: primaryActive ? primary.activeId : conversations.at(-1)!.id, conversations };
+}
+
+function loadConversationState(scope: string, migrationScopes: string[] = []): AiConversationState {
+  const primary = readConversationState(scope);
+  const imported = [...new Set(migrationScopes.filter((migrationScope) => migrationScope && migrationScope !== scope))].map(readConversationState);
+  return imported.length ? mergeAiConversationStates(primary, imported) : primary;
 }
 
 function isStorageQuotaError(error: unknown) {
@@ -412,18 +448,73 @@ export function taskPlanResumeLabel(steps: AiAgentPlanStep[]): string {
     : "从未完成步骤继续";
 }
 
-function storeTransferredConversation(scope: string, title: string, runs: AgentRun[]) {
-  const state = loadConversationState(scope);
-  const transferred = { ...createConversation(runs), title };
-  const conversations = [...state.conversations.filter((conversation) => conversation.runs.length), transferred].slice(-maxStoredConversations);
-  storeConversationState(scope, { activeId: transferred.id, conversations });
+export const aiAssistantSuggestions = [
+  { label: "创建一个基础程序", prompt: "创建一个基础程序" },
+  { label: "检查当前代码", prompt: "检查当前代码" },
+  { label: "修改当前文档", prompt: "修改当前文档" },
+] as const;
+
+export function buildAiFollowUpSuggestions(run: Pick<AgentRun, "activities">, contextName: string): AiFollowUpSuggestion[] {
+  const context = contextName.trim() || "当前工作区";
+  const toolNames = new Set(run.activities.flatMap((activity) => activity.toolName ? [activity.toolName] : []));
+  if (["render_manim", "render_image", "inspect_rendered_output"].some((name) => toolNames.has(name))) {
+    return [
+      { label: `检查 ${context} 的渲染结果`, prompt: `检查 ${context} 的渲染结果` },
+      { label: `继续优化 ${context} 的动画`, prompt: `继续优化 ${context} 的动画效果` },
+      { label: `修改 ${context} 的视觉效果`, prompt: `修改 ${context} 的视觉效果` },
+    ];
+  }
+  if (["add_workspace_block", "apply_workspace", "search_blocks", "get_workspace"].some((name) => toolNames.has(name))) {
+    return [
+      { label: `检查 ${context} 的积木连接`, prompt: `检查 ${context} 的积木连接和生成代码` },
+      { label: `继续完善 ${context}`, prompt: `继续完善 ${context} 的图形化程序` },
+      { label: `查看 ${context} 的可用积木`, prompt: `查看 ${context} 中还可以使用的相关积木` },
+    ];
+  }
+  if (["edit_code", "insert_statements", "replace_function_body", "add_import", "replace_code"].some((name) => toolNames.has(name)) || run.activities.some((activity) => activity.codeChange)) {
+    return [
+      { label: `检查 ${context} 的代码`, prompt: `检查 ${context} 的代码是否还有问题` },
+      { label: `运行 ${context} 验证结果`, prompt: `运行 ${context} 验证刚才的修改` },
+      { label: `继续完善 ${context}`, prompt: `继续完善 ${context} 的当前实现` },
+    ];
+  }
+  return [
+    { label: `检查 ${context}`, prompt: `检查 ${context} 的当前状态` },
+    { label: `继续完善 ${context}`, prompt: `继续完善 ${context}` },
+    { label: `查看 ${context} 的可用能力`, prompt: `查看 ${context} 当前可用的工具和能力` },
+  ];
 }
 
-const suggestions = [
-  "创建勾股定理动画",
-  "让图形沿圆形路径移动",
-  "添加标题和入场动画",
-];
+export function getAiFollowUpSuggestions(run: Pick<AgentRun, "activities" | "result">, contextName: string): AiFollowUpSuggestion[] {
+  const fallback = buildAiFollowUpSuggestions(run, contextName);
+  const generated = run.result?.followUpSuggestions || [];
+  const seen = new Set<string>();
+  return [...generated, ...fallback].filter((suggestion) => {
+    if (!suggestion.prompt || seen.has(suggestion.prompt)) return false;
+    seen.add(suggestion.prompt);
+    return true;
+  }).slice(0, 3);
+}
+
+export function applyAiAssistantSuggestion(prompt: string, setPrompt: (value: string) => void, focusPrompt: () => void) {
+  setPrompt(prompt);
+  focusPrompt();
+}
+
+export function shouldShowAiFollowUpSuggestions(runs: Array<Pick<AgentRun, "status">>) {
+  const status = runs.at(-1)?.status;
+  return status === "done" || status === "error" || status === "stopped";
+}
+
+export function AiAssistantSuggestionButtons({ onSelect, suggestions = aiAssistantSuggestions, className = "" }: { onSelect: (prompt: string) => void; suggestions?: readonly AiFollowUpSuggestion[]; className?: string }) {
+  return <div className={`ai-agent-suggestions${className ? ` ${className}` : ""}`} aria-label="建议任务">
+    {suggestions.map((suggestion) => <button type="button" key={suggestion.prompt} onClick={() => onSelect(suggestion.prompt)}>{suggestion.label}</button>)}
+  </div>;
+}
+
+export function AiAssistantWelcome({ onSelect }: { onSelect: (prompt: string) => void }) {
+  return <div className="ai-agent-empty" aria-label="AI 助手初始化"><AiAssistantSuggestionButtons onSelect={onSelect}/></div>;
+}
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 
@@ -565,7 +656,7 @@ export function normalizeAssistantMarkdown(value: string): string {
 }
 
 export function MarkdownContent({ children, className = "" }: { children: string; className?: string }) {
-  return <div className={`ai-markdown ${className}`}><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{ pre: MarkdownCodeBlock, a: MarkdownLink }}>{normalizeAssistantMarkdown(children)}</ReactMarkdown></div>;
+  return <div className={`ai-markdown ${className}`}><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, markdownKatexOptions]]} components={{ pre: MarkdownCodeBlock, a: MarkdownLink }}>{normalizeAssistantMarkdown(children)}</ReactMarkdown></div>;
 }
 
 function codeDiffStartLine(result?: string): number | null {
@@ -666,10 +757,56 @@ export function nextAiThreadScrollTop(scrollTop: number, deltaY: number, clientH
   return Math.max(0, Math.min(maximum, Number.isFinite(next) ? next : scrollTop));
 }
 
+export type AiThreadScrollbarInput = {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  trackHeight: number;
+};
+
+export function getAiThreadScrollbarMetrics(input: AiThreadScrollbarInput): { visible: boolean; thumbHeight: number; thumbTop: number; maxThumbTop: number } {
+  const trackHeight = Math.max(0, input.trackHeight);
+  const scrollHeight = Math.max(0, input.scrollHeight);
+  const clientHeight = Math.max(0, input.clientHeight);
+  const maximumScrollTop = Math.max(0, scrollHeight - clientHeight);
+  if (trackHeight <= 0 || maximumScrollTop <= 0) return { visible: false, thumbHeight: trackHeight, thumbTop: 0, maxThumbTop: 0 };
+  const thumbHeight = Math.max(28, Math.min(trackHeight, trackHeight * clientHeight / scrollHeight));
+  const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+  const progress = Math.max(0, Math.min(1, input.scrollTop / maximumScrollTop));
+  return { visible: true, thumbHeight, thumbTop: maxThumbTop * progress, maxThumbTop };
+}
+
+type AiThreadWheelTarget = Pick<HTMLElement, "scrollTop" | "scrollHeight" | "clientHeight"> & {
+  addEventListener: (type: "wheel", listener: (event: WheelEvent) => void, options: AddEventListenerOptions) => void;
+  removeEventListener: (type: "wheel", listener: (event: WheelEvent) => void) => void;
+};
+
+export function attachAiThreadWheelHandler(thread: AiThreadWheelTarget, onLeaveLatest: () => void): () => void {
+  const handleWheel = (event: WheelEvent) => {
+    event.stopPropagation();
+    if (event.deltaY === 0) return;
+    const deltaY = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * thread.clientHeight : event.deltaY;
+    const next = nextAiThreadScrollTop(thread.scrollTop, deltaY, thread.clientHeight, thread.scrollHeight);
+    if (next === thread.scrollTop) {
+      if (thread.scrollHeight > thread.clientHeight) event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    thread.scrollTop = next;
+    onLeaveLatest();
+  };
+  thread.addEventListener("wheel", handleWheel, { passive: false });
+  return () => thread.removeEventListener("wheel", handleWheel);
+}
+
 export function scrollThreadToLatest(thread: Pick<HTMLElement, "scrollTop" | "scrollHeight">, enabled: boolean): boolean {
   if (!enabled) return false;
   thread.scrollTop = thread.scrollHeight;
   return true;
+}
+
+export function shouldPersistConversationRuns(runs: Array<{ status: AgentRun["status"] }>): boolean {
+  return !runs.some((run) => run.status === "running");
 }
 
 export function formatAgentElapsed(startedAt?: number, finishedAt = Date.now()): string {
@@ -721,11 +858,28 @@ function parseAgentToolResult(value?: string): Record<string, unknown> | null {
   }
 }
 
+function malformedStructuredMessage(text: string): string | null {
+  const match = text.match(/"(?:error|message|diagnostic|warning)"\s*:\s*"((?:\\.|[^"\\])*)"/i)
+    || text.match(/"(?:issues|errors)"\s*:\s*\[\s*"((?:\\.|[^"\\])*)"/i);
+  if (!match) return null;
+  try {
+    const decoded = JSON.parse(`"${match[1]}"`) as unknown;
+    return typeof decoded === "string" && decoded.trim() ? decoded.trim() : null;
+  } catch {
+    return match[1]?.trim() || null;
+  }
+}
+
 function sanitizeAgentDisplayText(value?: string): string | null {
   const text = value?.trim();
   if (!text) return null;
   if (/[<＜][|｜]DSML[|｜]/i.test(text) || /[<＜][|｜](?:tool_calls?|invoke|parameter)[|｜]/i.test(text)) return "工具返回格式无效";
-  if ((text.startsWith("{") || text.startsWith("[")) && !parseAgentToolResult(text)) return "工具返回格式无效";
+  if ((text.startsWith("{") || text.startsWith("[")) && !parseAgentToolResult(text)) {
+    const message = malformedStructuredMessage(text);
+    if (message) return message;
+    if (text.includes("[结果已截断]") && /"(?:updated|created|installed|changed)"\s*:\s*true/i.test(text)) return null;
+    return "工具返回格式无效";
+  }
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (/^Traceback \(most recent call last\):/i.test(lines[0] || "")) {
     const exception = [...lines].reverse().find((line) => /^[A-Za-z_][\w.]*(?:Error|Exception):\s*\S/.test(line));
@@ -778,6 +932,16 @@ export function formatAgentToolResult(activity: AiAgentActivity): string | null 
     return missing.length ? `未安装：${missing.join("、")}` : null;
   }
   if (parsed.ok === false) return structuredAgentMessage(parsed.error) || "执行失败";
+  const validation = parsed.validation && typeof parsed.validation === "object" && !Array.isArray(parsed.validation)
+    ? parsed.validation as Record<string, unknown>
+    : null;
+  if (parsed.installed === false || validation?.valid === false) {
+    const error = structuredAgentMessage(validation?.error) || structuredAgentMessage(parsed.error);
+    if (error) return error;
+    const issues = Array.isArray(validation?.issues) ? validation.issues : Array.isArray(validation?.errors) ? validation.errors : [];
+    const messages = issues.map(structuredAgentMessage).filter((message): message is string => Boolean(message));
+    return messages.join("\n") || "插件未安装";
+  }
   if (parsed.valid === false) {
     const diagnostic = structuredAgentMessage(parsed.diagnostic);
     if (diagnostic) return diagnostic;
@@ -957,14 +1121,17 @@ export function settlePermissionResolvers(resolvers: Map<number, (approved: bool
   resolvers.clear();
 }
 
-export function AiAssistantPanel({ lineCount, contextName, conversationScope, conversationProjectId, workspaceEpoch, onOpenSettings, onClose, onRunAgent, onRevealCodeChange, onRevealProblem, onUndoTaskChange, onApplyTaskChange, onClearConversationConfirm }: AiAssistantPanelProps) {
+export function AiAssistantPanel({ lineCount, contextName, conversationScope, conversationMigrationScopes = [], workspaceEpoch, onOpenSettings, onClose, onRunAgent, onRevealCodeChange, onRevealProblem, onUndoTaskChange, onApplyTaskChange, onClearConversationConfirm }: AiAssistantPanelProps) {
   const [prompt, setPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<AiAgentMode>("agent");
   const [agentModeMenuOpen, setAgentModeMenuOpen] = useState(false);
+  const [reasoningEffort, setReasoningEffort] = useState<AiReasoningEffort>(() => getAiReasoningEffort());
+  const [reasoningEffortMenuOpen, setReasoningEffortMenuOpen] = useState(false);
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
   const [conversationPersistenceFailed, setConversationPersistenceFailed] = useState(false);
-  const [conversationState, setConversationState] = useState<AiConversationState>(() => loadConversationState(conversationScope));
+  const conversationMigrationKey = conversationMigrationScopes.join("|");
+  const [conversationState, setConversationState] = useState<AiConversationState>(() => loadConversationState(conversationScope, conversationMigrationScopes));
   const activeConversation = conversationState.conversations.find((conversation) => conversation.id === conversationState.activeId) ?? conversationState.conversations[0];
   const runs = activeConversation?.runs ?? [];
   const runId = useRef(Math.max(0, ...conversationState.conversations.flatMap((conversation) => conversation.runs.map((run) => run.id))) + 1);
@@ -972,14 +1139,27 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const permissionResolvers = useRef(new Map<number, (approved: boolean) => void>());
   const mountedRef = useRef(true);
   const threadRef = useRef<HTMLDivElement>(null);
+  const threadContentRef = useRef<HTMLDivElement>(null);
+  const threadScrollbarRef = useRef<HTMLDivElement>(null);
+  const threadScrollbarThumbRef = useRef<HTMLDivElement>(null);
+  const threadScrollbarDragRef = useRef<{ startY: number; startScrollTop: number; maxScrollTop: number; maxThumbTop: number } | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const conversationMenuRef = useRef<HTMLDivElement>(null);
   const agentModeMenuRef = useRef<HTMLDivElement>(null);
   const agentModeTriggerRef = useRef<HTMLButtonElement>(null);
+  const reasoningEffortMenuRef = useRef<HTMLDivElement>(null);
+  const reasoningEffortTriggerRef = useRef<HTMLButtonElement>(null);
   const runsRef = useRef(runs);
   const stickToLatestRef = useRef(true);
   const running = runs.some((run) => run.status === "running");
   const awaitingClarification = runs.at(-1)?.status === "done" && Boolean(runs.at(-1)?.result?.clarification);
+
+  useEffect(() => {
+    if (!conversationMigrationScopes.length) return;
+    const imported = [...new Set(conversationMigrationScopes.filter((scope) => scope && scope !== conversationScope))].map(readConversationState);
+    if (!imported.length) return;
+    setConversationState((current) => mergeAiConversationStates(current, imported));
+  }, [conversationMigrationKey, conversationScope]);
 
   const setRuns = (update: (items: AgentRun[]) => AgentRun[]) => {
     if (!mountedRef.current) return;
@@ -994,8 +1174,10 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   };
 
   useEffect(() => {
-    setConversationPersistenceFailed(!storeConversationState(conversationScope, conversationState));
-  }, [conversationScope, conversationState]);
+    if (!shouldPersistConversationRuns(runs)) return;
+    const failed = !storeConversationState(conversationScope, conversationState);
+    setConversationPersistenceFailed((current) => current === failed ? current : failed);
+  }, [conversationScope, conversationState, runs]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1014,14 +1196,10 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       setShowScrollToLatest(false);
       return;
     }
-    if (!stickToLatestRef.current) {
-      setShowScrollToLatest(true);
-      return;
-    }
+    if (!stickToLatestRef.current) return;
     const frame = requestAnimationFrame(() => {
       if (!threadRef.current) return;
-      if (!scrollThreadToLatest(threadRef.current, stickToLatestRef.current)) return;
-      setShowScrollToLatest(false);
+      scrollThreadToLatest(threadRef.current, stickToLatestRef.current);
     });
     return () => cancelAnimationFrame(frame);
   }, [runs]);
@@ -1034,6 +1212,83 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     });
     return () => cancelAnimationFrame(frame);
   }, [conversationState.activeId]);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    return attachAiThreadWheelHandler(thread, () => {
+      stickToLatestRef.current = false;
+      setShowScrollToLatest(true);
+    });
+  }, [workspaceEpoch]);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    const content = threadContentRef.current;
+    const track = threadScrollbarRef.current;
+    const thumb = threadScrollbarThumbRef.current;
+    if (!thread || !content || !track || !thumb) return;
+    let frame: number | null = null;
+    const update = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        const metrics = getAiThreadScrollbarMetrics({ scrollTop: thread.scrollTop, scrollHeight: thread.scrollHeight, clientHeight: thread.clientHeight, trackHeight: track.clientHeight });
+        track.classList.toggle("has-overflow", metrics.visible);
+        thumb.style.height = `${metrics.thumbHeight}px`;
+        thumb.style.transform = `translateY(${metrics.thumbTop}px)`;
+        track.setAttribute("aria-valuemax", String(Math.max(0, thread.scrollHeight - thread.clientHeight)));
+        track.setAttribute("aria-valuenow", String(Math.round(thread.scrollTop)));
+      });
+    };
+    const mutationObserver = new MutationObserver(update);
+    const resizeObserver = new ResizeObserver(update);
+    thread.addEventListener("scroll", update, { passive: true });
+    mutationObserver.observe(thread, { childList: true, subtree: true, characterData: true });
+    resizeObserver.observe(thread);
+    resizeObserver.observe(content);
+    resizeObserver.observe(track);
+    update();
+    return () => {
+      thread.removeEventListener("scroll", update);
+      mutationObserver.disconnect();
+      resizeObserver.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [workspaceEpoch]);
+
+  const handleAiScrollbarPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const thread = threadRef.current;
+    const track = threadScrollbarRef.current;
+    const thumb = threadScrollbarThumbRef.current;
+    if (!thread || !track || !thumb || !track.classList.contains("has-overflow")) return;
+    const metrics = getAiThreadScrollbarMetrics({ scrollTop: thread.scrollTop, scrollHeight: thread.scrollHeight, clientHeight: thread.clientHeight, trackHeight: track.clientHeight });
+    if (!metrics.visible || metrics.maxThumbTop <= 0) return;
+    event.preventDefault();
+    const trackRect = track.getBoundingClientRect();
+    if (event.target !== thumb) {
+      const targetTop = Math.max(0, Math.min(metrics.maxThumbTop, event.clientY - trackRect.top - metrics.thumbHeight / 2));
+      thread.scrollTop = targetTop / metrics.maxThumbTop * (thread.scrollHeight - thread.clientHeight);
+      return;
+    }
+    threadScrollbarDragRef.current = { startY: event.clientY, startScrollTop: thread.scrollTop, maxScrollTop: thread.scrollHeight - thread.clientHeight, maxThumbTop: metrics.maxThumbTop };
+    track.classList.add("dragging");
+    const move = (moveEvent: PointerEvent) => {
+      const drag = threadScrollbarDragRef.current;
+      if (!drag) return;
+      thread.scrollTop = Math.max(0, Math.min(drag.maxScrollTop, drag.startScrollTop + (moveEvent.clientY - drag.startY) / drag.maxThumbTop * drag.maxScrollTop));
+    };
+    const end = () => {
+      threadScrollbarDragRef.current = null;
+      track.classList.remove("dragging");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end, { once: true });
+    window.addEventListener("pointercancel", end, { once: true });
+  };
 
   useEffect(() => {
     if (!conversationMenuOpen) return;
@@ -1070,7 +1325,28 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   }, [agentModeMenuOpen]);
 
   useEffect(() => {
-    if (running) setAgentModeMenuOpen(false);
+    if (!reasoningEffortMenuOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!reasoningEffortMenuRef.current?.contains(event.target as Node)) setReasoningEffortMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setReasoningEffortMenuOpen(false);
+      reasoningEffortTriggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [reasoningEffortMenuOpen]);
+
+  useEffect(() => {
+    if (running) {
+      setAgentModeMenuOpen(false);
+      setReasoningEffortMenuOpen(false);
+    }
   }, [running]);
 
   const updateRun = (id: number, update: Partial<AgentRun>) => {
@@ -1127,6 +1403,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         prompt: normalizedPrompt,
         history,
         agentMode: runMode,
+        reasoningEffort,
         ...(initialPlan.length ? { initialPlan } : {}),
         onActivity: (activity) => updateActivity(id, activity),
         onProgress: (progress) => updateRun(id, { progress }),
@@ -1156,13 +1433,6 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       });
       setRuns(() => completedRuns);
       completedSuccessfully = true;
-      const transferredScope = result.taskChange?.conversationTargetId
-        ? conversationProjectId ? createAiConversationScope(conversationProjectId, result.taskChange.conversationTargetId) : result.taskChange.conversationTargetId
-        : "";
-      if (transferredScope && transferredScope !== conversationScope) {
-        const title = activeConversation?.title === "新对话" ? conversationTitle(normalizedVisiblePrompt) : activeConversation?.title || conversationTitle(normalizedVisiblePrompt);
-        queueMicrotask(() => storeTransferredConversation(transferredScope, title, completedRuns));
-      }
     } catch (error) {
       const failedStatus = controller.signal.aborted ? "stopped" : "error";
       const failedActivities = runsRef.current.find((run) => run.id === id)?.activities || [];
@@ -1221,19 +1491,6 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     setShowScrollToLatest(!atLatest);
   };
 
-  const handleThreadWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    const thread = threadRef.current;
-    if (!thread || event.deltaY === 0) return;
-    const deltaY = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * thread.clientHeight : event.deltaY;
-    const next = nextAiThreadScrollTop(thread.scrollTop, deltaY, thread.clientHeight, thread.scrollHeight);
-    if (next === thread.scrollTop) return;
-    event.preventDefault();
-    thread.scrollTop = next;
-    stickToLatestRef.current = false;
-    setShowScrollToLatest(true);
-  };
-
   const scrollToLatest = () => {
     const thread = threadRef.current;
     if (!thread) return;
@@ -1280,6 +1537,10 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     requestAnimationFrame(() => promptRef.current?.focus());
   };
 
+  const selectSuggestion = (suggestion: string) => {
+    applyAiAssistantSuggestion(suggestion, setPrompt, () => promptRef.current?.focus());
+  };
+
   return <section className="ai-assistant" aria-label="AI 编程助手">
     <header className="ai-assistant-header">
       <div className="ai-assistant-title"><span className="ai-assistant-icon"><Sparkles size={16}/></span><strong>AI 编程助手</strong><small title={activeConversation?.title}>{activeConversation?.title || "新对话"}</small></div>
@@ -1303,10 +1564,9 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       </div>
     </header>
     <div className="ai-thread-shell">
-      <div ref={threadRef} className={`ai-thread ${runs.length ? "has-runs" : ""}`} aria-live="polite" onScroll={handleThreadScroll} onWheel={handleThreadWheel}>
-        {!runs.length && <div className="ai-agent-empty" aria-label="指令示例">
-          {suggestions.map((suggestion) => <button key={suggestion} onClick={() => void runAgent(suggestion)}>{suggestion}</button>)}
-        </div>}
+      <div ref={threadRef} className={`ai-thread ${runs.length ? "has-runs" : ""}`} aria-live="polite" onScroll={handleThreadScroll}>
+        <div ref={threadContentRef} className="ai-thread-content">
+        {!runs.length && <AiAssistantWelcome onSelect={selectSuggestion}/>}
         {runs.map((run) => <article className="ai-agent-run" key={run.id}>
           <p className="ai-agent-prompt">{run.prompt}</p>
           <div className="ai-agent-activity-list">
@@ -1344,6 +1604,11 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
           </div>
           {run.error && <div className="ai-agent-error"><span className="ai-agent-error-content"><strong>任务未完成</strong><span>{formatAgentRunError(run.error)}</span>{run.startedAt ? <small>{formatAgentElapsed(run.startedAt, run.finishedAt)}</small> : null}</span><span className="ai-agent-error-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} onClick={() => resumeRun(run)} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])}><Play size={14}/></button> : <button disabled={running} onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)} title="重新执行此任务" aria-label="重新执行此任务"><RefreshCw size={15}/></button>}<button onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={15}/></button></span></div>}
         </article>)}
+        {runs.length > 0 && shouldShowAiFollowUpSuggestions(runs) && !runs.at(-1)?.result?.clarification && <div className="ai-agent-followups"><AiAssistantSuggestionButtons onSelect={selectSuggestion} suggestions={getAiFollowUpSuggestions(runs.at(-1)!, contextName)}/></div>}
+        </div>
+      </div>
+      <div ref={threadScrollbarRef} className="ai-thread-scrollbar" role="scrollbar" aria-label="AI 消息滚动条" aria-orientation="vertical" aria-valuemin={0} aria-valuemax={0} aria-valuenow={0} onPointerDown={handleAiScrollbarPointerDown}>
+        <div ref={threadScrollbarThumbRef} className="ai-thread-scrollbar-thumb" />
       </div>
       {showScrollToLatest && runs.length > 0 && <button type="button" className="ai-scroll-to-latest" onClick={scrollToLatest} title="回到最新消息" aria-label="回到最新消息"><ArrowDown size={16}/></button>}
     </div>
@@ -1352,12 +1617,21 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         <textarea ref={promptRef} value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); running ? enqueuePrompt() : void runAgent(); } }} placeholder={running ? "输入后续指令..." : awaitingClarification ? "输入序号或补充要求..." : agentMode === "plan" ? "描述需要规划的任务..." : "输入任务..."} aria-label="AI 指令" rows={2}/>
         <div className="ai-composer-footer">
           <div className="ai-agent-mode-menu" ref={agentModeMenuRef}>
-            <button ref={agentModeTriggerRef} type="button" className={`ai-agent-mode-trigger ${agentModeMenuOpen ? "open" : ""}`} disabled={running} onClick={() => setAgentModeMenuOpen((open) => !open)} onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setAgentModeMenuOpen(true); } }} title={agentMode === "plan" ? "只读分析并制定计划" : "直接执行任务"} aria-label={`智能体模式：${agentMode === "plan" ? "计划" : "智能体"}`} aria-haspopup="menu" aria-expanded={agentModeMenuOpen}>
+            <button ref={agentModeTriggerRef} type="button" className={`ai-agent-mode-trigger ${agentModeMenuOpen ? "open" : ""}`} disabled={running} onClick={() => { setReasoningEffortMenuOpen(false); setAgentModeMenuOpen((open) => !open); }} onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setReasoningEffortMenuOpen(false); setAgentModeMenuOpen(true); } }} title={agentMode === "plan" ? "只读分析并制定计划" : "直接执行任务"} aria-label={`智能体模式：${agentMode === "plan" ? "计划" : "智能体"}`} aria-haspopup="menu" aria-expanded={agentModeMenuOpen}>
               {agentMode === "plan" ? <ListChecks size={13}/> : <Sparkles size={13}/>}<span>{agentMode === "plan" ? "计划" : "智能体"}</span><ChevronDown size={13}/>
             </button>
             {agentModeMenuOpen && <div className="ai-agent-mode-options" role="menu" aria-label="选择智能体模式">
               <button type="button" role="menuitemradio" aria-checked={agentMode === "agent"} className={agentMode === "agent" ? "selected" : ""} onClick={() => { setAgentMode("agent"); setAgentModeMenuOpen(false); requestAnimationFrame(() => agentModeTriggerRef.current?.focus()); }}><Sparkles size={14}/><span>智能体</span>{agentMode === "agent" && <Check size={13}/>}</button>
               <button type="button" role="menuitemradio" aria-checked={agentMode === "plan"} className={agentMode === "plan" ? "selected" : ""} onClick={() => { setAgentMode("plan"); setAgentModeMenuOpen(false); requestAnimationFrame(() => agentModeTriggerRef.current?.focus()); }}><ListChecks size={14}/><span>计划</span>{agentMode === "plan" && <Check size={13}/>}</button>
+            </div>}
+          </div>
+          <div className="ai-agent-mode-menu ai-reasoning-effort-menu" ref={reasoningEffortMenuRef}>
+            <button ref={reasoningEffortTriggerRef} type="button" className={`ai-agent-mode-trigger ai-reasoning-effort-trigger ${reasoningEffortMenuOpen ? "open" : ""}`} disabled={running} onClick={() => { setAgentModeMenuOpen(false); setReasoningEffortMenuOpen((open) => !open); }} title={`思考强度：${reasoningEffortLabels[reasoningEffort]}`} aria-label={`思考强度：${reasoningEffortLabels[reasoningEffort]}`} aria-haspopup="menu" aria-expanded={reasoningEffortMenuOpen}>
+              <span>{reasoningEffortLabels[reasoningEffort]}</span><ChevronDown size={13}/>
+            </button>
+            {reasoningEffortMenuOpen && <div className="ai-agent-mode-options ai-reasoning-effort-options" role="menu" aria-label="选择思考强度">
+              <span className="ai-reasoning-effort-heading">思考强度</span>
+              {(Object.keys(reasoningEffortLabels) as AiReasoningEffort[]).map((effort) => <button type="button" role="menuitemradio" aria-checked={reasoningEffort === effort} className={reasoningEffort === effort ? "selected" : ""} key={effort} onClick={() => { setReasoningEffort(saveAiReasoningEffort(effort)); setReasoningEffortMenuOpen(false); requestAnimationFrame(() => reasoningEffortTriggerRef.current?.focus()); }}><span>{reasoningEffortLabels[effort]}</span>{reasoningEffort === effort && <Check size={13}/>}</button>)}
             </div>}
           </div>
           <span className="ai-composer-scope" title={`${contextName} · ${lineCount} 行代码`}><Code2 size={14}/><span>{contextName}</span><small>{lineCount} 行</small></span>

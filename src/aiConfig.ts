@@ -7,6 +7,7 @@ export type AiModelConfig = {
 };
 
 export type AiAgentPermissionMode = "auto" | "confirm";
+export type AiReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export type AiChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -70,6 +71,7 @@ export type AiModelCapabilities = {
 
 const storageKey = "visual-python:ai-model-config";
 const permissionModeStorageKey = "visual-python:ai-agent-permission-mode";
+const reasoningEffortStorageKey = "visual-python:ai-reasoning-effort";
 const capabilityStorageKey = "visual-python:ai-model-capabilities";
 const capabilityTtlMs = 7 * 24 * 60 * 60 * 1000;
 const defaultAiModelCapabilities: AiModelCapabilities = { functionCalling: "unknown", toolChoice: "unknown" };
@@ -158,6 +160,21 @@ export function saveAiAgentPermissionMode(mode: AiAgentPermissionMode): AiAgentP
   return normalized;
 }
 
+export function getAiReasoningEffort(): AiReasoningEffort {
+  try {
+    const value = localStorage.getItem(reasoningEffortStorageKey);
+    return value === "low" || value === "medium" || value === "xhigh" ? value : "high";
+  } catch {
+    return "high";
+  }
+}
+
+export function saveAiReasoningEffort(effort: AiReasoningEffort): AiReasoningEffort {
+  const normalized = effort === "low" || effort === "medium" || effort === "xhigh" ? effort : "high";
+  localStorage.setItem(reasoningEffortStorageKey, normalized);
+  return normalized;
+}
+
 export function hasAiApiKey(baseUrl: string): Promise<boolean> {
   return invoke<boolean>("has_ai_api_key", { baseUrl });
 }
@@ -186,7 +203,7 @@ let streamRequestSequence = 1;
 export async function streamAiChat(
   messages: AiChatMessage[],
   onDelta: (delta: string) => void,
-  options: { maxTokens?: number; signal?: AbortSignal; tools?: AiChatToolDefinition[]; toolChoice?: AiChatToolChoice; omitToolChoice?: boolean; onReasoningDelta?: (delta: string) => void; onToolCallDelta?: (delta: AiToolCallStreamDelta) => void } = {},
+  options: { maxTokens?: number; reasoningEffort?: AiReasoningEffort; signal?: AbortSignal; tools?: AiChatToolDefinition[]; toolChoice?: AiChatToolChoice; omitToolChoice?: boolean; onReasoningDelta?: (delta: string) => void; onToolCallDelta?: (delta: AiToolCallStreamDelta) => void } = {},
 ): Promise<AiChatCompletionResult> {
   const requestId = `${Date.now().toString(36)}-${streamRequestSequence++}`;
   if (options.signal?.aborted) throw new Error("已停止生成");
@@ -213,6 +230,7 @@ export async function streamAiChat(
       toolChoice: options.toolChoice ?? null,
       omitToolChoice: options.omitToolChoice ?? false,
       maxTokens: options.maxTokens ?? null,
+      reasoningEffort: options.reasoningEffort ?? null,
     });
     if (options.signal?.aborted) throw new Error("已停止生成");
     return result;

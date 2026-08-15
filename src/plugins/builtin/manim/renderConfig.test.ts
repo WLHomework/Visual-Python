@@ -1,9 +1,25 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultManimRenderConfig, getManimRenderConfig, isDefaultManimRenderConfig, loadManimRenderConfig, resetManimRenderConfig, setManimRenderConfig, subscribeManimRenderConfig } from "./renderConfig";
 import { manimPlugin } from "./index";
 import type { PluginProjectSerializer } from "../../api/types";
 
-afterEach(resetManimRenderConfig);
+const renderConfigStorageKey = "visual-python:manim-render-config";
+const storage = new Map<string, string>();
+
+beforeEach(() => {
+  storage.clear();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  });
+  resetManimRenderConfig();
+});
+
+afterEach(() => {
+  storage.clear();
+  resetManimRenderConfig();
+  vi.unstubAllGlobals();
+});
 
 describe("Manim render configuration", () => {
   it("uses stable defaults and applies valid project settings", () => {
@@ -23,6 +39,50 @@ describe("Manim render configuration", () => {
     unsubscribe();
   });
 
+  it("persists reusable render preferences without project-specific fields", () => {
+    setManimRenderConfig({
+      outputType: "image",
+      transparentBackground: true,
+      imageSizeMode: "custom",
+      imageWidth: 1600,
+      imageHeight: 1200,
+      lockImageAspectRatio: false,
+      imageCaptureMode: "animation",
+      imageAnimationStep: 3,
+      quality: "high",
+      fps: 60,
+      renderer: "opengl",
+      disableCaching: true,
+      selectedScene: "ProjectScene",
+      outputFileName: "lesson-one",
+    });
+
+    expect(JSON.parse(storage.get(renderConfigStorageKey) || "null")).toEqual({
+      outputType: "image",
+      transparentBackground: true,
+      imageSizeMode: "custom",
+      imageWidth: 1600,
+      imageHeight: 1200,
+      lockImageAspectRatio: false,
+      imageCaptureMode: "animation",
+      imageAnimationStep: 3,
+      quality: "high",
+      fps: 60,
+      renderer: "opengl",
+      disableCaching: true,
+    });
+  });
+
+  it("restores reusable preferences and lets project settings override them", () => {
+    storage.set(renderConfigStorageKey, JSON.stringify({ quality: "high", fps: 60, renderer: "opengl", disableCaching: true }));
+
+    resetManimRenderConfig();
+    expect(getManimRenderConfig()).toMatchObject({ quality: "high", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "", outputFileName: "" });
+
+    loadManimRenderConfig({ quality: "medium", selectedScene: "ProjectScene", outputFileName: "lesson-one" });
+    expect(getManimRenderConfig()).toMatchObject({ quality: "medium", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "ProjectScene", outputFileName: "lesson-one" });
+  });
+
   it("round-trips non-default settings through the Manim project serializer", async () => {
     let serializer: PluginProjectSerializer | undefined;
     await manimPlugin.activate({
@@ -39,7 +99,7 @@ describe("Manim render configuration", () => {
     setManimRenderConfig({ outputType: "image", transparentBackground: true, imageSizeMode: "custom", imageWidth: 1600, imageHeight: 1200, lockImageAspectRatio: false, imageCaptureMode: "animation", imageAnimationStep: 3, quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });
     const saved = serializer?.save();
     serializer?.clear?.();
-    expect(getManimRenderConfig()).toEqual(defaultManimRenderConfig);
+    expect(getManimRenderConfig()).toEqual({ outputType: "image", transparentBackground: true, imageSizeMode: "custom", imageWidth: 1600, imageHeight: 1200, lockImageAspectRatio: false, imageCaptureMode: "animation", imageAnimationStep: 3, quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "", outputFileName: "" });
     serializer?.load(saved);
     expect(getManimRenderConfig()).toEqual({ outputType: "image", transparentBackground: true, imageSizeMode: "custom", imageWidth: 1600, imageHeight: 1200, lockImageAspectRatio: false, imageCaptureMode: "animation", imageAnimationStep: 3, quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });
   });

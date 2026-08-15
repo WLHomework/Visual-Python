@@ -33,6 +33,7 @@ export function getActiveAgentCapabilities(): AgentCapability[] {
       tools: pluginRegistry.getAgentToolNames(record.plugin.manifest.id),
       fileTypes: record.plugin.manifest.agent!.fileTypes,
       detect: record.plugin.manifest.agent!.detect,
+      codegen: record.plugin.manifest.agent!.codegen,
       active: true,
     }));
 }
