@@ -362,6 +362,12 @@ Blockly.Blocks.python_dict_query = {
 };
 
 const sequenceOutputCheck = () => ["Array", "PythonTuple", "PythonSet"];
+const preserveEditableConnections = (connections: Array<Blockly.Connection | null>) => {
+  for (const connection of connections) {
+    const block = connection?.getSourceBlock();
+    if (block?.isShadow()) block.setShadow(false);
+  }
+};
 
 Blockly.Blocks.python_sequence_collection = {
   init(this: any) {
@@ -371,6 +377,7 @@ Blockly.Blocks.python_sequence_collection = {
     this.appendDummyInput("HEAD").appendField(kindField, "KIND");
     this.itemCount_ = 2; this.updateShape_(); this.updateOutputCheck_();
     this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg));
+    this.setTooltip("创建列表、元组或集合；下拉框选择类型，点击齿轮增减项目。");
   },
   itemCount_: 2,
   saveExtraState(this: any) { return { itemCount: this.itemCount_ }; },
@@ -398,10 +405,14 @@ Blockly.Blocks.python_sequence_collection = {
   },
   updateShape_(this: any) {
     this.getInput("TAIL") && this.removeInput("TAIL");
-    for (let i = 0; this.getInput(`ITEM${i}`); i++) this.removeInput(`ITEM${i}`);
     this.getInput("EMPTY") && this.removeInput("EMPTY");
     if (!this.itemCount_) this.appendDummyInput("EMPTY").appendField("空");
-    for (let i = 0; i < this.itemCount_; i++) { const input = this.appendValueInput(`ITEM${i}`); if (i > 0) input.appendField(","); }
+    for (let i = 0; i < this.itemCount_; i++) {
+      if (this.getInput(`ITEM${i}`)) continue;
+      const input = this.appendValueInput(`ITEM${i}`);
+      if (i > 0) input.appendField(",");
+    }
+    for (let i = this.itemCount_; this.getInput(`ITEM${i}`); i++) this.removeInput(`ITEM${i}`);
     this.updateTail_();
     this.setInputsInline(true);
   },
@@ -423,6 +434,7 @@ Blockly.Blocks.python_list_collection = {
     this.appendDummyInput("HEAD").appendField("列表 [");
     this.itemCount_ = 2; this.updateShape_();
     this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg));
+    this.setTooltip("创建可调整数量的列表；点击齿轮可以增减项目，也可以在项目中嵌套列表。\n需要切换列表、元组或集合时，请使用通用序列积木。");
   },
   itemCount_: 2,
   saveExtraState: Blockly.Blocks.python_sequence_collection.saveExtraState,
@@ -447,10 +459,33 @@ Blockly.Blocks.python_dynamic_dict = {
   compose(this: any, container: Blockly.Block) {
     const pairs: Array<[Blockly.Connection | null, Blockly.Connection | null]> = []; let item = container.getInputTargetBlock("STACK");
     while (item) { if (!item.isInsertionMarker()) pairs.push([(item as Blockly.Block & { keyConnection_?: Blockly.Connection | null }).keyConnection_ ?? null, (item as Blockly.Block & { valueConnection_?: Blockly.Connection | null }).valueConnection_ ?? null]); item = item.getNextBlock(); }
+    for (let i = 0; i < this.itemCount_; i++) {
+      const key = this.getInput(`KEY${i}`)?.connection?.targetConnection;
+      const value = this.getInput(`VALUE${i}`)?.connection?.targetConnection;
+      if (key && !pairs.some(([candidate]) => candidate === key)) key.disconnect();
+      if (value && !pairs.some(([, candidate]) => candidate === value)) value.disconnect();
+    }
     this.itemCount_ = pairs.length; this.updateShape_(); pairs.forEach(([key, val], i) => { key?.reconnect(this, `KEY${i}`); val?.reconnect(this, `VALUE${i}`); });
   },
   saveConnections(this: any, container: Blockly.Block) { let item = container.getInputTargetBlock("STACK"); let i = 0; while (item) { if (!item.isInsertionMarker()) { const typed = item as Blockly.Block & { keyConnection_?: Blockly.Connection | null; valueConnection_?: Blockly.Connection | null }; typed.keyConnection_ = this.getInput(`KEY${i}`)?.connection?.targetConnection; typed.valueConnection_ = this.getInput(`VALUE${i}`)?.connection?.targetConnection; i++; } item = item.getNextBlock(); } },
-  updateShape_(this: any) { this.getInput("TAIL") && this.removeInput("TAIL"); for (let i = 0; this.getInput(`KEY${i}`); i++) { this.removeInput(`KEY${i}`); this.removeInput(`VALUE${i}`); } this.getInput("EMPTY") && this.removeInput("EMPTY"); if (!this.itemCount_) this.appendDummyInput("EMPTY").appendField("空"); for (let i = 0; i < this.itemCount_; i++) { const key = this.appendValueInput(`KEY${i}`); if (i > 0) key.appendField(","); this.appendValueInput(`VALUE${i}`).appendField(":"); } this.appendDummyInput("TAIL").appendField("}"); this.setInputsInline(true); },
+  updateShape_(this: any) {
+    this.getInput("TAIL") && this.removeInput("TAIL");
+    this.getInput("EMPTY") && this.removeInput("EMPTY");
+    if (!this.itemCount_) this.appendDummyInput("EMPTY").appendField("空");
+    for (let i = 0; i < this.itemCount_; i++) {
+      if (!this.getInput(`KEY${i}`)) {
+        const key = this.appendValueInput(`KEY${i}`);
+        if (i > 0) key.appendField(",");
+      }
+      if (!this.getInput(`VALUE${i}`)) this.appendValueInput(`VALUE${i}`).appendField(":");
+    }
+    for (let i = this.itemCount_; this.getInput(`KEY${i}`); i++) {
+      this.removeInput(`KEY${i}`);
+      this.removeInput(`VALUE${i}`);
+    }
+    this.appendDummyInput("TAIL").appendField("}");
+    this.setInputsInline(true);
+  },
 } as unknown as (typeof Blockly.Blocks)[string];
 
 Blockly.Blocks.python_print_many = {
@@ -479,6 +514,7 @@ Blockly.Blocks.python_print_many = {
       const target = this.getInput(`ITEM${i}`)?.connection?.targetConnection;
       if (target && !connections.includes(target)) target.disconnect();
     }
+    preserveEditableConnections(connections);
     this.itemCount_ = Math.max(1, connections.length);
     this.updateShape_();
     connections.forEach((connection, index) => connection?.reconnect(this, `ITEM${index}`));
@@ -670,6 +706,7 @@ const parameterMixin = {
     while (item) { if (!item.isInsertionMarker()) { parameters.push({ kind: item.getFieldValue("KIND"), name: item.getFieldValue("NAME") || "数值", annotation: item.getFieldValue("TYPE") || "" }); connections.push((item as any).valueConnection_ ?? null); } item = item.getNextBlock(); }
     const normalized = normalizeParameters(parameters);
     const orderedConnections = normalized.map((parameter) => connections[parameters.findIndex((item) => item.name === parameter.name)] ?? null);
+    preserveEditableConnections(orderedConnections);
     this.parameters_ = normalized; rebuildParameterShape(this); orderedConnections.forEach((connection, i) => connection?.reconnect(this, `PARAM${i}`));
   },
   saveConnections(this: any, container: Blockly.Block) { let item = container.getInputTargetBlock("STACK"); let i = 0; while (item) { if (!item.isInsertionMarker()) { (item as any).valueConnection_ = this.getInput(`PARAM${i}`)?.connection?.targetConnection; i++; } item = item.getNextBlock(); } },
@@ -732,6 +769,7 @@ const argumentMixin = {
     const unchanged = JSON.stringify(normalized) === JSON.stringify(current)
       && connections.every((connection, index) => connection === currentConnections[index]);
     if (unchanged) return;
+    preserveEditableConnections(connections);
     this.arguments_ = normalized;
     rebuildArgumentShape(this);
     connections.forEach((connection, index) => connection?.reconnect(this, `ARG${index}`));
@@ -1172,15 +1210,14 @@ const booleanShadow = (value: "TRUE" | "FALSE") => ({ shadow: { type: "logic_boo
 const toolboxVariableField = (name: string) => ({ id: `toolbox-variable-${name}`, name });
 const variableShadow = (name: string) => ({ shadow: { type: "variables_get", fields: { VAR: toolboxVariableField(name) } } });
 const listShadow = (values: number[] = []) => ({
-  shadow: {
-    type: "python_sequence_collection",
-    fields: { KIND: "list" },
+  block: {
+    type: "python_list_collection",
     extraState: { itemCount: values.length },
     inputs: Object.fromEntries(values.map((item, index) => [`ITEM${index}`, numberShadow(item)])),
   },
 });
 const tupleShadow = (values: number[] = []) => ({
-  shadow: {
+  block: {
     type: "python_sequence_collection",
     fields: { KIND: "tuple" },
     extraState: { itemCount: values.length },
@@ -1188,7 +1225,7 @@ const tupleShadow = (values: number[] = []) => ({
   },
 });
 const setShadow = (values: number[] = []) => ({
-  shadow: {
+  block: {
     type: "python_sequence_collection",
     fields: { KIND: "set" },
     extraState: { itemCount: values.length },
@@ -1196,9 +1233,8 @@ const setShadow = (values: number[] = []) => ({
   },
 });
 const textListShadow = (values: string[]) => ({
-  shadow: {
-    type: "python_sequence_collection",
-    fields: { KIND: "list" },
+  block: {
+    type: "python_list_collection",
     extraState: { itemCount: values.length },
     inputs: Object.fromEntries(values.map((item, index) => [`ITEM${index}`, textShadow(item)])),
   },

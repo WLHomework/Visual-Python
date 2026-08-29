@@ -781,11 +781,28 @@ type AiThreadWheelTarget = Pick<HTMLElement, "scrollTop" | "scrollHeight" | "cli
   removeEventListener: (type: "wheel", listener: (event: WheelEvent) => void) => void;
 };
 
+type AiNestedScrollTarget = Pick<HTMLElement, "scrollTop" | "scrollHeight" | "clientHeight">;
+
+function findNestedAiScrollTarget(target: EventTarget | null): AiNestedScrollTarget | null {
+  if (!target || typeof (target as { closest?: unknown }).closest !== "function") return null;
+  const candidate = (target as Element).closest(".ai-agent-thinking > .ai-markdown");
+  return candidate ? candidate as AiNestedScrollTarget : null;
+}
+
 export function attachAiThreadWheelHandler(thread: AiThreadWheelTarget, onLeaveLatest: () => void): () => void {
   const handleWheel = (event: WheelEvent) => {
     event.stopPropagation();
     if (event.deltaY === 0) return;
     const deltaY = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * thread.clientHeight : event.deltaY;
+    const nestedTarget = findNestedAiScrollTarget(event.target);
+    if (nestedTarget) {
+      const nextNestedScrollTop = nextAiThreadScrollTop(nestedTarget.scrollTop, deltaY, nestedTarget.clientHeight, nestedTarget.scrollHeight);
+      if (nextNestedScrollTop !== nestedTarget.scrollTop) {
+        event.preventDefault();
+        nestedTarget.scrollTop = nextNestedScrollTop;
+      }
+      return;
+    }
     const next = nextAiThreadScrollTop(thread.scrollTop, deltaY, thread.clientHeight, thread.scrollHeight);
     if (next === thread.scrollTop) {
       if (thread.scrollHeight > thread.clientHeight) event.preventDefault();

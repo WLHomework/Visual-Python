@@ -58,6 +58,10 @@ const pickerConfigs: Record<string, FileBlockPickerConfig[]> = {
   python_path_write_text: [{ inputName: "PATH", mode: "save-file" }],
   python_os_listdir: [{ inputName: "PATH", mode: "directory" }],
   python_os_makedirs: [{ inputName: "PATH", mode: "directory" }],
+  visual_python_pandas_read_csv: [{ inputName: "PATH", mode: "open-file" }],
+  visual_python_pandas_to_csv: [{ inputName: "PATH", mode: "save-file" }],
+  visual_python_pandas_read_excel: [{ inputName: "PATH", mode: "open-file" }],
+  visual_python_pandas_to_excel: [{ inputName: "PATH", mode: "save-file" }],
   visual_python_manim_play_local_audio: [{ inputName: "PATH", mode: "audio-file", previewAudio: true }],
   visual_python_manim_play_local_audio_with_animation: [{ inputName: "PATH", mode: "audio-file", previewAudio: true }],
 };

@@ -61,9 +61,15 @@ const escapeFStringText = (input: string) => String(input || "")
 const numberShadow = (value: number) => ({ shadow: { type: "math_number", fields: { NUM: value } } });
 const textShadow = (value: string) => ({ shadow: { type: "text", fields: { TEXT: value } } });
 const listShadow = (values: number[] = []) => ({
+  block: {
+    type: "python_list_collection",
+    extraState: { itemCount: values.length },
+    inputs: Object.fromEntries(values.map((item, index) => [`ITEM${index}`, numberShadow(item)])),
+  },
+});
+const shadowList = (values: number[] = []) => ({
   shadow: {
-    type: "python_sequence_collection",
-    fields: { KIND: "list" },
+    type: "python_list_collection",
     extraState: { itemCount: values.length },
     inputs: Object.fromEntries(values.map((item, index) => [`ITEM${index}`, numberShadow(item)])),
   },
@@ -124,7 +130,7 @@ export const pythonSyntaxToolbox = {
     { kind: "label", text: "迭代工具", "web-class": "python-standard-library-label" },
     { kind: "block", type: "python_builtin_map_filter", fields: { FUNCTION: "map" }, inputs: { CALLABLE: expressionShadow("lambda 数值: 数值 * 2"), ITERABLE: listShadow([1, 2, 3]) } },
     { kind: "block", type: "python_builtin_iter", inputs: { ITERABLE: listShadow([1, 2, 3]) } },
-    { kind: "block", type: "python_builtin_next", inputs: { ITERATOR: { shadow: { type: "python_builtin_iter", inputs: { ITERABLE: listShadow([1, 2, 3]) } } } } },
+    { kind: "block", type: "python_builtin_next", inputs: { ITERATOR: { shadow: { type: "python_builtin_iter", inputs: { ITERABLE: shadowList([1, 2, 3]) } } } } },
   ],
   logic: [
     { kind: "block", type: "python_chained_compare", fields: { OP1: "<", OP2: "<" }, inputs: { A: numberShadow(0), B: numberShadow(5), C: numberShadow(10) } },
@@ -199,9 +205,9 @@ export const pythonSyntaxToolbox = {
     { kind: "block", type: "python_collections_defaultdict", inputs: { FACTORY: { shadow: { type: "python_raw_expression", fields: { CODE: "list" } } } } },
     { kind: "block", type: "python_collections_deque", inputs: { ITERABLE: listShadow([1, 2, 3]) } },
     { kind: "block", type: "python_collections_namedtuple", inputs: { NAME: textShadow("坐标"), FIELDS: { shadow: { type: "python_sequence_collection", fields: { KIND: "list" }, extraState: { itemCount: 2 }, inputs: { ITEM0: textShadow("x"), ITEM1: textShadow("y") } } } } },
-    { kind: "block", type: "python_deque_add", inputs: { DEQUE: { shadow: { type: "python_collections_deque", inputs: { ITERABLE: listShadow([1, 2, 3]) } } }, VALUE: numberShadow(4) } },
-    { kind: "block", type: "python_deque_pop", inputs: { DEQUE: { shadow: { type: "python_collections_deque", inputs: { ITERABLE: listShadow([1, 2, 3]) } } } } },
-    { kind: "block", type: "python_counter_most_common", inputs: { COUNTER: { shadow: { type: "python_collections_counter", inputs: { ITERABLE: listShadow([1, 1, 2]) } } }, COUNT: numberShadow(3) } },
+    { kind: "block", type: "python_deque_add", inputs: { DEQUE: { shadow: { type: "python_collections_deque", inputs: { ITERABLE: shadowList([1, 2, 3]) } } }, VALUE: numberShadow(4) } },
+    { kind: "block", type: "python_deque_pop", inputs: { DEQUE: { shadow: { type: "python_collections_deque", inputs: { ITERABLE: shadowList([1, 2, 3]) } } } } },
+    { kind: "block", type: "python_counter_most_common", inputs: { COUNTER: { shadow: { type: "python_collections_counter", inputs: { ITERABLE: shadowList([1, 1, 2]) } } }, COUNT: numberShadow(3) } },
   ],
   modern: [
     { kind: "block", type: "python_match", inputs: {

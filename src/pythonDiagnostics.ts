@@ -29,6 +29,7 @@ export function diagnosePythonError(traceback: string, options: PythonDiagnostic
   const localName = detail.match(/local variable ['"]([^'"]+)['"]/i);
   const missingModule = detail.match(/No module named ['"]([^'"]+)['"]/i);
   const missingFile = detail.match(/(?:No such file or directory|cannot find)[^'"]*['"]([^'"]+)['"]/i);
+  const missingOptionalDependency = detail.match(/(?:install|missing optional dependency|requires?)[^.\n]*\b(xlrd|openpyxl)\b/i)?.[1]?.toLowerCase();
   const attribute = detail.match(/has no attribute ['"]([^'"]+)['"]/i);
   const missingArgument = detail.match(/missing \d+ required positional argument[s]?:?\s*(.+)$/i);
   const unexpectedKeyword = detail.match(/unexpected keyword argument ['"]([^'"]+)['"]/i);
@@ -48,6 +49,8 @@ export function diagnosePythonError(traceback: string, options: PythonDiagnostic
       suggestion = "除数不能为 0。请在除法、整除或取余运算前检查除数。";
     } else if (type === "ModuleNotFoundError" && missingModule) {
       suggestion = `找不到模块“${missingModule[1]}”。请检查模块名称，并确认它已安装到当前 Python 环境。`;
+    } else if (type === "ImportError" && missingOptionalDependency) {
+      suggestion = `缺少 Excel 引擎依赖。请在当前 Python 环境中安装 Python 包“${missingOptionalDependency}”后重试。`;
     } else if (type === "ImportError") {
       suggestion = "模块存在，但无法导入指定名称。请检查 from ... import ... 中的名称以及当前库版本。";
     } else if (type === "FileNotFoundError") {
@@ -108,6 +111,8 @@ export function diagnosePythonError(traceback: string, options: PythonDiagnostic
     suggestion = "除数不能为 0。请检查除法、整除或取余积木右侧的值，并在运算前判断它是否为零。";
   } else if (type === "ModuleNotFoundError" && missingModule) {
     suggestion = `找不到模块“${missingModule[1]}”。请检查模块名称；第三方模块需要先在当前 Python 环境中安装。`;
+  } else if (type === "ImportError" && missingOptionalDependency) {
+    suggestion = `缺少 Excel 引擎依赖。请在当前 Python 环境中安装 Python 包“${missingOptionalDependency}”后重试。`;
   } else if (type === "ImportError") {
     suggestion = "模块存在，但无法导入指定名称。请检查“从模块导入”积木中的名称和当前库版本。";
   } else if (type === "FileNotFoundError") {

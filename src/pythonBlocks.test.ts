@@ -141,6 +141,152 @@ describe("Python block generators", () => {
     expect(generatePython(state({ type: "python_dynamic_dict", extraState: { itemCount: 1 }, inputs: { KEY0: text("name"), VALUE0: text("Ada") } }))).toBe("{'name': 'Ada'}\n");
   });
 
+  it("uses a list-only mutator for list examples instead of a type selector", () => {
+    const standardLibrary = (toolbox as any).contents.find((item: any) => item.name === "标准库");
+    const counter = standardLibrary.contents.find((item: any) => item.type === "python_collections_counter");
+    expect(counter.inputs.ITERABLE.block.type).toBe("python_list_collection");
+  });
+
+  it("keeps existing list values when the mutator adds an item", () => {
+    const workspace = new Blockly.Workspace();
+    const listBlock = workspace.newBlock("python_list_collection") as Blockly.Block & {
+      itemCount_?: number;
+      loadExtraState(state: object): void;
+      saveConnections(container: Blockly.Block): void;
+      compose(container: Blockly.Block): void;
+    };
+    listBlock.loadExtraState({ itemCount: 3 });
+    const values = [1, 2, 3].map((value) => {
+      const block = workspace.newBlock("math_number");
+      block.setFieldValue(value, "NUM");
+      return block;
+    });
+    values.forEach((value, index) => listBlock.getInput(`ITEM${index}`)!.connection!.connect(value.outputConnection!));
+    const originalIds = values.map((value) => value.id);
+
+    const container = workspace.newBlock("python_collection_container");
+    let connection = container.getInput("STACK")!.connection!;
+    for (let i = 0; i < 4; i++) {
+      const item = workspace.newBlock("python_collection_item");
+      connection.connect(item.previousConnection!);
+      connection = item.nextConnection!;
+    }
+    listBlock.saveConnections(container);
+    listBlock.compose(container);
+
+    expect(listBlock.itemCount_).toBe(4);
+    expect([0, 1, 2].map((index) => listBlock.getInputTargetBlock(`ITEM${index}`)?.id)).toEqual(originalIds);
+    expect(listBlock.getInputTargetBlock("ITEM3")).toBeNull();
+    workspace.dispose();
+  });
+
+  it("keeps shadow values when the mutator adds an item", () => {
+    const workspace = new Blockly.Workspace();
+    Blockly.serialization.blocks.append({
+      type: "python_list_collection",
+      extraState: { itemCount: 3 },
+      inputs: {
+        ITEM0: { shadow: { type: "math_number", fields: { NUM: 1 } } },
+        ITEM1: { shadow: { type: "math_number", fields: { NUM: 2 } } },
+        ITEM2: { shadow: { type: "math_number", fields: { NUM: 3 } } },
+      },
+    }, workspace);
+    const listBlock = workspace.getTopBlocks(false)[0] as Blockly.Block & {
+      itemCount_?: number;
+      saveConnections(container: Blockly.Block): void;
+      compose(container: Blockly.Block): void;
+    };
+    const originalValues = [0, 1, 2].map((index) => listBlock.getInputTargetBlock(`ITEM${index}`)?.getFieldValue("NUM"));
+
+    const container = workspace.newBlock("python_collection_container");
+    let connection = container.getInput("STACK")!.connection!;
+    for (let i = 0; i < 4; i++) {
+      const item = workspace.newBlock("python_collection_item");
+      connection.connect(item.previousConnection!);
+      connection = item.nextConnection!;
+    }
+    listBlock.saveConnections(container);
+    listBlock.compose(container);
+
+    expect(listBlock.itemCount_).toBe(4);
+    expect([0, 1, 2].map((index) => listBlock.getInputTargetBlock(`ITEM${index}`)?.getFieldValue("NUM"))).toEqual(originalValues);
+    expect([0, 1, 2].every((index) => listBlock.getInputTargetBlock(`ITEM${index}`)?.isShadow())).toBe(true);
+    workspace.dispose();
+  });
+
+  it("keeps tuple and set shadow values when their mutator adds an item", () => {
+    for (const kind of ["tuple", "set"] as const) {
+      const workspace = new Blockly.Workspace();
+      Blockly.serialization.blocks.append({
+        type: "python_sequence_collection",
+        fields: { KIND: kind },
+        extraState: { itemCount: 2 },
+        inputs: {
+          ITEM0: { shadow: { type: "math_number", fields: { NUM: 1 } } },
+          ITEM1: { shadow: { type: "math_number", fields: { NUM: 2 } } },
+        },
+      }, workspace);
+      const sequence = workspace.getTopBlocks(false)[0] as Blockly.Block & {
+        saveConnections(container: Blockly.Block): void;
+        compose(container: Blockly.Block): void;
+      };
+      const container = workspace.newBlock("python_collection_container");
+      let connection = container.getInput("STACK")!.connection!;
+      for (let index = 0; index < 3; index += 1) {
+        const item = workspace.newBlock("python_collection_item");
+        connection.connect(item.previousConnection!);
+        connection = item.nextConnection!;
+      }
+      sequence.saveConnections(container);
+      sequence.compose(container);
+
+      expect(sequence.getInputTargetBlock("ITEM0")?.getFieldValue("NUM")).toBe(1);
+      expect(sequence.getInputTargetBlock("ITEM1")?.getFieldValue("NUM")).toBe(2);
+      expect(sequence.getInputTargetBlock("ITEM0")?.isShadow()).toBe(true);
+      expect(sequence.getInputTargetBlock("ITEM1")?.isShadow()).toBe(true);
+      workspace.dispose();
+    }
+  });
+
+  it("keeps shadow keys and values when the dictionary mutator adds an item", () => {
+    const workspace = new Blockly.Workspace();
+    Blockly.serialization.blocks.append({
+      type: "python_dynamic_dict",
+      extraState: { itemCount: 2 },
+      inputs: {
+        KEY0: { shadow: { type: "text", fields: { TEXT: "a" } } },
+        VALUE0: { shadow: { type: "math_number", fields: { NUM: 1 } } },
+        KEY1: { shadow: { type: "text", fields: { TEXT: "b" } } },
+        VALUE1: { shadow: { type: "math_number", fields: { NUM: 2 } } },
+      },
+    }, workspace);
+    const dictionary = workspace.getTopBlocks(false)[0] as Blockly.Block & {
+      itemCount_?: number;
+      saveConnections(container: Blockly.Block): void;
+      compose(container: Blockly.Block): void;
+    };
+    const container = workspace.newBlock("python_collection_container");
+    let connection = container.getInput("STACK")!.connection!;
+    for (let i = 0; i < 3; i++) {
+      const item = workspace.newBlock("python_collection_item");
+      connection.connect(item.previousConnection!);
+      connection = item.nextConnection!;
+    }
+    dictionary.saveConnections(container);
+    dictionary.compose(container);
+
+    expect(dictionary.itemCount_).toBe(3);
+    expect(dictionary.getInputTargetBlock("KEY0")?.getFieldValue("TEXT")).toBe("a");
+    expect(dictionary.getInputTargetBlock("VALUE0")?.getFieldValue("NUM")).toBe(1);
+    expect(dictionary.getInputTargetBlock("KEY1")?.getFieldValue("TEXT")).toBe("b");
+    expect(dictionary.getInputTargetBlock("VALUE1")?.getFieldValue("NUM")).toBe(2);
+    expect(dictionary.getInputTargetBlock("KEY0")?.isShadow()).toBe(true);
+    expect(dictionary.getInputTargetBlock("VALUE0")?.isShadow()).toBe(true);
+    expect(dictionary.getInputTargetBlock("KEY1")?.isShadow()).toBe(true);
+    expect(dictionary.getInputTargetBlock("VALUE1")?.isShadow()).toBe(true);
+    workspace.dispose();
+  });
+
   it("generates for-in, enumerate, pass and assert", () => {
     const loop = { type: "python_for_enumerate", fields: { INDEX: "index", VALUE: "item" }, inputs: { ITERABLE: expression("items"), DO: { block: { type: "python_assert", inputs: { CONDITION: expression("item is not None") } } } } };
     expect(generatePython(state(loop))).toContain("for index, item in enumerate(items):\n  assert item is not None\n");

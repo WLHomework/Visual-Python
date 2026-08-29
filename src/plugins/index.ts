@@ -1,4 +1,6 @@
 import { manimPlugin } from "./builtin/manim";
+import { numpyPlugin } from "./builtin/numpy";
+import { pandasPlugin } from "./builtin/pandas";
 import { PluginRegistry } from "./core/pluginRegistry";
 import type { PluginCompatibilityIssue, PluginProjectRequirement } from "./api/types";
 import type { AgentCapability } from "../agentV2/types";
@@ -7,7 +9,7 @@ export const pluginRegistry = new PluginRegistry();
 
 let initialization: Promise<void> | null = null;
 const preferenceKey = "visual-python:plugins";
-export const corePluginIds = new Set([manimPlugin.manifest.id]);
+export const corePluginIds = new Set([manimPlugin.manifest.id, numpyPlugin.manifest.id, pandasPlugin.manifest.id]);
 export const isCorePlugin = (pluginId: string) => corePluginIds.has(pluginId);
 
 const readPreferences = (): Record<string, boolean> => {
@@ -41,8 +43,16 @@ export function getActiveAgentCapabilities(): AgentCapability[] {
 export function initializePlugins() {
   if (initialization) return initialization;
   pluginRegistry.register(manimPlugin);
+  pluginRegistry.register(numpyPlugin);
+  pluginRegistry.register(pandasPlugin);
   writePreference(manimPlugin.manifest.id, true);
-  initialization = pluginRegistry.activate(manimPlugin.manifest.id);
+  writePreference(numpyPlugin.manifest.id, true);
+  writePreference(pandasPlugin.manifest.id, true);
+  initialization = (async () => {
+    await pluginRegistry.activate(manimPlugin.manifest.id);
+    await pluginRegistry.activate(numpyPlugin.manifest.id);
+    await pluginRegistry.activate(pandasPlugin.manifest.id);
+  })();
   return initialization;
 }
 

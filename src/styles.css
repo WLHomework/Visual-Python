@@ -1666,6 +1666,27 @@ details.ai-agent-task-plan.completed {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
+  scrollbar-color: color-mix(in srgb,var(--muted),transparent 20%) var(--surface-1);
+  scrollbar-width: thin;
+}
+
+.ai-agent-thinking > .ai-markdown::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.ai-agent-thinking > .ai-markdown::-webkit-scrollbar-track {
+  background: var(--surface-1);
+}
+
+.ai-agent-thinking > .ai-markdown::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb,var(--muted),transparent 20%);
+  border: 2px solid var(--surface-1);
+  border-radius: 8px;
+}
+
+.ai-agent-thinking > .ai-markdown::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb,var(--muted),transparent 4%);
 }
 
 .ai-agent-event {

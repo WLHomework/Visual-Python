@@ -621,6 +621,48 @@ describe("AI assistant scroll position", () => {
     expect(thread.scrollTop).toBe(400);
     expect(onLeaveLatest).not.toHaveBeenCalled();
   });
+
+  it("scrolls the expanded thinking content before the outer AI thread", () => {
+    let listener: ((event: WheelEvent) => void) | undefined;
+    const thread = {
+      scrollTop: 100,
+      scrollHeight: 600,
+      clientHeight: 200,
+      addEventListener: vi.fn((_type: string, callback: (event: WheelEvent) => void) => { listener = callback; }),
+      removeEventListener: vi.fn(),
+    };
+    const thinkingContent = { scrollTop: 30, scrollHeight: 500, clientHeight: 120 };
+    const eventTarget = { closest: vi.fn(() => thinkingContent) };
+    const event = { deltaY: 50, deltaMode: 0, target: eventTarget, preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as WheelEvent;
+
+    attachAiThreadWheelHandler(thread, vi.fn());
+    listener?.(event);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(thinkingContent.scrollTop).toBe(80);
+    expect(thread.scrollTop).toBe(100);
+  });
+
+  it("lets the outer AI thread take over when thinking content reaches its edge", () => {
+    let listener: ((event: WheelEvent) => void) | undefined;
+    const thread = {
+      scrollTop: 100,
+      scrollHeight: 600,
+      clientHeight: 200,
+      addEventListener: vi.fn((_type: string, callback: (event: WheelEvent) => void) => { listener = callback; }),
+      removeEventListener: vi.fn(),
+    };
+    const thinkingContent = { scrollTop: 380, scrollHeight: 500, clientHeight: 120 };
+    const eventTarget = { closest: vi.fn(() => thinkingContent) };
+    const event = { deltaY: 50, deltaMode: 0, target: eventTarget, preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as WheelEvent;
+
+    attachAiThreadWheelHandler(thread, vi.fn());
+    listener?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(thinkingContent.scrollTop).toBe(380);
+    expect(thread.scrollTop).toBe(100);
+  });
 });
 
 describe("AI assistant conversation persistence", () => {

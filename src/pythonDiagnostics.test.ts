@@ -30,6 +30,12 @@ describe("Python error diagnostics", () => {
     expect(diagnoseBlocks("OSError: [Errno 39] Directory not empty: 'data'").suggestion).toContain("连同全部内容");
   });
 
+  it("identifies missing optional Excel engine dependencies", () => {
+    const diagnosis = diagnoseBlocks("ImportError: Import xlrd failed. Install xlrd >= 2.0.1 for xls Excel support");
+    expect(diagnosis.suggestion).toContain("安装 Python 包“xlrd”");
+    expect(diagnosis.suggestion).not.toContain("无法导入指定名称");
+  });
+
   it("diagnoses common syntax placement errors", () => {
     expect(diagnoseBlocks("SyntaxError: 'return' outside function").suggestion).toContain("函数体内部");
     expect(diagnoseBlocks("SyntaxError: 'await' outside async function").suggestion).toContain("异步函数");
