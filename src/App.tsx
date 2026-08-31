@@ -12,9 +12,11 @@ import type { CancellationToken as MonacoCancellationToken, editor as MonacoEdit
 import { AlertCircle, AlignLeft, ArrowLeft, Blocks, BookOpen, Box, Braces, Check, ChevronDown, ChevronRight, ChevronUp, ClipboardPaste, Cloud, Code2, Columns2, Copy, Download, ExternalLink, FileCode2, FilePlus2, Film, FolderOpen, Image as ImageIcon, Link2, ListOrdered, ListTree, Mic2, Minus, PanelBottomClose, PanelBottomOpen, Pause, Play, Plug, Plus, Power, RefreshCw, Replace, Save, SaveAll, Scissors, Search, Send, Settings, SlidersHorizontal, Sparkles, Square, Terminal, TextSelect, Trash2, Undo2, Redo2, Unlink2, Upload, Volume2, X } from "lucide-react";
 import { AiAssistantPanel } from "./AiAssistantPanel";
 import { AiModelSettings } from "./AiModelSettings";
-import { createVisualPythonHostAdapter, runVisualPythonAgent, type AgentActivityEvent, type AgentTokenUsage, type AiAgentActivity, type AiAgentMode, type AiAgentPermissionRequest, type AiAgentPlanStep, type AiAgentProgress, type AiAgentResult, type AiAgentToolName, type AiCodeChangeSnapshot, type AiConversationTurn, type AiTaskChangeSnapshot } from "./agentV2";
+import { createVisualPythonHostAdapter } from "./agentV2/hostAdapter";
+import type { AgentActivityEvent, AgentTokenUsage, AiAgentActivity, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
 import { blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockInputs } from "./agentV2/blocklyHost";
 import { createPluginDraftStore, validatePluginDraft, type PluginDraft } from "./agentV2/pluginAuthoring";
+import { runAgentWithProtocolFallback } from "./codexAgentRunner";
 import type { AiAgentPermissionMode, AiReasoningEffort } from "./aiConfig";
 import { createAiConversationScope } from "./aiConversationContext";
 import { inspectVoiceovers } from "./aiVoiceover";
@@ -4955,6 +4957,7 @@ export default function App() {
   const runAiCodeAgentTask = useCallback(async ({
     prompt,
     history,
+    conversationId,
     agentMode,
     reasoningEffort,
     onActivity,
@@ -4965,6 +4968,7 @@ export default function App() {
   }: {
     prompt: string;
     history: AiConversationTurn[];
+    conversationId: string;
     agentMode: AiAgentMode;
     reasoningEffort: AiReasoningEffort;
     initialPlan?: AiAgentPlanStep[];
@@ -5023,17 +5027,7 @@ export default function App() {
 
 
     try {
-      const agentResult = await runVisualPythonAgent({
-        prompt,
-        history,
-        mode: agentMode,
-        reasoningEffort,
-        onEvent: reportAgentV2Event,
-        onProgress: reportAgentV2Progress,
-        permissionMode,
-        onPermissionRequest: (request) => onPermissionRequest({ ...request, toolName: request.toolName as AiAgentToolName }),
-        signal,
-        host: createVisualPythonHostAdapter({
+      const agentHost = createVisualPythonHostAdapter({
           workspaceModeRef,
           documentsRef: sceneDocumentsRef,
           activeDocumentIdRef: activeSceneIdRef,
@@ -5234,7 +5228,21 @@ export default function App() {
               } : {}),
             };
           },
-        }),
+        });
+      const agentResult = await runAgentWithProtocolFallback({
+        prompt,
+        history,
+        mode: agentMode,
+        reasoningEffort,
+        onEvent: reportAgentV2Event,
+        onProgress: reportAgentV2Progress,
+        permissionMode,
+        onPermissionRequest: (request) => onPermissionRequest({ ...request, toolName: request.toolName as AiAgentToolName }),
+        signal,
+        conversationTargetId: `project:${encodeURIComponent(projectIdRef.current)}:conversation:${encodeURIComponent(conversationId)}:mode:${encodeURIComponent(agentWorkspaceMode)}:document:${encodeURIComponent(agentSceneId || "workspace")}`,
+        host: agentHost,
+      }, {
+        onFallback: () => reportAgentV2Progress({ phase: "preparing", label: "切换兼容模式" }),
       });
       if (signal.aborted || aiAgentRunTokenRef.current !== agentRunToken) throw new Error("已停止生成");
       const result: AiAgentResult = {

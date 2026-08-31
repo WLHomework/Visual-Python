@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
-import { defaultAiModelConfig, getAiAgentPermissionMode, getAiModelCapabilities, getAiModelConfig, getAiReasoningEffort, normalizeAiModelConfig, saveAiAgentPermissionMode, saveAiModelConfig, saveAiReasoningEffort, streamAiChat, updateAiModelCapabilities } from "./aiConfig";
+import { defaultAiModelConfig, getAiAgentPermissionMode, getAiModelCapabilities, getAiModelConfig, getAiProviderProtocol, getAiReasoningEffort, normalizeAiModelConfig, saveAiAgentPermissionMode, saveAiModelConfig, saveAiProviderProtocol, saveAiReasoningEffort, streamAiChat, updateAiModelCapabilities } from "./aiConfig";
 
 describe("AI model configuration", () => {
   beforeEach(() => {
@@ -25,7 +25,13 @@ describe("AI model configuration", () => {
 
   it("trims the endpoint and model before saving", () => {
     const config = saveAiModelConfig({ baseUrl: " https://example.com/v1/// ", model: " demo-model " });
-    expect(config).toEqual({ baseUrl: "https://example.com/v1", model: "demo-model" });
+    expect(config).toEqual({ baseUrl: "https://example.com/v1", model: "demo-model", protocol: "auto" });
+    expect(localStorage.setItem).toHaveBeenCalledWith("visual-python:ai-model-config", JSON.stringify(config));
+  });
+
+  it("normalizes and persists the selected model protocol", () => {
+    const config = saveAiModelConfig({ baseUrl: "https://example.com/v1", model: "demo-model", protocol: "responses" });
+    expect(config.protocol).toBe("responses");
     expect(localStorage.setItem).toHaveBeenCalledWith("visual-python:ai-model-config", JSON.stringify(config));
   });
 
@@ -80,5 +86,18 @@ describe("AI model configuration", () => {
 
     expect(getAiModelCapabilities(first)).toEqual({ functionCalling: "supported", toolChoice: "unsupported" });
     expect(getAiModelCapabilities(second)).toEqual({ functionCalling: "unknown", toolChoice: "unknown" });
+  });
+
+  it("persists the provider protocol independently for each model endpoint", () => {
+    const values = new Map<string, string>();
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) => values.get(key) ?? null);
+    vi.mocked(localStorage.setItem).mockImplementation((key: string, value: string) => values.set(key, value));
+    const first = { baseUrl: "https://one.example/v1", model: "model-a" };
+    const second = { baseUrl: "https://two.example/v1", model: "model-a" };
+
+    expect(getAiProviderProtocol(first)).toBe("unknown");
+    expect(saveAiProviderProtocol("chat-completions", first)).toBe("chat-completions");
+    expect(getAiProviderProtocol(first)).toBe("chat-completions");
+    expect(getAiProviderProtocol(second)).toBe("unknown");
   });
 });

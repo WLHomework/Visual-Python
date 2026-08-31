@@ -15,8 +15,8 @@ import rehypeKatex, { type Options as RehypeKatexOptions } from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
-import { createCodeChangePreview } from "./agentV2";
-import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2";
+import { createCodeChangePreview } from "./agentV2/codeChanges";
+import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2/types";
 import { getAiAgentPermissionMode, getAiReasoningEffort, saveAiReasoningEffort, type AiAgentPermissionMode, type AiReasoningEffort } from "./aiConfig";
 import { buildAiConversationHistory } from "./aiConversationContext";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
@@ -37,6 +37,7 @@ const markdownKatexOptions: RehypeKatexOptions = {
 type RunAgentArgs = {
   prompt: string;
   history: AiConversationTurn[];
+  conversationId: string;
   agentMode: AiAgentMode;
   reasoningEffort: AiReasoningEffort;
   initialPlan?: AiAgentPlanStep[];
@@ -1419,6 +1420,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       const result = await onRunAgent({
         prompt: normalizedPrompt,
         history,
+        conversationId: conversationState.activeId,
         agentMode: runMode,
         reasoningEffort,
         ...(initialPlan.length ? { initialPlan } : {}),

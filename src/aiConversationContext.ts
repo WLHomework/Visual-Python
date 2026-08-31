@@ -1,4 +1,4 @@
-import type { AiAgentActivity, AiConversationTurn } from "./agentV2";
+import type { AiAgentActivity, AiConversationTurn } from "./agentV2/types";
 
 export type AiConversationRunForContext = {
   id: number;

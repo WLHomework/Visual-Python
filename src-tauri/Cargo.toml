@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A visual programming workbench for Python and Manim"
 authors = ["Visual Python Contributors"]
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.95.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -31,8 +31,22 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "mul
 base64 = "0.22"
 sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "sync"] }
+toml = "0.9"
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
+codex-app-server-client = { path = "../vendor/codex-rs/app-server-client" }
+codex-app-server-protocol = { path = "../vendor/codex-rs/app-server-protocol" }
+codex-arg0 = { path = "../vendor/codex-rs/arg0" }
+codex-config = { path = "../vendor/codex-rs/config" }
+codex-feedback = { path = "../vendor/codex-rs/feedback" }
+codex-protocol = { path = "../vendor/codex-rs/protocol" }
+codex-rollout = { path = "../vendor/codex-rs/rollout" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+
+# Codex is consumed as a path dependency, so its root workspace patches are
+# not inherited by this application. Keep the same fork revisions here.
+[patch.crates-io]
+tokio-tungstenite = { git = "https://github.com/openai-oss-forks/tokio-tungstenite", rev = "0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186" }
+tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }

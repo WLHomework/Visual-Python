@@ -5678,7 +5678,20 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   font-size: 12px;
 }
 
+.ai-settings-fields > label > select {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+  outline: 0;
+  font-size: 12px;
+}
+
 .ai-settings-fields > label > input:focus,
+.ai-settings-fields > label > select:focus,
 .ai-api-key-field > div:focus-within {
   border-color: #2f9e8f;
   box-shadow: 0 0 0 2px color-mix(in srgb,#2f9e8f,transparent 82%);

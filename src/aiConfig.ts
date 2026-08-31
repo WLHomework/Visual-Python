@@ -4,7 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 export type AiModelConfig = {
   baseUrl: string;
   model: string;
+  protocol?: AiProtocolPreference;
 };
+
+export type AiProtocolPreference = "auto" | "chat-completions" | "responses";
 
 export type AiAgentPermissionMode = "auto" | "confirm";
 export type AiReasoningEffort = "low" | "medium" | "high" | "xhigh";
@@ -69,25 +72,33 @@ export type AiModelCapabilities = {
   toolChoice: AiCapabilityStatus;
 };
 
+export type AiProviderProtocol = "unknown" | "chat-completions" | "responses";
+
 const storageKey = "visual-python:ai-model-config";
 const permissionModeStorageKey = "visual-python:ai-agent-permission-mode";
 const reasoningEffortStorageKey = "visual-python:ai-reasoning-effort";
 const capabilityStorageKey = "visual-python:ai-model-capabilities";
+const protocolStorageKey = "visual-python:ai-provider-protocol:v2";
 const capabilityTtlMs = 7 * 24 * 60 * 60 * 1000;
 const defaultAiModelCapabilities: AiModelCapabilities = { functionCalling: "unknown", toolChoice: "unknown" };
 
 export const defaultAiModelConfig: AiModelConfig = {
   baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
   model: "qwen3.7-flash",
+  protocol: "auto",
 };
 
 export function normalizeAiModelConfig(value: unknown): AiModelConfig {
   const candidate = value && typeof value === "object" ? value as Partial<AiModelConfig> : {};
   const baseUrl = typeof candidate.baseUrl === "string" ? candidate.baseUrl.trim().replace(/\/+$/, "").slice(0, 1000) : "";
   const model = typeof candidate.model === "string" ? candidate.model.trim().slice(0, 200) : "";
+  const protocol = candidate.protocol === "responses" || candidate.protocol === "chat-completions" || candidate.protocol === "auto"
+    ? candidate.protocol
+    : "auto";
   return {
     baseUrl: baseUrl || defaultAiModelConfig.baseUrl,
     model: model || defaultAiModelConfig.model,
+    protocol,
   };
 }
 
@@ -101,6 +112,14 @@ export function getAiModelConfig(): AiModelConfig {
 
 export function saveAiModelConfig(config: AiModelConfig): AiModelConfig {
   const normalized = normalizeAiModelConfig(config);
+  try {
+    const previous = normalizeAiModelConfig(JSON.parse(localStorage.getItem(storageKey) || "null"));
+    if (previous.baseUrl !== normalized.baseUrl || previous.model !== normalized.model || previous.protocol !== normalized.protocol) {
+      clearAiProviderProtocol(normalized);
+    }
+  } catch {
+    // Configuration persistence should remain available even when local storage is unavailable.
+  }
   localStorage.setItem(storageKey, JSON.stringify(normalized));
   return normalized;
 }
@@ -111,6 +130,8 @@ function aiModelCapabilityKey(config: AiModelConfig): string {
 }
 
 type StoredAiModelCapabilities = AiModelCapabilities & { updatedAt: number };
+
+type StoredAiProviderProtocol = { protocol: Exclude<AiProviderProtocol, "unknown">; updatedAt: number };
 
 export function getAiModelCapabilities(config: AiModelConfig = getAiModelConfig()): AiModelCapabilities {
   try {
@@ -144,6 +165,43 @@ export function updateAiModelCapabilities(update: Partial<AiModelCapabilities>, 
     // Capability caching is an optimization; an unavailable storage must not block AI requests.
   }
   return next;
+}
+
+export function getAiProviderProtocol(config: AiModelConfig = getAiModelConfig()): AiProviderProtocol {
+  try {
+    const entries = JSON.parse(localStorage.getItem(protocolStorageKey) || "{}") as Record<string, StoredAiProviderProtocol>;
+    const entry = entries[aiModelCapabilityKey(config)];
+    if (!entry || !Number.isFinite(entry.updatedAt) || Date.now() - entry.updatedAt > capabilityTtlMs) return "unknown";
+    return entry.protocol === "chat-completions" || entry.protocol === "responses" ? entry.protocol : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+export function saveAiProviderProtocol(protocol: AiProviderProtocol, config: AiModelConfig = getAiModelConfig()): AiProviderProtocol {
+  if (protocol === "unknown") return "unknown";
+  try {
+    const stored = JSON.parse(localStorage.getItem(protocolStorageKey) || "{}") as Record<string, StoredAiProviderProtocol>;
+    const entries = Object.fromEntries(Object.entries(stored)
+      .filter(([, value]) => value && Number.isFinite(value.updatedAt) && Date.now() - value.updatedAt <= capabilityTtlMs)
+      .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
+      .slice(0, 31));
+    entries[aiModelCapabilityKey(config)] = { protocol, updatedAt: Date.now() };
+    localStorage.setItem(protocolStorageKey, JSON.stringify(entries));
+  } catch {
+    // Protocol caching is an optimization; unavailable storage must not block requests.
+  }
+  return protocol;
+}
+
+export function clearAiProviderProtocol(config: AiModelConfig = getAiModelConfig()): void {
+  try {
+    const stored = JSON.parse(localStorage.getItem(protocolStorageKey) || "{}") as Record<string, StoredAiProviderProtocol>;
+    delete stored[aiModelCapabilityKey(config)];
+    localStorage.setItem(protocolStorageKey, JSON.stringify(stored));
+  } catch {
+    // Protocol cache cleanup is best effort.
+  }
 }
 
 export function getAiAgentPermissionMode(): AiAgentPermissionMode {

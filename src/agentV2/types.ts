@@ -192,6 +192,7 @@ export type RunVisualPythonAgentArgs = {
   history?: AgentConversationTurn[];
   mode?: AgentMode;
   reasoningEffort?: AiReasoningEffort;
+  conversationTargetId?: string;
   host: AgentHost;
   onEvent: (event: AgentActivityEvent) => void;
   onProgress?: (progress: AgentProgress) => void;

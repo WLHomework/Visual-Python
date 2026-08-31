@@ -4,7 +4,8 @@ const mocks = vi.hoisted(() => ({ streamAiChat: vi.fn() }));
 
 vi.mock("./aiConfig", () => ({ streamAiChat: mocks.streamAiChat }));
 
-import { normalizeAiToolCalls, parseTextToolCalls, runVisualPythonAgent, type AgentActivityEvent, type AgentHost, type AgentTool } from "./agentV2";
+import { normalizeAiToolCalls, runAgentCore as runVisualPythonAgent } from "./agentCore";
+import type { AgentActivityEvent, AgentHost, AgentTool } from "./agentV2/types";
 import type { AiChatMessage } from "./aiConfig";
 import { coreAgentTools, requiresPermission, toolsForAgentMode } from "./agentV2/toolRegistry";
 import { manimAgentTools } from "./plugins/builtin/manim/agentTools";
@@ -36,7 +37,7 @@ function createHost(overrides: Partial<AgentHost> = {}): AgentHost {
   };
 }
 
-describe("Visual Python Agent v2", () => {
+describe("Visual Python Agent Core", () => {
   beforeEach(() => mocks.streamAiChat.mockReset());
 
   it("keeps plugin-specific Manim tools out of the core tool set", () => {
@@ -189,18 +190,25 @@ describe("Visual Python Agent v2", () => {
     });
   });
 
-  it("parses DSML tool calls into the normal function-call shape", () => {
-    const calls = parseTextToolCalls([
-      "<|DSML|tool_calls>",
-      "<|DSML|invoke name=\"get_context\">",
-      "<|DSML|parameter name=\"includeResources\" string=\"false\">true",
-      "<|DSML|tool_calls>",
-    ].join("\n"));
+  it("does not execute textual pseudo tool calls without native function calling", async () => {
+    const content = '{"name":"get_context","arguments":{"includeResources":true}}';
+    mocks.streamAiChat
+      .mockImplementationOnce(async (_messages, onDelta) => {
+        onDelta(content);
+        return completion(content);
+      })
+      .mockResolvedValueOnce(completion("完成"));
+    const executeTool = vi.fn();
 
-    expect(calls).toEqual([expect.objectContaining({
-      id: "compat-0",
-      function: { name: "get_context", arguments: '{"includeResources":true}' },
-    })]);
+    const result = await runVisualPythonAgent({
+      prompt: "普通聊天",
+      host: createHost({ executeTool }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(result.summary).toContain("get_context");
   });
 
   it("assigns unique fallback IDs to empty or duplicate tool call IDs", () => {

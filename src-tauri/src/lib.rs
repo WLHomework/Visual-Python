@@ -18,7 +18,9 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::Notify;
+use tokio::sync::{Mutex as TokioMutex, Notify};
+
+mod codex_agent;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,11 +85,17 @@ const BAILIAN_VOICE_ENROLLMENT_MODEL: &str = "voice-enrollment";
 const BAILIAN_PLUS_BUILTIN_VOICES: [&str; 2] = ["longanlingxin", "longanlufeng"];
 const MAX_VOICE_SAMPLE_BYTES: u64 = 10 * 1024 * 1024;
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct AiModelConfig {
     base_url: String,
     model: String,
+    #[serde(default = "default_ai_protocol")]
+    protocol: String,
+}
+
+fn default_ai_protocol() -> String {
+    "auto".into()
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -147,6 +155,7 @@ struct AiChatStreamEvent {
     tool_name: Option<String>,
 }
 
+#[derive(Clone)]
 struct AiStreamTarget {
     app: AppHandle,
     request_id: String,
@@ -176,6 +185,147 @@ impl AiRequestCancellation {
 #[derive(Default)]
 struct AiChatRequests {
     active: Mutex<HashMap<String, Arc<AiRequestCancellation>>>,
+}
+
+#[derive(Default)]
+struct CodexAgentState {
+    runtime: TokioMutex<Option<Arc<codex_agent::CodexAppServerRuntime>>>,
+    config: TokioMutex<Option<AiModelConfig>>,
+}
+
+#[tauri::command]
+async fn codex_agent_start(
+    state: State<'_, CodexAgentState>,
+    config: AiModelConfig,
+) -> Result<(), String> {
+    let base_url = validate_ai_base_url(&config.base_url)?;
+    validate_ai_model_protocol(&config.protocol)?;
+    let model = config.model.trim().to_string();
+    if model.is_empty() || model.chars().count() > 200 {
+        return Err("模型名称不能为空且不能超过 200 个字符".into());
+    }
+    let normalized = AiModelConfig {
+        base_url: base_url.clone(),
+        model: model.clone(),
+        protocol: config.protocol.clone(),
+    };
+    let mut runtime = state.runtime.lock().await;
+    let mut active_config = state.config.lock().await;
+    if active_config.as_ref() == Some(&normalized)
+        && runtime.as_ref().is_some_and(|current| current.is_usable())
+    {
+        return Ok(());
+    }
+    if let Some(previous) = runtime.take() {
+        let _ = previous.shutdown().await;
+    }
+    let api_key = load_stored_ai_api_key(&base_url)?.or_else(|| ai_environment_api_key(&base_url));
+    *runtime = Some(Arc::new(
+        codex_agent::CodexAppServerRuntime::start(codex_agent::CodexAgentLaunchConfig {
+            base_url,
+            model,
+            api_key,
+        })
+        .await?,
+    ));
+    *active_config = Some(normalized);
+    Ok(())
+}
+
+#[tauri::command]
+async fn codex_agent_request(
+    state: State<'_, CodexAgentState>,
+    request: Value,
+) -> Result<Value, String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Codex Agent 尚未启动".to_string())?;
+    runtime.request_json(request).await
+}
+
+#[tauri::command]
+async fn codex_agent_notify(
+    state: State<'_, CodexAgentState>,
+    notification: Value,
+) -> Result<(), String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Codex Agent 尚未启动".to_string())?;
+    runtime.notify_json(notification).await
+}
+
+#[tauri::command]
+async fn codex_agent_next_event(
+    state: State<'_, CodexAgentState>,
+) -> Result<Option<Value>, String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Codex Agent 尚未启动".to_string())?;
+    Ok(runtime.next_event_json().await)
+}
+
+#[tauri::command]
+async fn codex_agent_respond_to_request(
+    state: State<'_, CodexAgentState>,
+    request_id: Value,
+    result: Value,
+) -> Result<(), String> {
+    let request_id: codex_app_server_protocol::RequestId = serde_json::from_value(request_id)
+        .map_err(|error| format!("Codex 宿主请求 ID 无效: {error}"))?;
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Codex Agent 尚未启动".to_string())?;
+    runtime.resolve_server_request(request_id, result).await
+}
+
+#[tauri::command]
+async fn codex_agent_reject_request(
+    state: State<'_, CodexAgentState>,
+    request_id: Value,
+    code: i64,
+    message: String,
+    data: Option<Value>,
+) -> Result<(), String> {
+    let request_id: codex_app_server_protocol::RequestId = serde_json::from_value(request_id)
+        .map_err(|error| format!("Codex 宿主请求 ID 无效: {error}"))?;
+    let runtime = state
+        .runtime
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Codex Agent 尚未启动".to_string())?;
+    runtime
+        .reject_server_request(
+            request_id,
+            codex_app_server_protocol::JSONRPCErrorError {
+                code,
+                data,
+                message,
+            },
+        )
+        .await
+}
+
+#[tauri::command]
+async fn codex_agent_shutdown(state: State<'_, CodexAgentState>) -> Result<(), String> {
+    let runtime = state.runtime.lock().await.take();
+    *state.config.lock().await = None;
+    if let Some(runtime) = runtime {
+        runtime.shutdown().await?;
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -1030,6 +1180,54 @@ fn openai_chat_endpoint(base_url: &str) -> String {
     }
 }
 
+fn openai_responses_endpoint(base_url: &str) -> String {
+    let lower = base_url.to_ascii_lowercase();
+    if lower.ends_with("/responses") {
+        base_url.to_string()
+    } else if lower.ends_with("/v1") {
+        format!("{base_url}/responses")
+    } else {
+        format!("{base_url}/v1/responses")
+    }
+}
+
+fn responses_message_content(payload: &Value) -> Option<String> {
+    if let Some(text) = payload.get("output_text").and_then(Value::as_str) {
+        let text = text.trim();
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    let mut content = String::new();
+    if let Some(output) = payload.get("output").and_then(Value::as_array) {
+        for item in output {
+            let Some(parts) = item.get("content").and_then(Value::as_array) else {
+                continue;
+            };
+            for part in parts {
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    content.push_str(text);
+                }
+            }
+        }
+    }
+    let content = content.trim();
+    (!content.is_empty()).then(|| content.to_string())
+}
+
+fn is_responses_endpoint_unsupported(status: u16, body: &str) -> bool {
+    if status == 404 || status == 405 {
+        return true;
+    }
+    let lower = body.to_ascii_lowercase();
+    lower.contains("http 404")
+        || lower.contains("http 405")
+        || lower.contains("not support")
+        || lower.contains("unsupported")
+        || lower.contains("not implemented")
+        || (lower.contains("responses") && lower.contains("not found"))
+}
+
 fn uses_openai_chat_audio(base_url: &str) -> bool {
     let lower = base_url.to_ascii_lowercase();
     lower.ends_with("/chat/completions")
@@ -1485,6 +1683,14 @@ fn validate_ai_base_url(value: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn validate_ai_model_protocol(value: &str) -> Result<(), String> {
+    if matches!(value, "auto" | "responses" | "chat-completions") {
+        Ok(())
+    } else {
+        Err("AI 接口协议只能是自动检测、Responses 或 Chat Completions".into())
+    }
+}
+
 fn ai_credential_account(base_url: &str) -> Result<String, String> {
     Ok(validate_ai_base_url(base_url)?.to_ascii_lowercase())
 }
@@ -1868,6 +2074,51 @@ fn apply_ai_reasoning_effort(
     Ok(())
 }
 
+fn apply_ai_reasoning_controls(
+    body: &mut Value,
+    base_url: &str,
+    model: &str,
+    reasoning_effort: Option<&str>,
+) -> Result<(), String> {
+    if should_disable_ai_thinking(base_url, model) {
+        body["enable_thinking"] = Value::Bool(false);
+        return Ok(());
+    }
+    apply_ai_reasoning_effort(body, reasoning_effort)
+}
+
+fn should_retry_without_reasoning(
+    force_disable_thinking: bool,
+    omit_reasoning_controls: bool,
+    truncated: bool,
+    content: &str,
+    tool_call_count: usize,
+    received_reasoning: bool,
+) -> bool {
+    !force_disable_thinking
+        && !omit_reasoning_controls
+        && !truncated
+        && content.is_empty()
+        && tool_call_count == 0
+        && received_reasoning
+}
+
+fn should_retry_for_reasoning_parameter_error(
+    status: u16,
+    body: &str,
+    reasoning_effort: Option<&str>,
+    omit_reasoning_controls: bool,
+) -> bool {
+    if omit_reasoning_controls || reasoning_effort.is_none() || !matches!(status, 400 | 422) {
+        return false;
+    }
+    let body = body.to_ascii_lowercase();
+    body.contains("reasoning_effort")
+        || body.contains("reasoning effort")
+        || body.contains("enable_thinking")
+        || body.contains("thinking parameter")
+}
+
 fn supports_ai_stream_usage(base_url: &str) -> bool {
     url::Url::parse(base_url)
         .ok()
@@ -1967,6 +2218,35 @@ async fn perform_ai_chat_completion(
     reasoning_effort: Option<String>,
     stream_target: Option<AiStreamTarget>,
 ) -> Result<AiChatCompletionResult, String> {
+    perform_ai_chat_completion_attempt(
+        config,
+        messages,
+        tools,
+        tool_choice,
+        omit_tool_choice,
+        api_key,
+        max_tokens,
+        reasoning_effort,
+        stream_target,
+        false,
+        false,
+    )
+    .await
+}
+
+async fn perform_ai_chat_completion_attempt(
+    config: AiModelConfig,
+    messages: Vec<AiChatMessage>,
+    tools: Option<Vec<Value>>,
+    tool_choice: Option<Value>,
+    omit_tool_choice: bool,
+    api_key: Option<String>,
+    max_tokens: u32,
+    reasoning_effort: Option<String>,
+    stream_target: Option<AiStreamTarget>,
+    force_disable_thinking: bool,
+    omit_reasoning_controls: bool,
+) -> Result<AiChatCompletionResult, String> {
     let base_url = validate_ai_base_url(&config.base_url)?;
     let model = config.model.trim();
     if model.is_empty() || model.chars().count() > 200 {
@@ -2023,6 +2303,7 @@ async fn perform_ai_chat_completion(
     }
 
     let supplied_key = api_key
+        .as_ref()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
     let key = supplied_key
@@ -2089,18 +2370,27 @@ async fn perform_ai_chat_completion(
         "max_tokens": max_tokens,
         "stream": stream_target.is_some()
     });
-    apply_ai_reasoning_effort(&mut request_body, reasoning_effort.as_deref())?;
-    if should_disable_ai_thinking(&base_url, model) {
+    if omit_reasoning_controls {
+        // Some OpenAI-compatible providers reject both standard and vendor-specific reasoning fields.
+    } else if force_disable_thinking {
         request_body["enable_thinking"] = Value::Bool(false);
+    } else {
+        apply_ai_reasoning_controls(
+            &mut request_body,
+            &base_url,
+            model,
+            reasoning_effort.as_deref(),
+        )?;
     }
     if stream_target.is_some() && supports_ai_stream_usage(&base_url) {
         request_body["stream_options"] = serde_json::json!({ "include_usage": true });
     }
-    if let Some(definitions) = tools {
+    if let Some(definitions) = tools.clone() {
         request_body["tools"] = Value::Array(definitions);
         if !omit_tool_choice {
-            request_body["tool_choice"] =
-                tool_choice.unwrap_or_else(|| Value::String("auto".into()));
+            request_body["tool_choice"] = tool_choice
+                .clone()
+                .unwrap_or_else(|| Value::String("auto".into()));
         }
     }
     let request = client
@@ -2126,13 +2416,34 @@ async fn perform_ai_chat_completion(
             .text()
             .await
             .map_err(|error| format!("无法读取 AI 响应：{error}"))?;
+        if should_retry_for_reasoning_parameter_error(
+            status.as_u16(),
+            &body,
+            reasoning_effort.as_deref(),
+            omit_reasoning_controls,
+        ) {
+            return Box::pin(perform_ai_chat_completion_attempt(
+                config,
+                messages,
+                tools,
+                tool_choice,
+                omit_tool_choice,
+                api_key,
+                max_tokens,
+                None,
+                stream_target.clone(),
+                false,
+                true,
+            ))
+            .await;
+        }
         return Err(format!(
             "AI 请求失败（HTTP {}）：{}",
             status.as_u16(),
             ai_error_body(&body)
         ));
     }
-    if let Some(target) = stream_target {
+    if let Some(target) = stream_target.as_ref() {
         let mut buffer = Vec::new();
         let mut content = String::new();
         let mut response_model = model.to_string();
@@ -2306,8 +2617,31 @@ async fn perform_ai_chat_completion(
         let truncated = finish_reason.as_deref() == Some("length");
         let content = content.trim().to_string();
         let tool_calls = finish_ai_stream_tool_calls(streamed_tool_calls);
+        if should_retry_without_reasoning(
+            force_disable_thinking,
+            omit_reasoning_controls,
+            truncated,
+            &content,
+            tool_calls.len(),
+            received_reasoning,
+        ) {
+            return Box::pin(perform_ai_chat_completion_attempt(
+                config,
+                messages,
+                tools,
+                tool_choice,
+                omit_tool_choice,
+                api_key,
+                max_tokens,
+                None,
+                stream_target.clone(),
+                true,
+                false,
+            ))
+            .await;
+        }
         if !truncated && content.is_empty() && tool_calls.is_empty() && received_reasoning {
-            return Err("AI 只返回了思考过程，没有生成最终内容，请关闭模型思考模式后重试".into());
+            return Err("模型连续两次仅返回思考过程，没有生成最终内容".into());
         }
         if !truncated && content.is_empty() && tool_calls.is_empty() {
             return Err("AI 流式响应中没有找到文本或工具调用".into());
@@ -2374,28 +2708,135 @@ fn clear_ai_api_key(base_url: String) -> Result<(), String> {
     delete_stored_ai_api_key(&base_url)
 }
 
+async fn perform_ai_responses_connection(
+    config: AiModelConfig,
+    api_key: Option<String>,
+) -> Result<AiChatCompletionResult, String> {
+    let base_url = validate_ai_base_url(&config.base_url)?;
+    let model = config.model.trim();
+    if model.is_empty() || model.chars().count() > 200 {
+        return Err("模型名称不能为空且不能超过 200 个字符".into());
+    }
+    let supplied_key = api_key
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let key = supplied_key
+        .clone()
+        .or(load_stored_ai_api_key(&base_url)?)
+        .or_else(|| ai_environment_api_key(&base_url))
+        .ok_or_else(|| "请先填写 API Key".to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|error| format!("无法创建 AI 请求：{error}"))?;
+    let response = client
+        .post(openai_responses_endpoint(&base_url))
+        .bearer_auth(&key)
+        .json(&serde_json::json!({
+            "model": model,
+            "input": "请仅回复：连接成功",
+            "max_output_tokens": 32,
+            "stream": false
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("AI 请求失败：{error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("无法读取 AI 响应：{error}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "AI 请求失败（HTTP {}）：{}",
+            status.as_u16(),
+            ai_error_body(&body)
+        ));
+    }
+    let payload: Value =
+        serde_json::from_str(&body).map_err(|_| "AI 服务没有返回有效的 JSON 响应".to_string())?;
+    let content = responses_message_content(&payload)
+        .ok_or_else(|| "AI 响应中没有找到文本".to_string())?;
+    if let Some(value) = supplied_key.as_deref() {
+        store_ai_api_key(&base_url, value)?;
+    }
+    let (prompt_tokens, completion_tokens, total_tokens, cached_tokens, cache_creation_tokens) =
+        payload
+            .get("usage")
+            .map(ai_token_usage)
+            .unwrap_or_default();
+    Ok(AiChatCompletionResult {
+        content,
+        tool_calls: Vec::new(),
+        model: payload
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or(model)
+            .to_string(),
+        truncated: false,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cached_tokens,
+        cache_creation_tokens,
+    })
+}
+
 #[tauri::command]
 async fn test_ai_connection(
     config: AiModelConfig,
     api_key: Option<String>,
 ) -> Result<AiChatCompletionResult, String> {
-    perform_ai_chat_completion(
-        config,
-        vec![AiChatMessage {
-            role: "user".into(),
-            content: Some("请仅回复：连接成功".into()),
-            tool_call_id: None,
-            tool_calls: None,
-        }],
-        None,
-        None,
-        false,
-        api_key,
-        32,
-        None,
-        None,
-    )
-    .await
+    validate_ai_model_protocol(&config.protocol)?;
+    if config.protocol == "chat-completions" {
+        return perform_ai_chat_completion(
+            config,
+            vec![AiChatMessage {
+                role: "user".into(),
+                content: Some("Reply only: connection successful".into()),
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+            None,
+            None,
+            false,
+            api_key,
+            32,
+            None,
+            None,
+        )
+        .await;
+    }
+    if config.protocol == "responses" {
+        return perform_ai_responses_connection(config, api_key).await;
+    }
+    match perform_ai_responses_connection(config.clone(), api_key.clone()).await {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            let unsupported = is_responses_endpoint_unsupported(0, &error);
+            if unsupported {
+                return perform_ai_chat_completion(
+                    config,
+                    vec![AiChatMessage {
+                        role: "user".into(),
+                        content: Some("请仅回复：连接成功".into()),
+                        tool_call_id: None,
+                        tool_calls: None,
+                    }],
+                    None,
+                    None,
+                    false,
+                    api_key,
+                    32,
+                    None,
+                    None,
+                )
+                .await;
+            }
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -6009,6 +6450,7 @@ pub fn run() {
         .manage(PackageInstallTasks::default())
         .manage(ManimTasks::default())
         .manage(AiChatRequests::default())
+        .manage(CodexAgentState::default())
         .manage(PyrightState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -6115,7 +6557,14 @@ pub fn run() {
             ai_chat_completion,
             ai_chat_completion_stream,
             cancel_ai_chat_stream,
-            send_python_input
+            send_python_input,
+            codex_agent_start,
+            codex_agent_request,
+            codex_agent_notify,
+            codex_agent_next_event,
+            codex_agent_respond_to_request,
+            codex_agent_reject_request,
+            codex_agent_shutdown
         ])
         .run(tauri::generate_context!())
         .expect("error while running Visual Python");
@@ -6134,6 +6583,24 @@ mod tests {
         assert!(!is_supported_python_version("3.10.14"));
         assert!(!is_supported_python_version("3.15.0a1"));
         assert!(!is_supported_python_version("2.7.18"));
+    }
+
+    #[test]
+    fn defaults_ai_model_protocol_to_auto_for_older_configurations() {
+        let config: AiModelConfig = serde_json::from_value(json!({
+            "baseUrl": "https://example.com/v1",
+            "model": "test-model"
+        }))
+        .expect("AI model config should deserialize");
+        assert_eq!(config.protocol, "auto");
+    }
+
+    #[test]
+    fn validates_ai_model_protocol_values() {
+        assert!(validate_ai_model_protocol("auto").is_ok());
+        assert!(validate_ai_model_protocol("responses").is_ok());
+        assert!(validate_ai_model_protocol("chat-completions").is_ok());
+        assert!(validate_ai_model_protocol("legacy").is_err());
     }
 
     #[test]
@@ -6227,6 +6694,51 @@ mod tests {
             openai_chat_endpoint("https://example.com"),
             "https://example.com/v1/chat/completions"
         );
+    }
+
+    #[test]
+    fn builds_openai_responses_endpoints_from_common_base_urls() {
+        assert_eq!(
+            openai_responses_endpoint("https://example.com/v1"),
+            "https://example.com/v1/responses"
+        );
+        assert_eq!(
+            openai_responses_endpoint("https://example.com/v1/responses"),
+            "https://example.com/v1/responses"
+        );
+        assert_eq!(
+            openai_responses_endpoint("https://example.com"),
+            "https://example.com/v1/responses"
+        );
+    }
+
+    #[test]
+    fn extracts_text_from_openai_responses_payloads() {
+        assert_eq!(
+            responses_message_content(&json!({
+                "output": [{
+                    "type": "message",
+                    "content": [{ "type": "output_text", "text": "hello" }]
+                }]
+            })),
+            Some("hello".into())
+        );
+        assert_eq!(
+            responses_message_content(&json!({ "output_text": "fallback" })),
+            Some("fallback".into())
+        );
+    }
+
+    #[test]
+    fn recognizes_responses_endpoint_protocol_errors() {
+        assert!(is_responses_endpoint_unsupported(404, "Not support"));
+        assert!(is_responses_endpoint_unsupported(
+            0,
+            "AI request failed (HTTP 405): Method Not Allowed"
+        ));
+        assert!(is_responses_endpoint_unsupported(400, "Responses endpoint is unsupported"));
+        assert!(!is_responses_endpoint_unsupported(400, "invalid model"));
+        assert!(!is_responses_endpoint_unsupported(401, "Unauthorized"));
     }
 
     #[test]
@@ -6366,6 +6878,65 @@ mod tests {
         assert_eq!(body["reasoning_effort"], "xhigh");
 
         assert!(apply_ai_reasoning_effort(&mut body, Some("extra-high")).is_err());
+    }
+
+    #[test]
+    fn disables_qwen_thinking_without_sending_reasoning_effort() {
+        let mut body = json!({ "model": "qwen3.7-flash" });
+        apply_ai_reasoning_controls(
+            &mut body,
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "qwen3.7-flash",
+            Some("high"),
+        )
+        .unwrap();
+        assert_eq!(body["enable_thinking"], false);
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn retries_only_when_a_stream_contains_reasoning_without_output() {
+        assert!(should_retry_without_reasoning(false, false, false, "", 0, true));
+        assert!(!should_retry_without_reasoning(true, false, false, "", 0, true));
+        assert!(!should_retry_without_reasoning(false, true, false, "", 0, true));
+        assert!(!should_retry_without_reasoning(false, false, true, "", 0, true));
+        assert!(!should_retry_without_reasoning(false, false, false, "完成", 0, true));
+        assert!(!should_retry_without_reasoning(false, false, false, "", 1, true));
+        assert!(!should_retry_without_reasoning(false, false, false, "", 0, false));
+    }
+
+    #[test]
+    fn retries_when_a_provider_rejects_reasoning_parameters() {
+        assert!(should_retry_for_reasoning_parameter_error(
+            400,
+            r#"{"error":{"message":"Unknown parameter: reasoning_effort"}}"#,
+            Some("high"),
+            false,
+        ));
+        assert!(should_retry_for_reasoning_parameter_error(
+            422,
+            "enable_thinking is not supported",
+            Some("medium"),
+            false,
+        ));
+        assert!(!should_retry_for_reasoning_parameter_error(
+            401,
+            "reasoning_effort is invalid",
+            Some("high"),
+            false,
+        ));
+        assert!(!should_retry_for_reasoning_parameter_error(
+            400,
+            "reasoning_effort is invalid",
+            None,
+            false,
+        ));
+        assert!(!should_retry_for_reasoning_parameter_error(
+            400,
+            "reasoning_effort is invalid",
+            Some("high"),
+            true,
+        ));
     }
 
     #[test]
