@@ -9,18 +9,31 @@ describe("AI assistant Markdown", () => {
     const html = renderToStaticMarkup(<AiAssistantWelcome onSelect={() => undefined}/>);
 
     expect(html).toContain('class="ai-agent-empty"');
-    expect(html).toContain("创建一个基础程序");
-    expect(html).toContain("检查当前代码");
-    expect(html).toContain("修改当前文档");
+    expect(html).toContain('class="ai-agent-empty-mark"');
+    expect(html).toContain('class="ai-agent-empty-title"');
+    expect(html).toContain('class="ai-agent-suggestions welcome"');
+    expect(aiAssistantSuggestions).toHaveLength(4);
+    expect(html).toContain("探索并理解当前代码");
+    expect(html).toContain("创建程序或动画");
+    expect(html).toContain("检查代码并提出改进");
+    expect(html).toContain("修复问题和错误");
     expect(html).not.toContain("AI 编程助手");
     expect(html).not.toContain("基于当前文档处理代码、运行和插件任务");
     expect(html).not.toContain("勾股定理");
   });
 
+  it("shows the active document context in the welcome state", () => {
+    const html = renderToStaticMarkup(<AiAssistantWelcome onSelect={() => undefined} contextName="NewScene" lineCount={12}/>);
+
+    expect(html).toContain('title="NewScene · 12 行代码"');
+    expect(html).not.toContain("AI 编程助手");
+  });
+
   it("reuses the same suggestion buttons after a run finishes", () => {
-    const html = renderToStaticMarkup(<AiAssistantSuggestionButtons onSelect={() => undefined}/>);
+    const html = renderToStaticMarkup(<AiAssistantSuggestionButtons onSelect={() => undefined} className="followups"/>);
 
     expect(html.match(/<button/g)).toHaveLength(aiAssistantSuggestions.length);
+    expect(html).toContain('class="ai-agent-suggestions followups"');
     expect(shouldShowAiFollowUpSuggestions([{ status: "running" }])).toBe(false);
     expect(shouldShowAiFollowUpSuggestions([{ status: "done" }])).toBe(true);
     expect(shouldShowAiFollowUpSuggestions([{ status: "error" }])).toBe(true);
@@ -34,6 +47,18 @@ describe("AI assistant Markdown", () => {
 
     expect(setPrompt).toHaveBeenCalledWith(aiAssistantSuggestions[1].prompt);
     expect(focusPrompt).toHaveBeenCalledOnce();
+  });
+
+  it("submits a suggestion immediately when a submit handler is provided", () => {
+    const setPrompt = vi.fn();
+    const focusPrompt = vi.fn();
+    const submitPrompt = vi.fn();
+
+    applyAiAssistantSuggestion(aiAssistantSuggestions[1].prompt, setPrompt, focusPrompt, submitPrompt);
+
+    expect(setPrompt).toHaveBeenCalledWith(aiAssistantSuggestions[1].prompt);
+    expect(submitPrompt).toHaveBeenCalledWith(aiAssistantSuggestions[1].prompt);
+    expect(focusPrompt).not.toHaveBeenCalled();
   });
 
   it("uses model-provided follow-up suggestions without showing metadata", () => {
@@ -84,6 +109,22 @@ describe("AI assistant Markdown", () => {
     expect(html).not.toContain("**完成**");
   });
 
+  it("renders fenced Python code with syntax highlighting", () => {
+    const html = renderToStaticMarkup(<MarkdownContent>{"```python\nfrom manim import *\nclass Demo(Scene):\n    def construct(self):\n        self.add(Circle())\n```"}</MarkdownContent>);
+
+    expect(html).toContain("ai-markdown-code-block");
+    expect(html).toContain("hljs-keyword");
+    expect(html).toContain("hljs-title");
+    expect(html).not.toContain("<code>from manim");
+  });
+
+  it("auto-detects syntax in fenced code without a language label", () => {
+    const html = renderToStaticMarkup(<MarkdownContent>{"```\nfrom manim import *\nclass Demo(Scene):\n    def construct(self):\n        self.add(Circle())\n```"}</MarkdownContent>);
+
+    expect(html).toContain("ai-markdown-code-block");
+    expect(html).toContain("hljs-keyword");
+  });
+
   it("renders inline and display LaTeX formulas with KaTeX", () => {
     const html = renderToStaticMarkup(<MarkdownContent>{"Hyperbola $\\frac{x^2}{a^2} - \\frac{y^2}{b^2} = 1$.\n\n$$\nc^2 = a^2 + b^2\n$$"}</MarkdownContent>);
     expect(html).toContain("katex");
@@ -123,12 +164,24 @@ describe("AI assistant Markdown", () => {
     expect(html).not.toContain("<button");
   });
 
-  it("places completion metadata in the response footer", () => {
-    const html = renderToStaticMarkup(<AgentResponseFooter status="完成" meta="2 次操作 · 9 行代码 · 9 秒" metaTitle="缓存详情"/>);
+  it("places only completion metadata and actions in the response footer", () => {
+    const html = renderToStaticMarkup(<AgentResponseFooter status="完成" meta="9 秒 · 1.8 万 Token" metaTitle="缓存详情"><button type="button">复制</button></AgentResponseFooter>);
     expect(html).toContain('class="ai-agent-response-footer"');
-    expect(html.indexOf("完成")).toBeLessThan(html.indexOf("2 次操作"));
-    expect(html).not.toContain("<svg");
+    expect(html).toContain("9 秒 · 1.8 万 Token");
+    expect(html).toContain("复制");
+    expect(html).not.toContain(">完成<");
     expect(html).toContain('title="缓存详情"');
+  });
+
+  it("keeps the task activity stream separate from the final answer", () => {
+    const html = renderToStaticMarkup(<AgentActivityRow
+      activity={{ id: "tool-1", kind: "tool", status: "running", title: "读取当前工程", toolName: "get_context" }}
+      onRevealCodeChange={() => undefined}
+      onRevealProblem={() => undefined}
+    />);
+
+    expect(html).toContain('class="ai-agent-tool-line running"');
+    expect(html).not.toContain("任务完成");
   });
 
   it("explains provider cache usage without adding permanent footer text", () => {

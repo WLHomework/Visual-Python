@@ -1246,19 +1246,39 @@ button { font: inherit; }
 
 /* Agent-style conversation: commands, compact progress events, then plain output. */
 .ai-agent-empty {
-  width: min(100%, 420px);
+  width: min(100%, 760px);
   min-height: 100%;
   margin: 0 auto;
-  padding: 32px 0;
+  padding: 36px 16px 44px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
+  gap: 18px;
+}
+
+.ai-agent-empty-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.ai-agent-empty-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.2;
 }
 
 .ai-agent-followups {
-  width: min(100%, 420px);
+  width: min(100%, 760px);
   margin: 22px auto 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
 
 .ai-agent-suggestions {
@@ -1270,6 +1290,9 @@ button { font: inherit; }
   width: 100%;
   min-width: 0;
   min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   padding: 9px 11px;
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -1283,6 +1306,69 @@ button { font: inherit; }
   transition: background-color .12s ease,border-color .12s ease;
 }
 
+.ai-agent-suggestions.welcome {
+  width: 100%;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 10px;
+}
+
+.ai-agent-suggestions.welcome button {
+  min-height: 94px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+}
+
+.ai-agent-suggestions.welcome button:hover {
+  background: var(--surface-2);
+}
+
+.ai-agent-suggestions.welcome button > span:last-child {
+  display: block;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.ai-agent-suggestion-icon {
+  color: #4f9cff;
+}
+
+.ai-agent-suggestions.welcome button:nth-child(2) .ai-agent-suggestion-icon {
+  color: #a679ff;
+}
+
+.ai-agent-suggestions.welcome button:nth-child(3) .ai-agent-suggestion-icon {
+  color: #35bd82;
+}
+
+.ai-agent-suggestions.welcome button:nth-child(4) .ai-agent-suggestion-icon {
+  color: #ed815f;
+}
+
+.ai-agent-suggestions.followups {
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 8px;
+}
+
+.ai-agent-suggestions.followups button {
+  min-height: 44px;
+  justify-content: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb,var(--surface-2),transparent 18%);
+  text-align: center;
+}
+
+.ai-agent-suggestions.followups button:hover {
+  background: var(--hover);
+  border-color: color-mix(in srgb,#2f9e8f,var(--border) 40%);
+}
+
 .ai-agent-suggestions button:hover {
   background: var(--hover);
   border-color: color-mix(in srgb,var(--muted),transparent 38%);
@@ -1291,6 +1377,26 @@ button { font: inherit; }
 .ai-agent-suggestions button:focus-visible {
   outline: 2px solid color-mix(in srgb,#2f9e8f,transparent 18%);
   outline-offset: 2px;
+}
+
+@media (max-width: 620px) {
+  .ai-agent-suggestions.welcome {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+
+  .ai-agent-suggestions.welcome button {
+    min-height: 76px;
+  }
+
+  .ai-agent-suggestions.followups {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  .ai-agent-suggestions.welcome {
+    grid-template-columns: 1fr;
+  }
 }
 
 .ai-thread.has-runs {
@@ -1306,7 +1412,7 @@ button { font: inherit; }
 .ai-agent-prompt {
   width: max-content;
   max-width: 88%;
-  margin: 0 0 10px auto;
+  margin: 0;
   padding: 8px 10px;
   border-radius: 5px;
   background: color-mix(in srgb,var(--surface-3),#2f9e8f 10%);
@@ -1366,6 +1472,19 @@ button { font: inherit; }
 
 .ai-agent-error-content > span {
   overflow-wrap: anywhere;
+}
+
+.ai-agent-user-message {
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.ai-agent-worklog {
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb,#2f9e8f,var(--border) 58%);
 }
 
 .ai-agent-error-content small {
@@ -2372,29 +2491,17 @@ details.ai-agent-task-plan.completed {
 .ai-agent-response-footer {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   order: 2;
   gap: 8px;
   padding-top: 2px;
 }
 
-.ai-agent-response-footer > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: #58bdab;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.ai-agent-response.awaiting-user .ai-agent-response-footer > span {
-  color: #d2a24c;
-}
-
 .ai-agent-response-footer > small {
   min-width: 0;
   overflow: hidden;
+  justify-self: start;
   color: var(--muted);
   font-size: 10px;
   white-space: nowrap;

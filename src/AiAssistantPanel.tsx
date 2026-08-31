@@ -1,5 +1,5 @@
 import { isValidElement, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ArrowDown, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, Film, ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, RefreshCw, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { AlertCircle, ArrowDown, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, RefreshCw, SearchCheck, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -450,9 +450,10 @@ export function taskPlanResumeLabel(steps: AiAgentPlanStep[]): string {
 }
 
 export const aiAssistantSuggestions = [
-  { label: "创建一个基础程序", prompt: "创建一个基础程序" },
-  { label: "检查当前代码", prompt: "检查当前代码" },
-  { label: "修改当前文档", prompt: "修改当前文档" },
+  { label: "探索并理解当前代码", prompt: "探索并理解当前代码" },
+  { label: "创建程序或动画", prompt: "创建一个新的程序或动画" },
+  { label: "检查代码并提出改进", prompt: "检查当前代码并提出可执行的改进建议" },
+  { label: "修复问题和错误", prompt: "检查并修复当前代码中的问题和错误" },
 ] as const;
 
 export function buildAiFollowUpSuggestions(run: Pick<AgentRun, "activities">, contextName: string): AiFollowUpSuggestion[] {
@@ -497,9 +498,10 @@ export function getAiFollowUpSuggestions(run: Pick<AgentRun, "activities" | "res
   }).slice(0, 3);
 }
 
-export function applyAiAssistantSuggestion(prompt: string, setPrompt: (value: string) => void, focusPrompt: () => void) {
+export function applyAiAssistantSuggestion(prompt: string, setPrompt: (value: string) => void, focusPrompt: () => void, submitPrompt?: (value: string) => void) {
   setPrompt(prompt);
-  focusPrompt();
+  if (submitPrompt) submitPrompt(prompt);
+  else focusPrompt();
 }
 
 export function shouldShowAiFollowUpSuggestions(runs: Array<Pick<AgentRun, "status">>) {
@@ -508,13 +510,24 @@ export function shouldShowAiFollowUpSuggestions(runs: Array<Pick<AgentRun, "stat
 }
 
 export function AiAssistantSuggestionButtons({ onSelect, suggestions = aiAssistantSuggestions, className = "" }: { onSelect: (prompt: string) => void; suggestions?: readonly AiFollowUpSuggestion[]; className?: string }) {
+  const isWelcome = className.split(/\s+/).includes("welcome");
+  const icons = [Compass, Hammer, SearchCheck, Bug] as const;
   return <div className={`ai-agent-suggestions${className ? ` ${className}` : ""}`} aria-label="建议任务">
-    {suggestions.map((suggestion) => <button type="button" key={suggestion.prompt} onClick={() => onSelect(suggestion.prompt)}>{suggestion.label}</button>)}
+    {suggestions.map((suggestion, index) => {
+      const Icon = icons[index % icons.length];
+      return <button type="button" key={suggestion.prompt} onClick={() => onSelect(suggestion.prompt)}>{isWelcome && <Icon className="ai-agent-suggestion-icon" size={15}/>}<span>{suggestion.label}</span></button>;
+    })}
   </div>;
 }
 
-export function AiAssistantWelcome({ onSelect }: { onSelect: (prompt: string) => void }) {
-  return <div className="ai-agent-empty" aria-label="AI 助手初始化"><AiAssistantSuggestionButtons onSelect={onSelect}/></div>;
+export function AiAssistantWelcome({ onSelect, contextName, lineCount }: { onSelect: (prompt: string) => void; contextName?: string; lineCount?: number }) {
+  const documentName = contextName?.trim() || "当前文档";
+  const documentSize = lineCount && lineCount > 0 ? `${lineCount} 行代码` : "空文档";
+  return <div className="ai-agent-empty" aria-label="AI 助手初始化" title={`${documentName} · ${documentSize}`}>
+    <span className="ai-agent-empty-mark" aria-hidden="true"><Sparkles size={18}/></span>
+    <h2 className="ai-agent-empty-title">今天想完成什么？</h2>
+    <AiAssistantSuggestionButtons onSelect={onSelect} className="welcome"/>
+  </div>;
 }
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -544,6 +557,8 @@ const codeLanguageLabels: Record<string, string> = {
   xml: "HTML/XML",
 };
 
+const autoHighlightLanguages = ["bash", "css", "javascript", "json", "markdown", "python", "typescript", "xml"];
+
 function codeLanguage(className?: string): { id: string; label: string } {
   const requested = className?.match(/(?:^|\s)language-([^\s]+)/)?.[1]?.toLowerCase() || "";
   const id = codeLanguageAliases[requested] || requested;
@@ -551,8 +566,13 @@ function codeLanguage(className?: string): { id: string; label: string } {
 }
 
 export function highlightAssistantCode(code: string, language: string): string | null {
-  if (!language || !hljs.getLanguage(language)) return null;
-  return hljs.highlight(code, { language, ignoreIllegals: true }).value;
+  const normalizedLanguage = language.trim().toLowerCase();
+  if (normalizedLanguage) {
+    if (!hljs.getLanguage(normalizedLanguage)) return null;
+    return hljs.highlight(code, { language: normalizedLanguage, ignoreIllegals: true }).value;
+  }
+  const detected = hljs.highlightAuto(code, autoHighlightLanguages);
+  return detected.relevance > 0 ? detected.value : null;
 }
 
 async function writeClipboardText(text: string): Promise<void> {
@@ -1046,8 +1066,8 @@ function AgentExecutionResult({ execution, onRevealProblem }: { execution: AiAge
   </div>;
 }
 
-export function AgentResponseFooter({ status, meta, metaTitle, children }: { status: ReactNode; meta: string; metaTitle?: string; children?: ReactNode }) {
-  return <div className="ai-agent-response-footer"><span>{status}</span>{meta && <small title={metaTitle}>{meta}</small>}{children && <span className="ai-agent-response-footer-actions">{children}</span>}</div>;
+export function AgentResponseFooter({ meta, metaTitle, children }: { status: ReactNode; meta: string; metaTitle?: string; children?: ReactNode }) {
+  return <div className="ai-agent-response-footer">{meta && <small title={metaTitle}>{meta}</small>}{children && <span className="ai-agent-response-footer-actions">{children}</span>}</div>;
 }
 
 export function AgentActivityRow({ activity, onRevealCodeChange, onRevealProblem }: {
@@ -1471,8 +1491,8 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     }
   };
 
-  const enqueuePrompt = () => {
-    const normalizedPrompt = prompt.trim();
+  const enqueuePrompt = (nextPrompt = prompt) => {
+    const normalizedPrompt = nextPrompt.trim();
     if (!normalizedPrompt) return;
     if (!runsRef.current.some((run) => run.status === "running")) {
       void runAgent(normalizedPrompt);
@@ -1557,7 +1577,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   };
 
   const selectSuggestion = (suggestion: string) => {
-    applyAiAssistantSuggestion(suggestion, setPrompt, () => promptRef.current?.focus());
+    applyAiAssistantSuggestion(suggestion, setPrompt, () => promptRef.current?.focus(), enqueuePrompt);
   };
 
   return <section className="ai-assistant" aria-label="AI 编程助手">
@@ -1585,10 +1605,11 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     <div className="ai-thread-shell">
       <div ref={threadRef} className={`ai-thread ${runs.length ? "has-runs" : ""}`} aria-live="polite" onScroll={handleThreadScroll}>
         <div ref={threadContentRef} className="ai-thread-content">
-        {!runs.length && <AiAssistantWelcome onSelect={selectSuggestion}/>}
+        {!runs.length && <AiAssistantWelcome onSelect={selectSuggestion} contextName={contextName} lineCount={lineCount}/>}
         {runs.map((run) => <article className="ai-agent-run" key={run.id}>
-          <p className="ai-agent-prompt">{run.prompt}</p>
-          <div className="ai-agent-activity-list">
+          <div className="ai-agent-user-message"><p className="ai-agent-prompt">{run.prompt}</p></div>
+          <div className="ai-agent-worklog" aria-label="任务活动">
+            <div className="ai-agent-activity-list">
           {groupAgentActivities(run.activities, run.permission?.toolName).map((entry) => entry.kind === "group"
             ? <details className="ai-agent-tool-group" key={entry.id}>
               <summary><ChevronRight className="ai-agent-tool-chevron" size={14}/><strong>{entry.summary}</strong></summary>
@@ -1599,6 +1620,8 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
           {(run.status === "error" || run.status === "stopped") && run.progress?.taskPlan?.length ? <AgentTaskPlan steps={run.progress.taskPlan}/> : null}
           {run.permission && <AgentPermissionPrompt request={run.permission} onRespond={(approved) => respondToPermission(run.id, approved)}/>}
           {run.status === "running" && <AgentRunProgress progress={run.progress}/>}
+            </div>
+          </div>
           {run.status === "done" && !run.result?.clarification && <div className="ai-agent-response">
             <MarkdownContent>{run.result?.summary || "完成"}</MarkdownContent>
             <AgentResponseFooter status={run.result?.clarification
@@ -1620,10 +1643,9 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
           </div>}
           {run.status === "queued" && <div className="ai-agent-run-state queued"><Clock3 size={14}/><span>等待当前任务完成</span><span className="ai-agent-queued-actions"><button disabled={running} title="立即执行" aria-label="立即执行排队任务" onClick={() => startQueuedRun(run)}><Play size={13}/></button><button title="移出队列" aria-label="移出任务队列" onClick={() => removeQueuedRun(run.id)}><X size={14}/></button></span></div>}
           {run.status === "stopped" && <div className="ai-agent-run-state stopped"><Square size={12}/><span>已停止{run.startedAt ? ` · ${formatAgentElapsed(run.startedAt, run.finishedAt)}` : ""}</span><span className="ai-run-failure-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])} onClick={() => resumeRun(run)}><Play size={13}/></button> : <button className="ai-run-retry" disabled={running} title="重新执行此任务" aria-label="重新执行此任务" onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)}><RefreshCw size={13}/></button>}</span></div>}
-          </div>
           {run.error && <div className="ai-agent-error"><span className="ai-agent-error-content"><strong>任务未完成</strong><span>{formatAgentRunError(run.error)}</span>{run.startedAt ? <small>{formatAgentElapsed(run.startedAt, run.finishedAt)}</small> : null}</span><span className="ai-agent-error-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} onClick={() => resumeRun(run)} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])}><Play size={14}/></button> : <button disabled={running} onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)} title="重新执行此任务" aria-label="重新执行此任务"><RefreshCw size={15}/></button>}<button onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={15}/></button></span></div>}
         </article>)}
-        {runs.length > 0 && shouldShowAiFollowUpSuggestions(runs) && !runs.at(-1)?.result?.clarification && <div className="ai-agent-followups"><AiAssistantSuggestionButtons onSelect={selectSuggestion} suggestions={getAiFollowUpSuggestions(runs.at(-1)!, contextName)}/></div>}
+        {runs.length > 0 && shouldShowAiFollowUpSuggestions(runs) && !runs.at(-1)?.result?.clarification && <div className="ai-agent-followups"><AiAssistantSuggestionButtons onSelect={selectSuggestion} suggestions={getAiFollowUpSuggestions(runs.at(-1)!, contextName)} className="followups"/></div>}
         </div>
       </div>
       <div ref={threadScrollbarRef} className="ai-thread-scrollbar" role="scrollbar" aria-label="AI 消息滚动条" aria-orientation="vertical" aria-valuemin={0} aria-valuemax={0} aria-valuenow={0} onPointerDown={handleAiScrollbarPointerDown}>

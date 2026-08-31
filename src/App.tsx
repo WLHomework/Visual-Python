@@ -919,6 +919,12 @@ export default function App() {
   const [pyrightDiagnostics, setPyrightDiagnostics] = useState<LspDiagnostic[]>([]);
   const [output, setOutput] = useState<OutputEntry[]>([{ id: 0, stream: "system", data: "准备就绪。运行项目后，输出将显示在这里。\n" }]);
   const outputRef = useRef<OutputEntry[]>(output);
+  const outputScrollRef = useRef<HTMLDivElement>(null);
+  const outputStickToLatestRef = useRef(true);
+  const outputScrollFrameRef = useRef<number | null>(null);
+  const problemScrollRef = useRef<HTMLDivElement>(null);
+  const problemStickToLatestRef = useRef(true);
+  const problemScrollFrameRef = useRef<number | null>(null);
   const [running, setRunning] = useState(false);
   const runningRef = useRef(running);
   const pythonRunStartedAt = useRef(0);
@@ -1166,6 +1172,18 @@ export default function App() {
       outputFlushTimer.current = window.setTimeout(flushPendingOutput, 80);
     }
   }, [flushPendingOutput]);
+
+  const handleOutputScroll = useCallback(() => {
+    const scroll = outputScrollRef.current;
+    if (!scroll) return;
+    outputStickToLatestRef.current = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight <= 32;
+  }, []);
+
+  const handleProblemScroll = useCallback(() => {
+    const scroll = problemScrollRef.current;
+    if (!scroll) return;
+    problemStickToLatestRef.current = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight <= 32;
+  }, []);
 
   const clearConsole = useCallback(() => {
     pendingOutput.current = [];
@@ -1951,6 +1969,27 @@ export default function App() {
     setActivePanel(panel);
     setBottomPanelOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (activePanel !== "output") return;
+    outputStickToLatestRef.current = true;
+  }, [activePanel]);
+
+  useEffect(() => {
+    const scroll = outputScrollRef.current;
+    if (!scroll || activePanel !== "output" || !effectiveBottomPanelOpen || !outputStickToLatestRef.current) return;
+    if (outputScrollFrameRef.current !== null) cancelAnimationFrame(outputScrollFrameRef.current);
+    outputScrollFrameRef.current = requestAnimationFrame(() => {
+      outputScrollFrameRef.current = null;
+      if (outputStickToLatestRef.current && outputScrollRef.current === scroll) scroll.scrollTop = scroll.scrollHeight;
+    });
+    return () => {
+      if (outputScrollFrameRef.current !== null) {
+        cancelAnimationFrame(outputScrollFrameRef.current);
+        outputScrollFrameRef.current = null;
+      }
+    };
+  }, [activePanel, effectiveBottomPanelOpen, output, bottomPanelHeight, renderingManim, manimRenderProgress?.phase, manimRenderProgress?.percent]);
 
   const ensureDesktopNotificationPermission = useCallback(async () => {
     if (notificationPermission.current !== null) return notificationPermission.current;
@@ -4463,6 +4502,28 @@ export default function App() {
   const displayedProblems = workspaceMode === "code"
     ? [...codeSyntaxProblems, ...pyrightProblems, ...codeRuntimeProblems, ...resourceProblems, ...problems.filter((problem) => !(problem.kind === "syntax" && codeSyntaxDiagnostic) && !(problem.kind === "runtime" && codeRuntimeDiagnostic))]
     : [...contextProblems, ...resourceProblems, ...problems];
+
+  useEffect(() => {
+    if (activePanel !== "problems") return;
+    problemStickToLatestRef.current = true;
+  }, [activePanel]);
+
+  useEffect(() => {
+    const scroll = problemScrollRef.current;
+    if (!scroll || activePanel !== "problems" || !effectiveBottomPanelOpen || !problemStickToLatestRef.current) return;
+    if (problemScrollFrameRef.current !== null) cancelAnimationFrame(problemScrollFrameRef.current);
+    problemScrollFrameRef.current = requestAnimationFrame(() => {
+      problemScrollFrameRef.current = null;
+      if (problemStickToLatestRef.current && problemScrollRef.current === scroll) scroll.scrollTop = scroll.scrollHeight;
+    });
+    return () => {
+      if (problemScrollFrameRef.current !== null) {
+        cancelAnimationFrame(problemScrollFrameRef.current);
+        problemScrollFrameRef.current = null;
+      }
+    };
+  }, [activePanel, effectiveBottomPanelOpen, displayedProblems, bottomPanelHeight]);
+
   const contextMenuProblem = consoleContextMenu?.problemId
     ? displayedProblems.find((problem) => String(problem.id) === consoleContextMenu.problemId)
     : undefined;
@@ -5747,7 +5808,7 @@ export default function App() {
               <time>{formatRenderElapsed(manimRenderElapsed)}</time>
               <div className={`manim-render-progress-track ${manimRenderProgress.percent === undefined ? "indeterminate" : ""}`}><span style={manimRenderProgress.percent === undefined ? undefined : { width: `${manimRenderProgress.percent}%` }}/></div>
             </div>}
-            {activePanel === "output" ? <div className="console-scroll"><pre>{output.map((entry) => <span key={entry.id} className={`output-${entry.stream}`}>{entry.data}</span>)}</pre></div> : activePanel === "problems" ? <div className="problem-list">{displayedProblems.length ? displayedProblems.map((problem) => { const resourceProblem = problem.kind === "resource"; const locatable = resourceProblem || Boolean(problem.blockId || (workspaceMode === "code" && problem.line > 0)); const problemTypeLabel = { context: "积木语法问题", syntax: "Python 语法问题", runtime: "运行时错误", timeout: "执行超时", environment: "Python 环境问题", plugin: "插件问题", resource: "工程资源问题" }[problem.kind]; return <div key={problem.id} data-problem-id={String(problem.id)} className={`problem-${problem.kind} ${locatable ? "problem-locatable" : ""}`} onClick={() => resourceProblem ? setResourcesOpen(true) : locatable && focusProblem(problem)} title={resourceProblem ? "点击打开工程资源" : problem.blockId ? "点击定位到积木" : locatable ? "点击定位到代码" : undefined}><span className="problem-badge" title={problemTypeLabel} aria-label={problemTypeLabel}>{{ context: <Braces size={11}/>, syntax: <Braces size={11}/>, runtime: <Terminal size={11}/>, timeout: <RefreshCw size={11}/>, environment: <Settings size={11}/>, plugin: <Plug size={11}/>, resource: <Box size={11}/> }[problem.kind]}</span><span><strong>{problem.message}</strong>{problem.suggestion && <em>{problem.suggestion}</em>}<small>{resourceProblem ? "工程资源 · 点击打开资源面板" : problem.blockId ? problem.kind === "context" ? "编辑期语法检查 · 点击定位到积木" : "已定位到相关积木" : problem.line ? `Python 第 ${problem.line} 行${workspaceMode === "code" ? " · 点击定位" : ""}` : { context: "编辑期语法检查", syntax: "语法检查", runtime: "运行时错误", timeout: "执行超时", environment: "Python 环境", plugin: "插件依赖", resource: "工程资源" }[problem.kind]}</small></span></div>; }) : <div className="no-problems">没有检测到问题。</div>}</div> : <div className={`video-preview-panel ${manimRenderOutput?.type === "image" && manimRenderOutput.transparentBackground ? "transparent-image" : ""}`}>{manimRenderOutput ? <><div className="video-preview-actions"><button onClick={() => void openSystemRenderOutput()} title={manimRenderOutput.type === "image" ? "使用本地图片查看器打开" : "使用本地播放器打开"}><ExternalLink size={14}/></button><button onClick={() => void revealRenderOutputInFolder()} title="打开所在文件夹"><FolderOpen size={14}/></button></div>{manimRenderOutput.type === "image" ? <img key={manimRenderOutput.url} src={manimRenderOutput.url} alt={`${manimRenderOutput.scene} 渲染结果`}/> : <video key={manimRenderOutput.url} src={manimRenderOutput.url} controls/>}</> : <div className="empty-video-preview"><ImageIcon size={24}/><strong>暂无渲染结果</strong><span>渲染 Manim 视频或图片后会在这里预览。</span></div>}</div>}
+            {activePanel === "output" ? <div ref={outputScrollRef} className="console-scroll" onScroll={handleOutputScroll}><pre>{output.map((entry) => <span key={entry.id} className={`output-${entry.stream}`}>{entry.data}</span>)}</pre></div> : activePanel === "problems" ? <div ref={problemScrollRef} className="problem-list" onScroll={handleProblemScroll}>{displayedProblems.length ? displayedProblems.map((problem) => { const resourceProblem = problem.kind === "resource"; const locatable = resourceProblem || Boolean(problem.blockId || (workspaceMode === "code" && problem.line > 0)); const problemTypeLabel = { context: "积木语法问题", syntax: "Python 语法问题", runtime: "运行时错误", timeout: "执行超时", environment: "Python 环境问题", plugin: "插件问题", resource: "工程资源问题" }[problem.kind]; return <div key={problem.id} data-problem-id={String(problem.id)} className={`problem-${problem.kind} ${locatable ? "problem-locatable" : ""}`} onClick={() => resourceProblem ? setResourcesOpen(true) : locatable && focusProblem(problem)} title={resourceProblem ? "点击打开工程资源" : problem.blockId ? "点击定位到积木" : locatable ? "点击定位到代码" : undefined}><span className="problem-badge" title={problemTypeLabel} aria-label={problemTypeLabel}>{{ context: <Braces size={11}/>, syntax: <Braces size={11}/>, runtime: <Terminal size={11}/>, timeout: <RefreshCw size={11}/>, environment: <Settings size={11}/>, plugin: <Plug size={11}/>, resource: <Box size={11}/> }[problem.kind]}</span><span><strong>{problem.message}</strong>{problem.suggestion && <em>{problem.suggestion}</em>}<small>{resourceProblem ? "工程资源 · 点击打开资源面板" : problem.blockId ? problem.kind === "context" ? "编辑期语法检查 · 点击定位到积木" : "已定位到相关积木" : problem.line ? `Python 第 ${problem.line} 行${workspaceMode === "code" ? " · 点击定位" : ""}` : { context: "编辑期语法检查", syntax: "语法检查", runtime: "运行时错误", timeout: "执行超时", environment: "Python 环境", plugin: "插件依赖", resource: "工程资源" }[problem.kind]}</small></span></div>; }) : <div className="no-problems">没有检测到问题。</div>}</div> : <div className={`video-preview-panel ${manimRenderOutput?.type === "image" && manimRenderOutput.transparentBackground ? "transparent-image" : ""}`}>{manimRenderOutput ? <><div className="video-preview-actions"><button onClick={() => void openSystemRenderOutput()} title={manimRenderOutput.type === "image" ? "使用本地图片查看器打开" : "使用本地播放器打开"}><ExternalLink size={14}/></button><button onClick={() => void revealRenderOutputInFolder()} title="打开所在文件夹"><FolderOpen size={14}/></button></div>{manimRenderOutput.type === "image" ? <img key={manimRenderOutput.url} src={manimRenderOutput.url} alt={`${manimRenderOutput.scene} 渲染结果`}/> : <video key={manimRenderOutput.url} src={manimRenderOutput.url} controls/>}</> : <div className="empty-video-preview"><ImageIcon size={24}/><strong>暂无渲染结果</strong><span>渲染 Manim 视频或图片后会在这里预览。</span></div>}</div>}
             {activePanel === "output" && <div className="stdin-row"><span className="stdin-prompt">›</span><input value={stdinValue} onChange={(event) => setStdinValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void sendInput(); }} placeholder={running ? "输入内容并按 Enter" : "程序运行时可输入"} disabled={!running}/><button onClick={sendInput} disabled={!running || !stdinValue.length} title="发送输入"><Send size={14}/></button></div>}
           </div>
         </div>
