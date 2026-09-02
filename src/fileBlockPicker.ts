@@ -62,6 +62,7 @@ const pickerConfigs: Record<string, FileBlockPickerConfig[]> = {
   visual_python_pandas_to_csv: [{ inputName: "PATH", mode: "save-file" }],
   visual_python_pandas_read_excel: [{ inputName: "PATH", mode: "open-file" }],
   visual_python_pandas_to_excel: [{ inputName: "PATH", mode: "save-file" }],
+  visual_python_matplotlib_savefig: [{ inputName: "PATH", mode: "save-file" }],
   visual_python_manim_play_local_audio: [{ inputName: "PATH", mode: "audio-file", previewAudio: true }],
   visual_python_manim_play_local_audio_with_animation: [{ inputName: "PATH", mode: "audio-file", previewAudio: true }],
 };

@@ -1191,6 +1191,23 @@ fn openai_responses_endpoint(base_url: &str) -> String {
     }
 }
 
+fn responses_connection_request_body(base_url: &str, model: &str) -> Value {
+    let mut body = serde_json::json!({
+        "model": model,
+        "input": "请仅回复：连接成功",
+        "max_output_tokens": 128,
+        "stream": false
+    });
+    if should_disable_ai_thinking(base_url, model) {
+        body["enable_thinking"] = Value::Bool(false);
+    }
+    body
+}
+
+fn should_retry_responses_connection(attempt: usize, content: Option<&str>) -> bool {
+    attempt == 0 && content.is_none()
+}
+
 fn responses_message_content(payload: &Value) -> Option<String> {
     if let Some(text) = payload.get("output_text").and_then(Value::as_str) {
         let text = text.trim();
@@ -2730,57 +2747,64 @@ async fn perform_ai_responses_connection(
         .timeout(Duration::from_secs(90))
         .build()
         .map_err(|error| format!("无法创建 AI 请求：{error}"))?;
-    let response = client
-        .post(openai_responses_endpoint(&base_url))
-        .bearer_auth(&key)
-        .json(&serde_json::json!({
-            "model": model,
-            "input": "请仅回复：连接成功",
-            "max_output_tokens": 32,
-            "stream": false
-        }))
-        .send()
-        .await
-        .map_err(|error| format!("AI 请求失败：{error}"))?;
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("无法读取 AI 响应：{error}"))?;
-    if !status.is_success() {
-        return Err(format!(
-            "AI 请求失败（HTTP {}）：{}",
-            status.as_u16(),
-            ai_error_body(&body)
-        ));
+    let endpoint = openai_responses_endpoint(&base_url);
+    let request_body = responses_connection_request_body(&base_url, model);
+    for attempt in 0..2 {
+        let response = client
+            .post(&endpoint)
+            .bearer_auth(&key)
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|error| format!("AI 请求失败：{error}"))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| format!("无法读取 AI 响应：{error}"))?;
+        if !status.is_success() {
+            return Err(format!(
+                "AI 请求失败（HTTP {}）：{}",
+                status.as_u16(),
+                ai_error_body(&body)
+            ));
+        }
+        let payload: Value = serde_json::from_str(&body)
+            .map_err(|_| "AI 服务没有返回有效的 JSON 响应".to_string())?;
+        let content = responses_message_content(&payload);
+        if let Some(content) = content {
+            if let Some(value) = supplied_key.as_deref() {
+                store_ai_api_key(&base_url, value)?;
+            }
+            let (
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                cached_tokens,
+                cache_creation_tokens,
+            ) = payload.get("usage").map(ai_token_usage).unwrap_or_default();
+            return Ok(AiChatCompletionResult {
+                content,
+                tool_calls: Vec::new(),
+                model: payload
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .unwrap_or(model)
+                    .to_string(),
+                truncated: false,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                cached_tokens,
+                cache_creation_tokens,
+            });
+        }
+        if should_retry_responses_connection(attempt, None) {
+            continue;
+        }
+        return Err("AI 响应中没有找到文本".to_string());
     }
-    let payload: Value =
-        serde_json::from_str(&body).map_err(|_| "AI 服务没有返回有效的 JSON 响应".to_string())?;
-    let content = responses_message_content(&payload)
-        .ok_or_else(|| "AI 响应中没有找到文本".to_string())?;
-    if let Some(value) = supplied_key.as_deref() {
-        store_ai_api_key(&base_url, value)?;
-    }
-    let (prompt_tokens, completion_tokens, total_tokens, cached_tokens, cache_creation_tokens) =
-        payload
-            .get("usage")
-            .map(ai_token_usage)
-            .unwrap_or_default();
-    Ok(AiChatCompletionResult {
-        content,
-        tool_calls: Vec::new(),
-        model: payload
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or(model)
-            .to_string(),
-        truncated: false,
-        prompt_tokens,
-        completion_tokens,
-        total_tokens,
-        cached_tokens,
-        cache_creation_tokens,
-    })
+    Err("AI 响应中没有找到文本".to_string())
 }
 
 #[tauri::command]
@@ -2802,7 +2826,7 @@ async fn test_ai_connection(
             None,
             false,
             api_key,
-            32,
+            128,
             None,
             None,
         )
@@ -2828,7 +2852,7 @@ async fn test_ai_connection(
                     None,
                     false,
                     api_key,
-                    32,
+                    128,
                     None,
                     None,
                 )
@@ -6710,6 +6734,30 @@ mod tests {
             openai_responses_endpoint("https://example.com"),
             "https://example.com/v1/responses"
         );
+    }
+
+    #[test]
+    fn builds_connection_probe_with_room_for_final_text() {
+        let body = responses_connection_request_body(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "qwen3.7-flash",
+        );
+        assert_eq!(body["max_output_tokens"], 128);
+        assert_eq!(body["enable_thinking"], false);
+    }
+
+    #[test]
+    fn does_not_send_vendor_reasoning_controls_to_generic_responses_providers() {
+        let body = responses_connection_request_body("https://example.com/v1", "reasoning-model");
+        assert!(body.get("enable_thinking").is_none());
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn retries_responses_probe_once_when_only_reasoning_is_returned() {
+        assert!(should_retry_responses_connection(0, None));
+        assert!(!should_retry_responses_connection(0, Some("连接成功")));
+        assert!(!should_retry_responses_connection(1, None));
     }
 
     #[test]

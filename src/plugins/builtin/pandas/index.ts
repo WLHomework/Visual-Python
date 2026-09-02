@@ -8,6 +8,7 @@ const pandasColour = "#4c8b6b";
 const dataframeOutput = "PandasDataFrame";
 const seriesOutput = "PandasSeries";
 const indexOutput = "PandasIndex";
+const category = (name: string, colour: string, contents: Array<Record<string, unknown>>) => ({ kind: "category", name, colour, contents });
 
 const numberShadow = (value: number) => ({ shadow: { type: "math_number", fields: { NUM: value } } });
 const textShadow = (value: string) => ({ shadow: { type: "text", fields: { TEXT: value } } });
@@ -141,28 +142,29 @@ export const pandasPlugin: VisualPythonPlugin = {
       name: "Pandas",
       colour: pandasColour,
       contents: [
-        { kind: "label", text: "创建与读取" },
-        { kind: "block", type: "visual_python_pandas_import", fields: { ALIAS: "pd" } },
-        { kind: "block", type: "visual_python_pandas_series", inputs: { DATA: listShadow([90, 85, 92]), NAME: textShadow("分数") } },
-        { kind: "block", type: "visual_python_pandas_dataframe", inputs: { DATA: dictionaryBlock([["姓名", "['小明', '小红']"], ["分数", "[95, 82]"]]) } },
-        { kind: "block", type: "visual_python_pandas_read_csv", inputs: { PATH: textShadow("data.csv") } },
-        { kind: "block", type: "visual_python_pandas_to_csv", inputs: { DATAFRAME: dataframeShadow(), PATH: textShadow("output.csv") }, fields: { INDEX: "FALSE" } },
-        { kind: "block", type: "visual_python_pandas_read_excel", inputs: { PATH: textShadow("data.xlsx") } },
-        { kind: "block", type: "visual_python_pandas_to_excel", inputs: { DATAFRAME: dataframeShadow(), PATH: textShadow("output.xlsx") }, fields: { INDEX: "FALSE" } },
-        { kind: "sep", gap: 16 },
-        { kind: "label", text: "查看数据" },
-        { kind: "block", type: "visual_python_pandas_head", inputs: { DATAFRAME: dataframeShadow(), COUNT: numberShadow(5) } },
-        { kind: "block", type: "visual_python_pandas_tail", inputs: { DATAFRAME: dataframeShadow(), COUNT: numberShadow(5) } },
-        { kind: "block", type: "visual_python_pandas_shape", inputs: { DATAFRAME: dataframeShadow() } },
-        { kind: "block", type: "visual_python_pandas_columns", inputs: { DATAFRAME: dataframeShadow() } },
-        { kind: "block", type: "visual_python_pandas_describe", inputs: { DATAFRAME: dataframeShadow() } },
-        { kind: "block", type: "visual_python_pandas_row_count", inputs: { DATAFRAME: dataframeShadow() } },
-        { kind: "sep", gap: 16 },
-        { kind: "label", text: "选择与整理" },
-        { kind: "block", type: "visual_python_pandas_get_column", inputs: { DATAFRAME: dataframeShadow(), COLUMN: textShadow("分数") } },
-        { kind: "block", type: "visual_python_pandas_set_column", inputs: { DATAFRAME: dataframeShadow(), COLUMN: textShadow("等级"), VALUE: textShadow("合格") } },
-        { kind: "block", type: "visual_python_pandas_filter", inputs: { DATAFRAME: dataframeShadow(), CONDITION: expressionShadow("数据['分数'] >= 60") } },
-        { kind: "block", type: "visual_python_pandas_sort_values", fields: { ORDER: "True" }, inputs: { DATAFRAME: dataframeShadow(), COLUMN: textShadow("分数") } },
+        category("创建与读取", "#4c8b6b", [
+          { kind: "block", type: "visual_python_pandas_import", fields: { ALIAS: "pd" } },
+          { kind: "block", type: "visual_python_pandas_series", inputs: { DATA: listShadow([90, 85, 92]), NAME: textShadow("分数") } },
+          { kind: "block", type: "visual_python_pandas_dataframe", inputs: { DATA: dictionaryBlock([["姓名", "['小明', '小红']"], ["分数", "[95, 82]"]]) } },
+          { kind: "block", type: "visual_python_pandas_read_csv", inputs: { PATH: textShadow("data.csv") } },
+          { kind: "block", type: "visual_python_pandas_to_csv", inputs: { DATAFRAME: dataframeShadow(), PATH: textShadow("output.csv") }, fields: { INDEX: "FALSE" } },
+          { kind: "block", type: "visual_python_pandas_read_excel", inputs: { PATH: textShadow("data.xlsx") } },
+          { kind: "block", type: "visual_python_pandas_to_excel", inputs: { DATAFRAME: dataframeShadow(), PATH: textShadow("output.xlsx") }, fields: { INDEX: "FALSE" } },
+        ]),
+        category("查看数据", "#397ca5", [
+          { kind: "block", type: "visual_python_pandas_head", inputs: { DATAFRAME: dataframeShadow(), COUNT: numberShadow(5) } },
+          { kind: "block", type: "visual_python_pandas_tail", inputs: { DATAFRAME: dataframeShadow(), COUNT: numberShadow(5) } },
+          { kind: "block", type: "visual_python_pandas_shape", inputs: { DATAFRAME: dataframeShadow() } },
+          { kind: "block", type: "visual_python_pandas_columns", inputs: { DATAFRAME: dataframeShadow() } },
+          { kind: "block", type: "visual_python_pandas_describe", inputs: { DATAFRAME: dataframeShadow() } },
+          { kind: "block", type: "visual_python_pandas_row_count", inputs: { DATAFRAME: dataframeShadow() } },
+        ]),
+        category("选择与整理", "#7b5aa6", [
+          { kind: "block", type: "visual_python_pandas_get_column", inputs: { DATAFRAME: dataframeShadow(), COLUMN: textShadow("分数") } },
+          { kind: "block", type: "visual_python_pandas_set_column", inputs: { DATAFRAME: dataframeShadow(), COLUMN: textShadow("等级"), VALUE: textShadow("合格") } },
+          { kind: "block", type: "visual_python_pandas_filter", inputs: { DATAFRAME: dataframeShadow(), CONDITION: expressionShadow("数据['分数'] >= 60") } },
+          { kind: "block", type: "visual_python_pandas_sort_values", fields: { ORDER: "True" }, inputs: { DATAFRAME: dataframeShadow(), COLUMN: textShadow("分数") } },
+        ]),
       ],
     });
   },

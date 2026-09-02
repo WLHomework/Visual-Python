@@ -6,6 +6,9 @@ import { getFileBlockPickerConfigs } from "../../../fileBlockPicker";
 import { PluginRegistry } from "../../core/pluginRegistry";
 import { pandasPlugin } from "./index";
 
+const collectToolboxBlocks = (contents: Array<Record<string, any>>): Array<Record<string, any>> =>
+  contents.flatMap((item) => item.kind === "category" ? collectToolboxBlocks(item.contents ?? []) : item.kind === "block" ? [item] : []);
+
 describe("Pandas plugin", () => {
   let registry: PluginRegistry;
 
@@ -133,12 +136,27 @@ describe("Pandas plugin", () => {
     expect(blockTypes.every((type) => type.startsWith("visual_python_pandas_"))).toBe(true);
     const toolbox = registry.extendToolbox({ kind: "categoryToolbox", contents: [] }) as unknown as { contents: Array<Record<string, any>> };
     const category = toolbox.contents.find((entry) => entry.name === "Pandas")!;
-    for (const entry of category.contents.filter((item: Record<string, any>) => item.kind === "block")) {
+    const blocks = collectToolboxBlocks(category.contents);
+    expect(blocks).toHaveLength(blockTypes.length);
+    for (const entry of blocks) {
       const workspace = new Blockly.Workspace();
-      const { kind: _kind, ...state } = structuredClone(entry);
+      const state = structuredClone(entry) as any;
+      delete state.kind;
       expect(() => Blockly.serialization.blocks.append(state, workspace), entry.type).not.toThrow();
       workspace.dispose();
     }
+  });
+
+  it("organizes blocks into real child categories like the Turtle plugin", () => {
+    const toolbox = registry.extendToolbox({ kind: "categoryToolbox", contents: [] }) as unknown as { contents: Array<Record<string, any>> };
+    const pandasCategory = toolbox.contents.find((entry) => entry.name === "Pandas")!;
+    const categories = pandasCategory.contents.filter((entry: Record<string, any>) => entry.kind === "category");
+    expect(categories.map((entry: Record<string, any>) => entry.name)).toEqual([
+      "创建与读取",
+      "查看数据",
+      "选择与整理",
+    ]);
+    expect(categories.every((entry: Record<string, any>) => entry.contents?.every((item: Record<string, any>) => item.kind === "block"))).toBe(true);
   });
 
   it("generates self-contained samples for every Pandas block", () => {

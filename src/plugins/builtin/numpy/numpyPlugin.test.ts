@@ -14,9 +14,19 @@ const list = (values: number[]) => ({
   },
 });
 const array = (input: object) => ({ type: "visual_python_numpy_array", inputs: { DATA: input } });
+const collectToolboxBlocks = (contents: Array<Record<string, any>>): Array<Record<string, any>> =>
+  contents.flatMap((item) => item.kind === "category" ? collectToolboxBlocks(item.contents ?? []) : item.kind === "block" ? [item] : []);
+const findToolboxBlock = (contents: Array<Record<string, any>>, type: string): Record<string, any> | undefined =>
+  collectToolboxBlocks(contents).find((item) => item.type === type);
 
 describe("NumPy plugin", () => {
   let registry: PluginRegistry;
+
+  const toolboxCategories = () => {
+    const toolbox = registry.extendToolbox({ kind: "categoryToolbox", contents: [] }) as unknown as { contents: Array<Record<string, any>> };
+    const numpyCategory = toolbox.contents.find((entry) => entry.name === "NumPy")!;
+    return numpyCategory.contents.filter((entry: Record<string, any>) => entry.kind === "category");
+  };
 
   beforeAll(async () => {
     registry = new PluginRegistry();
@@ -107,8 +117,8 @@ describe("NumPy plugin", () => {
   it("uses editable list inputs for NumPy data and multidimensional shapes", () => {
     const toolbox = registry.extendToolbox({ kind: "categoryToolbox", contents: [] }) as unknown as { contents: Array<Record<string, any>> };
     const numpyCategory = toolbox.contents.find((entry) => entry.name === "NumPy")!;
-    const arrayEntry = numpyCategory.contents.find((entry: Record<string, any>) => entry.type === "visual_python_numpy_array");
-    const reshapeEntry = numpyCategory.contents.find((entry: Record<string, any>) => entry.type === "visual_python_numpy_reshape");
+    const arrayEntry = findToolboxBlock(numpyCategory.contents, "visual_python_numpy_array")!;
+    const reshapeEntry = findToolboxBlock(numpyCategory.contents, "visual_python_numpy_reshape")!;
     expect(arrayEntry.inputs.DATA.block.type).toBe("python_list_collection");
     expect(reshapeEntry.inputs.SHAPE.block.type).toBe("python_list_collection");
 
@@ -128,13 +138,27 @@ describe("NumPy plugin", () => {
     workspace.dispose();
   });
 
+  it("organizes blocks into real child categories like the Turtle plugin", () => {
+    const categories = toolboxCategories();
+    expect(categories.map((entry: Record<string, any>) => entry.name)).toEqual([
+      "数组创建",
+      "数组属性与变形",
+      "计算",
+      "拼接与筛选",
+      "随机数",
+    ]);
+    expect(categories.every((entry: Record<string, any>) => entry.contents?.every((item: Record<string, any>) => item.kind === "block"))).toBe(true);
+  });
+
   it("loads every NumPy toolbox block without shadow-child violations", () => {
     const toolbox = registry.extendToolbox({ kind: "categoryToolbox", contents: [] }) as unknown as { contents: Array<Record<string, any>> };
     const numpyCategory = toolbox.contents.find((entry) => entry.name === "NumPy")!;
-    const blocks = numpyCategory.contents.filter((entry: Record<string, any>) => entry.kind === "block");
+    const blocks = collectToolboxBlocks(numpyCategory.contents);
+    expect(blocks).toHaveLength(registry.getBlockTypes(numpyPlugin.manifest.id).length);
     for (const entry of blocks) {
       const workspace = new Blockly.Workspace();
-      const { kind: _kind, ...state } = structuredClone(entry);
+      const state = structuredClone(entry) as any;
+      delete state.kind;
       expect(() => Blockly.serialization.blocks.append(state, workspace), entry.type).not.toThrow();
       workspace.dispose();
     }
