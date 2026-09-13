@@ -53,6 +53,7 @@ describe("Responses protocol failure classification", () => {
     { status: 400, message: "Responses endpoint is not supported" },
     { status: undefined, message: "unknown endpoint: /responses" },
     { status: undefined, message: "AI request failed (HTTP 404): Not support" },
+    { status: 400, message: "该模型始终思考，不支持关闭思考；请使用 low、high 或 max。" },
   ])("recognizes an unsupported Responses endpoint ($status)", ({ status, message }) => {
     expect(isResponsesProtocolUnsupported({ status, message })).toBe(true);
   });

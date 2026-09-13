@@ -42,9 +42,11 @@ export function isResponsesProtocolUnsupported(error: unknown): boolean {
   const status = errorStatus(error);
   if (status === 404 || status === 405) return true;
 
-  const detail = errorText(error).toLowerCase();
-  if (/\b(?:404|405)\b/.test(detail)) return true;
+  const detail = errorText(error);
+  const lower = detail.toLowerCase();
+  if (/关闭思考|始终思考|thinking cannot be disabled|always think/i.test(detail)) return true;
+  if (/\b(?:404|405)\b/.test(lower)) return true;
   const mentionsResponses = /(?:responses?|\/responses)/i.test(detail);
   if (!mentionsResponses) return false;
-  return /(?:not\s+supported|unsupported|not\s+implemented|unknown\s+endpoint|unrecognized\s+endpoint|method\s+not\s+allowed|not\s+found|invalid\s+endpoint)/i.test(detail);
+  return /(?:not\s+supported|unsupported|not\s+implemented|unknown\s+endpoint|unrecognized\s+endpoint|method\s+not\s+allowed|not\s+found|invalid\s+endpoint)/i.test(lower);
 }

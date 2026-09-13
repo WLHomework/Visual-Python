@@ -65,6 +65,18 @@ describe("runAgentWithProtocolFallback", () => {
     expect(chatCompletions).toHaveBeenCalledWith(args);
   });
 
+  it("falls back when Responses cannot keep always-on thinking enabled", async () => {
+    const codex = vi.fn().mockRejectedValue(new CodexAgentUnavailableError("AI 请求失败（HTTP 400）：该模型始终思考，不支持关闭思考；请使用 low、high 或 max。"));
+    const chatCompletions = vi.fn().mockResolvedValue(result);
+    const onFallback = vi.fn();
+
+    await expect(runAgentWithProtocolFallback(args, { codex, chatCompletions, onFallback })).resolves.toBe(result);
+
+    expect(codex).toHaveBeenCalledWith(args);
+    expect(chatCompletions).toHaveBeenCalledWith(args);
+    expect(onFallback).toHaveBeenCalledWith(expect.any(CodexAgentUnavailableError));
+  });
+
   it("falls back when the Responses endpoint is unsupported", async () => {
     const codex = vi.fn().mockRejectedValue(new CodexAgentUnavailableError("AI 请求失败（HTTP 404）：Not support"));
     const chatCompletions = vi.fn().mockResolvedValue(result);

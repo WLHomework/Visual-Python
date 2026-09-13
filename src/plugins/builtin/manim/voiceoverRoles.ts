@@ -1,4 +1,4 @@
-import { bailianTtsModels, bailianVoiceCloneModel, getBailianVoiceOptions, isBailianClonedVoice, normalizeTtsExpression, type TtsExpressionConfig } from "./ttsConfig";
+import { bailianTtsModels, defaultTtsConfig, isBailianClonedVoice, normalizeTtsExpression, type TtsExpressionConfig } from "./ttsConfig";
 
 export type VoiceoverRole = TtsExpressionConfig & {
   id: string;
@@ -14,12 +14,13 @@ const listeners = new Set<(roles: VoiceoverRole[]) => void>();
 let projectRoles: VoiceoverRole[] | null = null;
 
 const normalizeRole = (value: Partial<VoiceoverRole>, index: number): VoiceoverRole => {
-  const requestedModel = typeof value.model === "string" ? value.model : "";
-  const requestedVoice = typeof value.voice === "string" ? value.voice.trim().slice(0, 160) : "";
-  const cloned = isBailianClonedVoice(requestedModel, requestedVoice);
-  const model = cloned ? bailianVoiceCloneModel : bailianTtsModels.some((item) => item.id === requestedModel) ? requestedModel : bailianTtsModels[0].id;
-  const voices = getBailianVoiceOptions(model);
-  const voice = cloned ? requestedVoice : voices.some((item) => item.id === requestedVoice) ? requestedVoice : voices[0].id;
+  const requestedModel = typeof value.model === "string" ? value.model.trim().slice(0, 160) : "";
+  let requestedVoice = typeof value.voice === "string" ? value.voice.trim().slice(0, 160) : "";
+  const model = bailianTtsModels.some((item) => item.id === requestedModel) ? requestedModel : defaultTtsConfig.model;
+  if (model === "qwen-audio-3.0-tts-plus" && requestedVoice === "longanlingxi") requestedVoice = "longanlingxin";
+  const cloned = isBailianClonedVoice(model, requestedVoice);
+  const voices = bailianTtsModels.find((item) => item.id === model)?.voices ?? [];
+  const voice = cloned || voices.some((item) => item.id === requestedVoice) ? requestedVoice : (voices[0]?.id || defaultTtsConfig.voice);
   const speed = Number(value.speed);
   const expression = normalizeTtsExpression(value);
   return {

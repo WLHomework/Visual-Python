@@ -6006,3 +6006,206 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
     border-left: 0;
   }
 }
+
+.ai-assistant .ai-agent-thinking > .ai-markdown,
+.ai-assistant .ai-agent-thinking > .ai-markdown-live,
+.ai-assistant .ai-agent-thinking > .ai-markdown-stream,
+.ai-assistant .ai-markdown-live,
+.ai-assistant .ai-markdown-stream,
+.ai-assistant .ai-markdown-code-block pre,
+.ai-assistant .ai-model-settings {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted), transparent 28%) transparent;
+}
+
+.ai-assistant .ai-agent-thinking > .ai-markdown::-webkit-scrollbar,
+.ai-assistant .ai-agent-thinking > .ai-markdown-live::-webkit-scrollbar,
+.ai-assistant .ai-agent-thinking > .ai-markdown-stream::-webkit-scrollbar,
+.ai-assistant .ai-markdown-live::-webkit-scrollbar,
+.ai-assistant .ai-markdown-stream::-webkit-scrollbar,
+.ai-assistant .ai-markdown-code-block pre::-webkit-scrollbar,
+.ai-assistant .ai-model-settings::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.ai-assistant .ai-agent-thinking > .ai-markdown::-webkit-scrollbar-track,
+.ai-assistant .ai-agent-thinking > .ai-markdown-live::-webkit-scrollbar-track,
+.ai-assistant .ai-agent-thinking > .ai-markdown-stream::-webkit-scrollbar-track,
+.ai-assistant .ai-markdown-live::-webkit-scrollbar-track,
+.ai-assistant .ai-markdown-stream::-webkit-scrollbar-track,
+.ai-assistant .ai-markdown-code-block pre::-webkit-scrollbar-track,
+.ai-assistant .ai-model-settings::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ai-assistant .ai-agent-thinking > .ai-markdown::-webkit-scrollbar-thumb,
+.ai-assistant .ai-agent-thinking > .ai-markdown-live::-webkit-scrollbar-thumb,
+.ai-assistant .ai-agent-thinking > .ai-markdown-stream::-webkit-scrollbar-thumb,
+.ai-assistant .ai-markdown-live::-webkit-scrollbar-thumb,
+.ai-assistant .ai-markdown-stream::-webkit-scrollbar-thumb,
+.ai-assistant .ai-markdown-code-block pre::-webkit-scrollbar-thumb,
+.ai-assistant .ai-model-settings::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted), transparent 38%);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+
+.ai-assistant .ai-agent-thinking > .ai-markdown::-webkit-scrollbar-thumb:hover,
+.ai-assistant .ai-agent-thinking > .ai-markdown-live::-webkit-scrollbar-thumb:hover,
+.ai-assistant .ai-agent-thinking > .ai-markdown-stream::-webkit-scrollbar-thumb:hover,
+.ai-assistant .ai-markdown-live::-webkit-scrollbar-thumb:hover,
+.ai-assistant .ai-markdown-stream::-webkit-scrollbar-thumb:hover,
+.ai-assistant .ai-markdown-code-block pre::-webkit-scrollbar-thumb:hover,
+.ai-assistant .ai-model-settings::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted), transparent 12%);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.ai-agent-thinking > .ai-markdown,
+.ai-agent-thinking > .ai-markdown-live,
+.ai-agent-thinking > .ai-markdown-stream {
+  max-height: min(280px, 42vh);
+  overflow: auto;
+}
+
+.ai-markdown-live,
+.ai-markdown-stream {
+  min-width: 0;
+}
+
+.ai-markdown-stream {
+  margin: 0;
+  max-height: min(420px, 50vh);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+
+.tts-model-voice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tts-id-card {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 10px 11px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.tts-id-card > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.tts-id-input,
+.tts-fields .tts-id-input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text);
+  font: 12px "Cascadia Code", Consolas, monospace;
+}
+
+.tts-id-input:hover,
+.tts-fields .tts-id-input:hover {
+  border-color: color-mix(in srgb, var(--border), #2f9e8f 40%);
+}
+
+.tts-id-input:focus,
+.tts-fields .tts-id-input:focus {
+  outline: 0;
+  border-color: #2f9e8f;
+  box-shadow: 0 0 0 2px rgba(47, 158, 143, .18);
+}
+
+.tts-id-card .tts-select-control {
+  position: relative;
+  display: block;
+}
+
+.tts-id-card .tts-select-control select {
+  display: block;
+  width: 100%;
+  appearance: none;
+  padding-right: 30px;
+}
+
+.tts-id-card .tts-select-control svg {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--muted);
+}
+
+.tts-voice-fetch {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.tts-voice-fetch > button {
+  width: max-content;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.tts-voice-fetch > button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--border), #2f9e8f 45%);
+  background: var(--hover);
+}
+
+.tts-voice-fetch > button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.tts-voice-fetch > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tts-voice-fetch > p {
+  flex: 1 1 100%;
+  margin: 0;
+  color: #df7979;
+  font-size: 11px;
+}
+
+.voiceover-role-fields {
+  align-items: end;
+}
+
+.voiceover-role-fields .tts-id-card {
+  padding: 8px 9px 9px;
+}

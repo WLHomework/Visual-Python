@@ -135,6 +135,7 @@ export type AgentHost = {
   getTools?: () => AgentTool[];
   executeTool: (name: string, args: Record<string, unknown>, signal: AbortSignal) => Promise<Record<string, unknown>>;
   observeExecution?: (toolName: string, signal: AbortSignal) => Promise<AgentExecutionObservation>;
+  previewStreamingCode?: (code: string) => void;
 };
 
 export type AgentTool = {

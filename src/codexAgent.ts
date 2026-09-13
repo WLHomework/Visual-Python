@@ -100,16 +100,26 @@ export async function runCodexVisualPythonAgent(
 
   const emit = (event: Omit<AgentActivityEvent, "id"> & { id?: string }) => args.onEvent({ ...event, id: event.id || `codex-${Date.now().toString(36)}-${sequence++}` });
   const progress = (value: AgentProgress) => args.onProgress?.({ ...value, tokenUsage: usage });
+  const lastUiUpdate = new Map<string, number>();
+  const shouldEmitUi = (key: string) => {
+    const now = Date.now();
+    const previous = lastUiUpdate.get(key) ?? Number.NEGATIVE_INFINITY;
+    if (now - previous < 200) return false;
+    lastUiUpdate.set(key, now);
+    return true;
+  };
   const handleEvent = (event: AgentModelEvent) => {
     if (event.type === "textDelta") {
       const itemId = event.itemId || "assistant";
       const content = `${messages.get(itemId) || ""}${event.delta}`;
       messages.set(itemId, content);
+      if (!shouldEmitUi(`message-${itemId}`)) return;
       emit({ id: `message-${itemId}`, kind: "message", status: "running", title: content, markdown: content });
     } else if (event.type === "reasoningDelta") {
       const itemId = event.itemId || "reasoning";
       const content = `${reasoning.get(itemId) || ""}${event.delta}`;
       reasoning.set(itemId, content);
+      if (!shouldEmitUi(`thinking-${itemId}`)) return;
       emit({ id: `thinking-${itemId}`, kind: "thinking", status: "running", title: "思考过程", markdown: content });
     } else if (event.type === "tokenUsage") {
       usage.prompt = event.inputTokens;

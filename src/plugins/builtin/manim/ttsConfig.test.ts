@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { bailianTtsModels, bailianVoiceCloneModel, defaultTtsConfig, getBailianVoiceOptions, getTtsConfig, isBailianClonedVoice, normalizeTtsConfig, ttsExpressionSummary } from "./ttsConfig";
+import { bailianTtsModels, bailianVoiceCloneModel, defaultTtsConfig, getBailianVoiceOptions, getStoredTtsVoices, getTtsConfig, isBailianClonedVoice, mergeTtsVoiceOptions, normalizeTtsConfig, saveStoredTtsVoices, ttsExpressionSummary, ttsVoiceChoices } from "./ttsConfig";
 
 const storage = new Map<string, string>();
 vi.stubGlobal("localStorage", {
@@ -24,10 +24,28 @@ describe("Manim TTS configuration", () => {
     expect(normalizeTtsConfig({ provider: "aliyun-bailian", model: "qwen-audio-3.0-tts-plus", voice: "longanlingxi" }).voice).toBe("longanlingxin");
   });
 
-  it("loads only voices supported by the selected Bailian model", () => {
+  it("keeps custom Bailian models and voices", () => {
     expect(getBailianVoiceOptions("qwen-audio-3.0-tts-plus").map((voice) => voice.id)).toEqual(["longanlingxin", "longanlufeng"]);
-    expect(bailianTtsModels).toHaveLength(1);
-    expect(normalizeTtsConfig({ provider: "aliyun-bailian", model: "qwen-audio-3.0-tts-flash", voice: "loongmary" })).toMatchObject({ model: "qwen-audio-3.0-tts-plus", voice: "longanlingxin" });
+    expect(getBailianVoiceOptions("qwen-audio-3.0-tts-flash").map((voice) => voice.id)).toEqual([
+      "longanfengyue", "longanyuanfei", "longanlingxi", "longanxiaoxin", "longanhuan_v3.6", "longjielidou_v3.6",
+      "longpaopao_v3.6", "longhuohuo_v3.6", "longchuanshu_v3.6", "loongmary", "loongeva_v3.6", "loongjohn",
+    ]);
+    expect(bailianTtsModels.map((model) => model.id)).toEqual(["qwen-audio-3.0-tts-flash", "qwen-audio-3.0-tts-plus"]);
+    expect(normalizeTtsConfig({ provider: "aliyun-bailian", model: "qwen-audio-3.0-tts-flash", voice: "loongmary" })).toMatchObject({ model: "qwen-audio-3.0-tts-flash", voice: "loongmary" });
+    expect(normalizeTtsConfig({ provider: "aliyun-bailian", model: "qwen-audio-3.0-tts-flash", voice: "longanlingxin" }).voice).toBe("longanfengyue");
+    expect(normalizeTtsConfig({ provider: "aliyun-bailian", model: "qwen3-tts-flash", voice: "loongmary" }).model).toBe(defaultTtsConfig.model);
+  });
+
+  it("stores fetched voices for a custom model", () => {
+    const voices = saveStoredTtsVoices("qwen-audio-3.0-tts-flash", [{ id: "Cherry", label: "芊悦" }, { id: "Cherry", label: "重复" }]);
+    expect(voices).toEqual([{ id: "Cherry", label: "芊悦" }]);
+    expect(getStoredTtsVoices("qwen-audio-3.0-tts-flash")).toEqual(voices);
+    expect(ttsVoiceChoices("qwen-audio-3.0-tts-flash", "Ethan").map((voice) => voice.id)).toEqual([
+      ...getBailianVoiceOptions("qwen-audio-3.0-tts-flash").map((voice) => voice.id),
+      "Cherry",
+      "Ethan",
+    ].filter((id, index, ids) => ids.indexOf(id) === index));
+    expect(mergeTtsVoiceOptions([{ id: "A", label: "甲" }], [{ id: "A", label: "乙" }])).toEqual([{ id: "A", label: "甲" }]);
   });
 
   it("recognizes only valid Qwen-Audio Plus cloned voice ids", () => {

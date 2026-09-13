@@ -37,7 +37,7 @@ import { validatePluginGeneratedPython } from "./plugins/core/pluginGeneratedCod
 import { getManimRenderConfig, setManimRenderConfig, subscribeManimRenderConfig, type ManimRenderConfig } from "./plugins/builtin/manim/renderConfig";
 import { createManimCapabilityExecutor } from "./plugins/builtin/manim/agentRuntime";
 import { manimPlugin } from "./plugins/builtin/manim";
-import { bailianTtsModels, bailianVoiceCloneModel, defaultTtsExpression, getBailianVoiceOptions, getTtsConfig, isBailianClonedVoice, saveTtsConfig, ttsExpressionSummary, type TtsConfig, type TtsExpressionConfig } from "./plugins/builtin/manim/ttsConfig";
+import { bailianTtsModels, bailianVoiceCloneModel, defaultTtsExpression, getBailianVoiceOptions, getTtsConfig, isBailianClonedVoice, mergeTtsVoiceOptions, saveStoredTtsVoices, saveTtsConfig, ttsExpressionSummary, ttsVoiceChoices, type TtsConfig, type TtsExpressionConfig, type TtsVoiceOption } from "./plugins/builtin/manim/ttsConfig";
 import { ManimVoiceoverError, prepareManimVoiceovers } from "./plugins/builtin/manim/voiceoverPreprocessor";
 import { ManimLocalAudioError, prepareManimLocalAudio } from "./plugins/builtin/manim/localAudioPreprocessor";
 import { readVoiceoverBlockMetadata, writeVoiceoverBlockMetadata } from "./plugins/builtin/manim/voiceoverBlockMetadata";
@@ -942,6 +942,9 @@ export default function App() {
   const [pythonEnvironmentMenuOpen, setPythonEnvironmentMenuOpen] = useState(false);
   const [manimRenderConfig, setManimRenderConfigState] = useState<ManimRenderConfig>(() => getManimRenderConfig());
   const [ttsConfig, setTtsConfigState] = useState<TtsConfig>(() => getTtsConfig());
+  const [ttsVoiceCatalog, setTtsVoiceCatalog] = useState<TtsVoiceOption[]>(() => ttsVoiceChoices(getTtsConfig().model, getTtsConfig().voice));
+  const [loadingTtsVoices, setLoadingTtsVoices] = useState(false);
+  const [ttsVoiceCatalogError, setTtsVoiceCatalogError] = useState("");
   const [voiceoverRoles, setVoiceoverRoles] = useState<VoiceoverRole[]>(() => getVoiceoverRoles());
   const [ttsApiKey, setTtsApiKey] = useState("");
   const [ttsHasApiKey, setTtsHasApiKey] = useState(false);
@@ -2273,6 +2276,7 @@ export default function App() {
   }, [activeSceneId, sourceCode]);
 
   useEffect(() => {
+    if (aiCodePreviewing.current) return;
     void pyrightClient.current?.updateDocument(sourceCode);
   }, [sourceCode]);
 
@@ -2447,7 +2451,12 @@ export default function App() {
     persistVoiceoverRoles(voiceoverRoles.map((role) => {
       if (role.id !== id) return role;
       const next = { ...role, ...patch };
-      if (patch.model) next.voice = getBailianVoiceOptions(patch.model)[0].id;
+      if (typeof patch.model === "string" && patch.model !== role.model) {
+        const voices = getBailianVoiceOptions(patch.model);
+        if (!isBailianClonedVoice(patch.model, next.voice) && !voices.some((item) => item.id === next.voice)) {
+          next.voice = voices[0]?.id || next.voice;
+        }
+      }
       return next;
     }));
   }, [persistVoiceoverRoles, voiceoverRoles]);
@@ -3178,6 +3187,35 @@ export default function App() {
       setTtsPreviewError(String(error));
     }
   }, [ttsConfig]);
+
+  const fetchTtsVoices = useCallback(async () => {
+    const model = ttsConfig.model.trim();
+    if (!model || !ttsConfig.baseUrl.trim()) {
+      setTtsVoiceCatalogError("请先填写百炼接口地址和模型名称。");
+      return;
+    }
+    setLoadingTtsVoices(true);
+    setTtsVoiceCatalogError("");
+    try {
+      const config = saveTtsConfig(ttsConfig);
+      setTtsConfigState(config);
+      const voices = await invoke<TtsVoiceOption[]>("list_tts_voices", { config, apiKey: ttsApiKey.trim() || null });
+      const catalog = mergeTtsVoiceOptions(getBailianVoiceOptions(config.model), voices, [{ id: config.voice, label: config.voice }]);
+      saveStoredTtsVoices(config.model, catalog);
+      setTtsVoiceCatalog(catalog);
+      setTtsHasApiKey(await invoke<boolean>("has_tts_api_key", { config }));
+      setTtsApiKey("");
+    } catch (error) {
+      setTtsVoiceCatalog(ttsVoiceChoices(ttsConfig.model, ttsConfig.voice));
+      setTtsVoiceCatalogError(String(error));
+    } finally {
+      setLoadingTtsVoices(false);
+    }
+  }, [ttsApiKey, ttsConfig]);
+
+  useEffect(() => {
+    setTtsVoiceCatalog(ttsVoiceChoices(ttsConfig.model, ttsConfig.voice));
+  }, [ttsConfig.model, ttsConfig.voice]);
 
   const refreshManimStorage = useCallback(async () => {
     setLoadingManimStorage(true);
@@ -5889,8 +5927,12 @@ export default function App() {
         {manimSettingsSection === "renderer" && <section className="manim-settings-page"><div className="manim-settings-page-header"><h3>渲染器</h3><p>选择渲染引擎并控制缓存策略。</p></div><div className="manim-option-group"><div><strong>渲染引擎</strong><small>根据场景类型选择合适的渲染方式</small></div><div className="manim-renderer-options"><button className={manimRenderConfig.renderer === "cairo" ? "selected" : ""} onClick={() => updateManimRenderConfig({ renderer: "cairo" })}><strong>Cairo</strong><small>兼容性更好，适合大多数 2D 场景</small></button><button className={manimRenderConfig.renderer === "opengl" ? "selected" : ""} onClick={() => updateManimRenderConfig({ renderer: "opengl" })}><strong>OpenGL</strong><small>适合实时预览与需要 GPU 的场景</small></button></div></div><div className="manim-cache-row"><div><strong>禁用缓存</strong><small>每次渲染都重新生成全部内容，排查缓存问题时使用</small></div><button className={`plugin-toggle ${manimRenderConfig.disableCaching ? "enabled" : ""}`} role="switch" aria-checked={manimRenderConfig.disableCaching} aria-label="禁用 Manim 渲染缓存" onClick={() => updateManimRenderConfig({ disableCaching: !manimRenderConfig.disableCaching })}><span/></button></div></section>}
         {manimSettingsSection === "voice" && <section className="manim-settings-page manim-tts-section"><div className="manim-settings-page-header"><h3>视频配音</h3><p>配置文字转语音服务并试听当前旁白效果。</p></div>
           <div className="tts-fields">
-            <label><span>百炼接口地址</span><input value={ttsConfig.baseUrl} onChange={(event) => updateTtsConfig({ baseUrl: event.target.value })} placeholder="https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com" spellCheck={false}/><small>填写百炼工作空间域名或完整 SpeechSynthesizer 地址</small></label>
-            <div className="tts-field-row"><label><span>模型</span><div className="tts-select-control"><select value={ttsConfig.model} onChange={(event) => updateTtsConfig({ model: event.target.value })} aria-label="百炼配音模型">{bailianTtsModels.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select><ChevronDown size={15}/></div></label><label><span>音色</span><div className="tts-select-control"><select value={ttsConfig.voice} onChange={(event) => updateTtsConfig({ voice: event.target.value })} aria-label="百炼配音音色">{getBailianVoiceOptions(ttsConfig.model).map((option) => <option key={option.id} value={option.id}>{option.label} · {option.id}</option>)}</select><ChevronDown size={15}/></div></label></div>
+            <label><span>配音接口地址</span><input value={ttsConfig.baseUrl} onChange={(event) => updateTtsConfig({ baseUrl: event.target.value })} placeholder="wss://dashscope.aliyuncs.com/api-ws/v1/inference" spellCheck={false}/><small>Qwen-Audio TTS 使用 WebSocket 地址 wss://dashscope.aliyuncs.com/api-ws/v1/inference</small></label>
+            <div className="tts-model-voice">
+              <label className="tts-id-card"><span>模型</span><div className="tts-select-control"><select className="tts-id-input" value={ttsConfig.model} onChange={(event) => updateTtsConfig({ model: event.target.value })} aria-label="配音模型">{bailianTtsModels.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select><ChevronDown size={15}/></div></label>
+              <label className="tts-id-card"><span>音色</span><div className="tts-select-control"><select className="tts-id-input" value={ttsVoiceCatalog.some((option) => option.id === ttsConfig.voice) ? ttsConfig.voice : ttsVoiceCatalog[0]?.id || ttsConfig.voice} onChange={(event) => updateTtsConfig({ voice: event.target.value })} aria-label="配音音色">{ttsVoiceCatalog.map((option) => <option key={option.id} value={option.id}>{option.label.includes(option.id) ? option.label : `${option.label} · ${option.id}`}</option>)}</select><ChevronDown size={15}/></div></label>
+              <div className="tts-voice-fetch"><button type="button" onClick={() => void fetchTtsVoices()} disabled={loadingTtsVoices || !ttsConfig.model.trim() || !ttsConfig.baseUrl.trim()}>{loadingTtsVoices ? <RefreshCw size={15} className="spin"/> : <RefreshCw size={15}/>}{loadingTtsVoices ? "正在获取音色" : "获取该模型音色"}</button><small>{ttsVoiceCatalog.length ? `当前可选用 ${ttsVoiceCatalog.length} 个音色` : "获取后可从列表选择，也可继续手动填写音色 ID"}</small>{ttsVoiceCatalogError && <p role="alert">{ttsVoiceCatalogError}</p>}</div>
+            </div>
             <label className="tts-api-key"><span>API Key</span><div className={ttsHasApiKey ? "has-key" : ""}><input type="password" value={ttsApiKey} onChange={(event) => setTtsApiKey(event.target.value)} placeholder="输入 API Key" autoComplete="off" spellCheck={false}/>{ttsHasApiKey && <button onClick={() => void forgetTtsApiKey()} title="删除 API Key" aria-label="删除 API Key"><Trash2 size={15}/></button>}</div></label>
             <div className="tts-field-row tts-compact-row"><label><span>语速 <output>{ttsConfig.speed.toFixed(2)}x</output></span><input type="range" min={0.5} max={2} step={0.05} value={ttsConfig.speed} onChange={(event) => updateTtsConfig({ speed: Number(event.target.value) })}/></label><label><span>音频格式</span><div className="tts-format-options"><button className={ttsConfig.audioFormat === "wav" ? "selected" : ""} onClick={() => updateTtsConfig({ audioFormat: "wav" })}>WAV</button><button className={ttsConfig.audioFormat === "mp3" ? "selected" : ""} onClick={() => updateTtsConfig({ audioFormat: "mp3" })}>MP3</button></div></label></div>
             <div className="tts-expression-section">
@@ -5912,7 +5954,7 @@ export default function App() {
                   <button onClick={() => duplicateVoiceoverRole(role)} disabled={voiceoverRoles.length >= 20} title="复制角色" aria-label={`复制角色 ${role.name}`}><Copy size={14}/></button>
                   <button onClick={() => removeVoiceoverRole(role.id)} title="删除角色" aria-label={`删除角色 ${role.name}`}><Trash2 size={14}/></button>
                 </div>
-                {isBailianClonedVoice(role.model, role.voice) ? <div className="voiceover-role-fields cloned"><label><span>模型</span><div className="voiceover-clone-value">Qwen-Audio 3.0 Plus</div></label><label><span>音色 ID</span><code className="voiceover-clone-value" title={role.voice}>{role.voice}</code></label><label><span>语速 <output>{role.speed.toFixed(2)}x</output></span><input type="range" min={0.5} max={2} step={0.05} value={role.speed} onChange={(event) => updateVoiceoverRole(role.id, { speed: Number(event.target.value) })}/></label></div> : <div className="voiceover-role-fields"><label><span>模型</span><select value={role.model} onChange={(event) => updateVoiceoverRole(role.id, { model: event.target.value })}>{bailianTtsModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label><label><span>音色</span><select value={role.voice} onChange={(event) => updateVoiceoverRole(role.id, { voice: event.target.value })}>{getBailianVoiceOptions(role.model).map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</select></label><label><span>语速 <output>{role.speed.toFixed(2)}x</output></span><input type="range" min={0.5} max={2} step={0.05} value={role.speed} onChange={(event) => updateVoiceoverRole(role.id, { speed: Number(event.target.value) })}/></label></div>}
+                {isBailianClonedVoice(role.model, role.voice) ? <div className="voiceover-role-fields cloned"><label><span>模型</span><div className="voiceover-clone-value">Qwen-Audio 3.0 Plus</div></label><label><span>音色 ID</span><code className="voiceover-clone-value" title={role.voice}>{role.voice}</code></label><label><span>语速 <output>{role.speed.toFixed(2)}x</output></span><input type="range" min={0.5} max={2} step={0.05} value={role.speed} onChange={(event) => updateVoiceoverRole(role.id, { speed: Number(event.target.value) })}/></label></div> : <div className="voiceover-role-fields"><label className="tts-id-card"><span>模型</span><div className="tts-select-control"><select className="tts-id-input" value={role.model} onChange={(event) => updateVoiceoverRole(role.id, { model: event.target.value })} aria-label={`${role.name} 配音模型`}>{bailianTtsModels.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select><ChevronDown size={15}/></div></label><label className="tts-id-card"><span>音色</span><div className="tts-select-control"><select className="tts-id-input" value={role.voice} onChange={(event) => updateVoiceoverRole(role.id, { voice: event.target.value })} aria-label={`${role.name} 配音音色`}>{ttsVoiceChoices(role.model, role.voice).map((option) => <option key={option.id} value={option.id}>{option.label.includes(option.id) ? option.label : `${option.label} · ${option.id}`}</option>)}</select><ChevronDown size={15}/></div></label><label><span>语速 <output>{role.speed.toFixed(2)}x</output></span><input type="range" min={0.5} max={2} step={0.05} value={role.speed} onChange={(event) => updateVoiceoverRole(role.id, { speed: Number(event.target.value) })}/></label></div>}
                 <details className="voiceover-role-expression">
                   <summary><SlidersHorizontal size={14}/><span>表达方式</span><small>{ttsExpressionSummary(role)}</small><ChevronDown size={14}/></summary>
                   <TtsExpressionControls value={role} onChange={(patch) => updateVoiceoverRole(role.id, patch)} compact/>

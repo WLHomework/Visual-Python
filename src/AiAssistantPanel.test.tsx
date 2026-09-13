@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
 
@@ -459,6 +459,39 @@ describe("AI assistant streaming events", () => {
       onRevealProblem={() => undefined}
     />);
     expect(html).toBe("");
+  });
+
+  it("renders streaming replies as Markdown instead of waiting until the turn finishes", () => {
+    const markdown = "Hyperbola $\frac{x^2}{a^2} = 1$.\n\n```python\nprint(1)\n```";
+    const live = renderToStaticMarkup(<AgentActivityRow
+      activity={{ id: "message-live", kind: "message", status: "running", title: markdown }}
+      onRevealCodeChange={() => undefined}
+      onRevealProblem={() => undefined}
+    />);
+    const done = renderToStaticMarkup(<AgentActivityRow
+      activity={{ id: "message-done", kind: "message", status: "done", title: markdown }}
+      onRevealCodeChange={() => undefined}
+      onRevealProblem={() => undefined}
+    />);
+
+    expect(live).toContain("ai-markdown-live");
+    expect(live).toContain("katex");
+    expect(live).toContain("hljs-keyword");
+    expect(done).toContain("katex");
+    expect(done).toContain("hljs-keyword");
+    expect(done).not.toContain("ai-markdown-live");
+  });
+
+  it("shows thinking markdown instead of the placeholder title", () => {
+    expect(activityDisplayText({ title: "思考过程", markdown: "先读取当前场景。" })).toBe("先读取当前场景。");
+    const html = renderToStaticMarkup(<StreamingRichText text={"先读取当前场景。"} live/>);
+    expect(html).toContain("ai-markdown-live");
+    expect(html).toContain("先读取当前场景。");
+  });
+
+  it("skips highlighting oversized unlabeled code blocks", () => {
+    expect(highlightAssistantCode("print('ok')\n".repeat(3000), "")).toBeNull();
+    expect(highlightAssistantCode("from manim import Scene\n", "python")).toContain("hljs-keyword");
   });
 });
 

@@ -14,10 +14,16 @@ describe("Manim voiceover roles", () => {
     expect(voiceoverRoleOptions()).toEqual([["默认旁白", "default"], ["老师", "teacher"]]);
   });
 
-  it("repairs incompatible model and voice combinations", () => {
-    const [role] = saveVoiceoverRoles([{ id: "student", name: "学生", model: "qwen-audio-3.0-tts-plus", voice: "loongmary", speed: 8, previewText: "", ...defaultTtsExpression }]);
-    expect(role.voice).toBe("longanlingxin");
-    expect(role.speed).toBe(2);
+  it("resets a role voice when the selected model does not support it", () => {
+    const [role] = saveVoiceoverRoles([{ id: "switch", name: "旁白", model: "qwen-audio-3.0-tts-flash", voice: "longanhuan_v3.6", speed: 1, previewText: "", ...defaultTtsExpression }]);
+    expect(role.voice).toBe("longanhuan_v3.6");
+    const [switched] = saveVoiceoverRoles([{ ...role, model: "qwen-audio-3.0-tts-plus" }]);
+    expect(switched).toMatchObject({ model: "qwen-audio-3.0-tts-plus", voice: "longanlingxin" });
+  });
+
+  it("keeps custom model and voice combinations and clamps speed", () => {
+    const [role] = saveVoiceoverRoles([{ id: "student", name: "学生", model: "qwen-audio-3.0-tts-flash", voice: "loongmary", speed: 8, previewText: "", ...defaultTtsExpression }]);
+    expect(role).toMatchObject({ model: "qwen-audio-3.0-tts-flash", voice: "loongmary", speed: 2 });
   });
 
   it("preserves the saved role order for Blockly dropdowns", () => {
@@ -57,8 +63,8 @@ describe("Manim voiceover roles", () => {
     expect(parseVoiceoverRolesFile(serializeVoiceoverRoles([role]))).toEqual([role]);
   });
 
-  it("does not migrate legacy Qwen3 cloned voices across models", () => {
+  it("preserves custom model identifiers instead of rewriting them to Plus", () => {
     const [role] = saveVoiceoverRoles([{ id: "legacy", name: "旧音色", model: "qwen3-tts-vc-2026-01-22", voice: "vpvoice_123", speed: 1, previewText: "", ...defaultTtsExpression }]);
-    expect(role).toMatchObject({ model: "qwen-audio-3.0-tts-plus", voice: "longanlingxin" });
+    expect(role).toMatchObject({ model: "qwen-audio-3.0-tts-flash", voice: "longanfengyue" });
   });
 });

@@ -1,5 +1,5 @@
 import type { AgentHost } from "./types";
-import { createVisualPythonToolExecutor, type VisualPythonHostServices as VisualPythonToolServices } from "./visualPythonHost";
+import { createVisualPythonToolExecutor, previewStreamingEditorCode, type VisualPythonHostServices as VisualPythonToolServices } from "./visualPythonHost";
 
 export type VisualPythonHostServices = VisualPythonToolServices & {
   getSnapshot: AgentHost["getSnapshot"];
@@ -26,6 +26,7 @@ export function createVisualPythonHostAdapter(services: VisualPythonHostServices
   const adapter: AgentHost = {
     getSnapshot: services.getSnapshot,
     executeTool,
+    previewStreamingCode: (code) => previewStreamingEditorCode(services, code),
     observeExecution: services.observeExecution || (async (toolName, signal) => {
       const tool = services.getTools?.().find((item) => item.definition.function.name === toolName);
       const stateField = tool?.execution?.stateField || "running";

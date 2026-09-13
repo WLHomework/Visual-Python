@@ -99,11 +99,28 @@ const waitWithSignal = (milliseconds: number, signal: AbortSignal) => new Promis
   signal.addEventListener("abort", cancel, { once: true });
 });
 
+export function previewStreamingEditorCode(services: VisualPythonHostServices, nextCode: string) {
+  if (services.workspaceModeRef.current !== "code") return;
+  services.aiCodePreviewing.current = true;
+  const editor = services.codeEditor.current;
+  const model = editor?.getModel();
+  if (editor && model && model.getValue() !== nextCode) {
+    editor.executeEdits("ai-code-stream", [{ range: model.getFullModelRange(), text: nextCode, forceMoveMarkers: true }]);
+    editor.revealLineInCenterIfOutsideViewport(model.getLineCount());
+  }
+  services.sourceCodeRef.current = nextCode;
+  services.setSourceCode(nextCode);
+  services.setSourceCodeInitialized(true);
+}
+
 export function createVisualPythonToolExecutor(services: VisualPythonHostServices): AgentHost["executeTool"] {
-  const writeEditorCode = (nextCode: string) => {
+  const writeEditorCode = (nextCode: string, origin = "ai-code-agent") => {
     const editor = services.codeEditor.current;
     const model = editor?.getModel();
-    if (editor && model && model.getValue() !== nextCode) editor.executeEdits("ai-code-agent", [{ range: model.getFullModelRange(), text: nextCode, forceMoveMarkers: true }]);
+    if (editor && model && model.getValue() !== nextCode) {
+      editor.executeEdits(origin, [{ range: model.getFullModelRange(), text: nextCode, forceMoveMarkers: true }]);
+      if (origin === "ai-code-stream") editor.revealLineInCenterIfOutsideViewport(model.getLineCount());
+    }
     services.sourceCodeRef.current = nextCode;
     services.setSourceCode(nextCode);
     services.setSourceCodeInitialized(true);
@@ -120,7 +137,7 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
     const editor = services.codeEditor.current;
     if (editor?.getValue() !== nextCode) editor?.pushUndoStop();
     services.aiCodePreviewing.current = false;
-    writeEditorCode(nextCode);
+    writeEditorCode(nextCode, "ai-code-agent");
     editor?.pushUndoStop();
     services.codeValidationVersion.current += 1;
     services.setCodeSyntaxDiagnostic(null);

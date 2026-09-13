@@ -6,6 +6,7 @@ import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessag
 import { createAgentTokenUsage, mergeProviderTokenUsage, recordAgentRequest, recordAgentToolResult } from "./agentV2/tokenLedger";
 import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
+import { isStreamingCodeTool, previewCodeFromStreamingTool } from "./agentV2/streamingCodePreview";
 
 export type { AgentActivityEvent, AgentCapability, AgentCodeChange, AgentConversationTurn, AgentHost, AgentMode, AgentProgress, AgentRunResult, AgentTokenUsage, AgentTool, RunVisualPythonAgentArgs, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiCodeEdit, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2/types";
 export { coreAgentTools, visualPythonTools } from "./agentV2/toolRegistry";
@@ -19,7 +20,7 @@ export const AGENT_HARD_ROUND_LIMIT = 48;
 const noProgressRoundLimitAfterSoftBudget = 4;
 // Keep each decision turn bounded independently from the selected reasoning effort.
 const maxTokensPerRequest = 8_192;
-const streamUiUpdateIntervalMs = 80;
+const streamUiUpdateIntervalMs = 200;
 const maxToolResultCharacters = 6000;
 const stopError = "任务已停止";
 const truncatedContinuationPrompt = "上一轮响应达到本轮输出上限。请从中断位置继续，不要重复已经完成的内容；如果需要调用工具，请输出完整的工具调用。";
@@ -288,6 +289,10 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
     let thinkingEmitted = false;
     let lastContentUiUpdate = Number.NEGATIVE_INFINITY;
     let lastReasoningUiUpdate = Number.NEGATIVE_INFINITY;
+    let lastCodePreview = "";
+    let lastCodePreviewAt = Number.NEGATIVE_INFINITY;
+    const toolArgumentBuffers = new Map<number, { name?: string; arguments: string }>();
+    const baselineCode = typeof host.getSnapshot().code === "string" ? host.getSnapshot().code as string : "";
     let roundProgressed = false;
     recordAgentRequest(usage, requestMessages, taskTools, round);
     reportProgress({ phase: "thinking", label: round === 1 ? "分析当前请求和工程状态" : "根据执行结果决定下一步" });
@@ -312,6 +317,19 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
           thinkingEmitted = true;
           lastReasoningUiUpdate = now;
           emit({ id: `thinking-${round}`, kind: "thinking", status: "running", title: "思考过程", markdown: reasoning });
+        } else if (event.type === "toolCallDelta" && host.previewStreamingCode) {
+          const current = toolArgumentBuffers.get(event.index) || { arguments: "" };
+          if (event.name) current.name = event.name;
+          current.arguments += event.delta;
+          toolArgumentBuffers.set(event.index, current);
+          if (!isStreamingCodeTool(current.name) || host.getSnapshot().workspaceMode !== "code") return;
+          const now = Date.now();
+          if (now - lastCodePreviewAt < 80) return;
+          lastCodePreviewAt = now;
+          const preview = previewCodeFromStreamingTool(current.name, current.arguments, baselineCode);
+          if (preview === null || preview === lastCodePreview) return;
+          lastCodePreview = preview;
+          host.previewStreamingCode(preview);
         }
       },
     });

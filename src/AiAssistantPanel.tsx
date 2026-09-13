@@ -1,4 +1,4 @@
-import { isValidElement, useEffect, useRef, useState, type ReactNode } from "react";
+import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, ArrowDown, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, RefreshCw, SearchCheck, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
@@ -558,6 +558,9 @@ const codeLanguageLabels: Record<string, string> = {
 };
 
 const autoHighlightLanguages = ["bash", "css", "javascript", "json", "markdown", "python", "typescript", "xml"];
+const highlightMaxChars = 20_000;
+const highlightCacheLimit = 48;
+const highlightCache = new Map<string, string | null>();
 
 function codeLanguage(className?: string): { id: string; label: string } {
   const requested = className?.match(/(?:^|\s)language-([^\s]+)/)?.[1]?.toLowerCase() || "";
@@ -567,12 +570,27 @@ function codeLanguage(className?: string): { id: string; label: string } {
 
 export function highlightAssistantCode(code: string, language: string): string | null {
   const normalizedLanguage = language.trim().toLowerCase();
-  if (normalizedLanguage) {
-    if (!hljs.getLanguage(normalizedLanguage)) return null;
-    return hljs.highlight(code, { language: normalizedLanguage, ignoreIllegals: true }).value;
+  if (code.length > highlightMaxChars) return null;
+  const cacheKey = `${normalizedLanguage}\0${code}`;
+  const cached = highlightCache.get(cacheKey);
+  if (cached !== undefined) {
+    highlightCache.delete(cacheKey);
+    highlightCache.set(cacheKey, cached);
+    return cached;
   }
-  const detected = hljs.highlightAuto(code, autoHighlightLanguages);
-  return detected.relevance > 0 ? detected.value : null;
+  let value: string | null = null;
+  if (normalizedLanguage) {
+    if (hljs.getLanguage(normalizedLanguage)) value = hljs.highlight(code, { language: normalizedLanguage, ignoreIllegals: true }).value;
+  } else {
+    const detected = hljs.highlightAuto(code, autoHighlightLanguages);
+    value = detected.relevance > 0 ? detected.value : null;
+  }
+  highlightCache.set(cacheKey, value);
+  if (highlightCache.size > highlightCacheLimit) {
+    const oldest = highlightCache.keys().next().value;
+    if (oldest !== undefined) highlightCache.delete(oldest);
+  }
+  return value;
 }
 
 async function writeClipboardText(text: string): Promise<void> {
@@ -676,8 +694,33 @@ export function normalizeAssistantMarkdown(value: string): string {
   return (outerFence?.[2] ?? markdown).trim();
 }
 
-export function MarkdownContent({ children, className = "" }: { children: string; className?: string }) {
+export const MarkdownContent = memo(function MarkdownContent({ children, className = "" }: { children: string; className?: string }) {
   return <div className={`ai-markdown ${className}`}><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, markdownKatexOptions]]} components={{ pre: MarkdownCodeBlock, a: MarkdownLink }}>{normalizeAssistantMarkdown(children)}</ReactMarkdown></div>;
+});
+
+export function activityDisplayText(activity: Pick<AiAgentActivity, "title" | "markdown">): string {
+  return (activity.markdown?.trim() || activity.title || "").trim();
+}
+
+const streamMarkdownIntervalMs = 180;
+
+export function StreamingRichText({ text, live = false }: { text: string; live?: boolean }) {
+  const [visible, setVisible] = useState(text);
+  const latest = useRef(text);
+  latest.current = text;
+
+  useEffect(() => {
+    if (!live) {
+      setVisible(text);
+      return;
+    }
+    if (visible === text) return;
+    const timer = window.setTimeout(() => setVisible(latest.current), visible ? streamMarkdownIntervalMs : 0);
+    return () => window.clearTimeout(timer);
+  }, [live, text, visible]);
+
+  if (!text.trim() && !visible.trim()) return null;
+  return <div className={live ? "ai-markdown-live" : undefined}><MarkdownContent>{visible || text}</MarkdownContent></div>;
 }
 
 function codeDiffStartLine(result?: string): number | null {
@@ -806,7 +849,7 @@ type AiNestedScrollTarget = Pick<HTMLElement, "scrollTop" | "scrollHeight" | "cl
 
 function findNestedAiScrollTarget(target: EventTarget | null): AiNestedScrollTarget | null {
   if (!target || typeof (target as { closest?: unknown }).closest !== "function") return null;
-  const candidate = (target as Element).closest(".ai-agent-thinking > .ai-markdown");
+  const candidate = (target as Element).closest(".ai-agent-thinking > .ai-markdown, .ai-agent-thinking > .ai-markdown-stream");
   return candidate ? candidate as AiNestedScrollTarget : null;
 }
 
@@ -1040,10 +1083,12 @@ function ToolResult({ activity, onRevealCodeChange }: { activity: AiAgentActivit
   if (!displayedResult) return null;
   const isCodeDiff = isCodeChangeTool(activity.toolName);
   if (!isCodeDiff) return <pre>{displayedResult}</pre>;
+  const lines = displayedResult.split("\n");
+  if (lines.length > 240) return <pre className="ai-code-diff" aria-label="代码修改差异">{displayedResult}</pre>;
   const startLine = codeDiffStartLine(displayedResult);
   let removedOffset = 0;
   let addedOffset = 0;
-  return <pre className="ai-code-diff" aria-label="代码修改差异">{displayedResult.split("\n").map((line, index) => {
+  return <pre className="ai-code-diff" aria-label="代码修改差异">{lines.map((line, index) => {
     const kind = line.startsWith("+ ") ? "added" : line.startsWith("- ") ? "removed" : line.startsWith("@@") ? "location" : "context";
     const targetLine = startLine === null ? null : kind === "added" ? startLine + addedOffset++ : kind === "removed" ? startLine + removedOffset++ : kind === "location" ? startLine : null;
     return <span className={`ai-code-diff-line ${kind} ${targetLine ? "locatable" : ""}`} key={`${index}-${line}`} onClick={targetLine ? () => onRevealCodeChange(displayedResult, targetLine) : undefined}><span className="ai-code-diff-marker" aria-hidden="true">{kind === "added" ? "+" : kind === "removed" ? "-" : ""}</span><span>{kind === "added" || kind === "removed" ? line.slice(2) : line}</span></span>;
@@ -1070,14 +1115,14 @@ export function AgentResponseFooter({ meta, metaTitle, children }: { status: Rea
   return <div className="ai-agent-response-footer">{meta && <small title={metaTitle}>{meta}</small>}{children && <span className="ai-agent-response-footer-actions">{children}</span>}</div>;
 }
 
-export function AgentActivityRow({ activity, onRevealCodeChange, onRevealProblem }: {
+export const AgentActivityRow = memo(function AgentActivityRow({ activity, onRevealCodeChange, onRevealProblem }: {
   activity: AiAgentActivity;
   onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void;
   onRevealProblem: (line: number) => void;
 }) {
   if (activity.channel === "thinking") return <details className={`ai-agent-thinking ${activity.status}`} open={activity.status === "running"}>
     <summary><ChevronRight className="ai-agent-tool-chevron" size={14}/><strong>思考过程</strong>{activity.status === "running" && <LoaderCircle className="spin" size={13}/>}</summary>
-    <MarkdownContent>{activity.title || "模型正在形成下一步决策。"}</MarkdownContent>
+    <StreamingRichText text={activityDisplayText(activity) || "模型正在形成下一步决策。"} live={activity.status === "running"}/>
   </details>;
   const verificationTitle = successfulToolVerificationTitle(activity);
   if (verificationTitle) return <div className={`ai-agent-event verification ${activity.status}`}>
@@ -1090,9 +1135,10 @@ export function AgentActivityRow({ activity, onRevealCodeChange, onRevealProblem
     {(failure || (activity.status !== "error" && sanitizeAgentDisplayText(activity.detail))) && <small>{failure || sanitizeAgentDisplayText(activity.detail)}</small>}
   </div>;
   if (activity.kind === "message") {
-    if (activity.status === "running" && !activity.title.trim()) return null;
+    const messageText = activityDisplayText(activity);
+    if (activity.status === "running" && !messageText) return null;
     return <div className={`ai-agent-narration ${activity.status}`}>
-      <MarkdownContent>{activity.title}</MarkdownContent>
+      <StreamingRichText text={messageText} live={activity.status === "running"}/>
     </div>;
   }
   if (activity.execution) return <AgentExecutionResult execution={activity.execution} onRevealProblem={onRevealProblem}/>;
@@ -1120,7 +1166,7 @@ export function AgentActivityRow({ activity, onRevealCodeChange, onRevealProblem
     </summary>
     <ToolResult activity={activity} onRevealCodeChange={onRevealCodeChange}/>
   </details>;
-}
+});
 
 function AgentTaskPlan({ steps, collapsed = false }: { steps: AiAgentPlanStep[]; collapsed?: boolean }) {
   if (!steps.length) return null;

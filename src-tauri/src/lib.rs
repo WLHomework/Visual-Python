@@ -18,7 +18,11 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, State};
+use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{Mutex as TokioMutex, Notify};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::header::{AUTHORIZATION, HeaderValue};
+use tokio_tungstenite::tungstenite::Message;
 
 mod codex_agent;
 
@@ -50,6 +54,13 @@ struct TtsPreviewResult {
     format: String,
     duration_seconds: f64,
     cached: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TtsVoiceOption {
+    id: String,
+    label: String,
 }
 
 #[derive(Serialize)]
@@ -1139,13 +1150,270 @@ struct PythonPackageStatus {
 fn validate_tts_url(value: &str) -> Result<String, String> {
     let value = value.trim().trim_end_matches('/');
     if value.is_empty() {
-        return Err("尚未配置配音接口地址，请在 Manim 设置的视频配音中填写百炼接口地址".into());
+        return Err("尚未配置配音接口地址，请在 Manim 设置的视频配音中填写接口地址".into());
     }
-    let parsed = url::Url::parse(value).map_err(|_| "配音接口地址无效".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("配音接口只支持 HTTP 或 HTTPS".into());
+    if value.chars().count() > 1000 {
+        return Err("配音接口地址不能超过 1000 个字符".into());
     }
     Ok(value.to_string())
+}
+
+fn is_http_tts_url(value: &str) -> bool {
+    let lower = value.trim().to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
+fn is_websocket_tts_url(value: &str) -> bool {
+    let lower = value.trim().to_ascii_lowercase();
+    lower.starts_with("ws://") || lower.starts_with("wss://")
+}
+
+fn bailian_http_base_url(base_url: &str) -> String {
+    if is_http_tts_url(base_url) {
+        return base_url.to_string();
+    }
+    if let Ok(parsed) = url::Url::parse(base_url) {
+        if matches!(parsed.scheme(), "ws" | "wss") {
+            if let Some(host) = parsed.host_str() {
+                let scheme = if parsed.scheme() == "wss" { "https" } else { "http" };
+                let port = parsed.port().map(|port| format!(":{port}")).unwrap_or_default();
+                return format!("{scheme}://{host}{port}");
+            }
+        }
+    }
+    base_url.to_string()
+}
+
+fn resolve_bailian_voice<'a>(model: &'a str, voice: &'a str) -> &'a str {
+    match (model, voice) {
+        ("qwen-audio-3.0-tts-plus", "longanlingxi") => "longanlingxin",
+        (_, "longanhuan_v3") => "longanhuan_v3.6",
+        (_, "longjielidou_v3") => "longjielidou_v3.6",
+        (_, "longpaopao_v3") => "longpaopao_v3.6",
+        (_, "longhuohuo_v3") => "longhuohuo_v3.6",
+        (_, "longchuanshu_v3") => "longchuanshu_v3.6",
+        (_, "loongeva_v3") => "loongeva_v3.6",
+        _ => voice,
+    }
+}
+
+fn tts_websocket_task_id() -> String {
+    let value = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!(
+        "{:08x}-{:04x}-4{:03x}-8{:03x}-{:012x}",
+        (value >> 96) as u32,
+        (value >> 80) as u16,
+        (value >> 64) as u16 & 0x0fff,
+        (value >> 48) as u16 & 0x0fff,
+        value as u64 & 0x0000_ffffffffffff
+    )
+}
+
+fn tts_model_supports_instruction(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    model.contains("plus") || model.contains("instruct")
+}
+
+fn bailian_websocket_envelope(action: &str, task_id: &str, payload: Value) -> Value {
+    serde_json::json!({
+        "header": {
+            "action": action,
+            "task_id": task_id,
+            "streaming": "duplex"
+        },
+        "payload": payload
+    })
+}
+
+fn bailian_websocket_run_task(
+    task_id: &str,
+    model: &str,
+    voice: &str,
+    format: &str,
+    speed: f32,
+    instruction: Option<&str>,
+) -> Value {
+    let mut parameters = serde_json::json!({
+        "text_type": "PlainText",
+        "voice": voice,
+        "format": format,
+        "sample_rate": 24000,
+        "rate": speed
+    });
+    if tts_model_supports_instruction(model) {
+        if let Some(instruction) = instruction.filter(|value| !value.is_empty()) {
+            parameters["instruction"] = Value::String(instruction.to_string());
+        }
+    }
+    bailian_websocket_envelope(
+        "run-task",
+        task_id,
+        serde_json::json!({
+            "task_group": "audio",
+            "task": "tts",
+            "function": "SpeechSynthesizer",
+            "model": model,
+            "parameters": parameters,
+            "input": {}
+        }),
+    )
+}
+
+fn bailian_websocket_continue_task(task_id: &str, text: &str) -> Value {
+    bailian_websocket_envelope(
+        "continue-task",
+        task_id,
+        serde_json::json!({ "input": { "text": text } }),
+    )
+}
+
+fn bailian_websocket_finish_task(task_id: &str) -> Value {
+    bailian_websocket_envelope("finish-task", task_id, serde_json::json!({ "input": {} }))
+}
+
+fn bailian_websocket_event_name(payload: &Value) -> &str {
+    payload
+        .get("header")
+        .and_then(|header| header.get("event"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+fn bailian_websocket_error_message(payload: &Value) -> String {
+    let message = payload
+        .get("header")
+        .and_then(|header| {
+            header
+                .get("error_message")
+                .or_else(|| header.get("errorMessage"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| {
+            payload
+                .get("payload")
+                .and_then(|body| body.get("message").or_else(|| body.get("error")))
+                .and_then(Value::as_str)
+        })
+        .unwrap_or("配音任务失败")
+        .to_string();
+    if message.contains("411") || message.to_ascii_lowercase().contains("speak operation failed") {
+        return format!("{message}。请确认音色属于当前模型：Flash 只能用该模型系统音色，Plus 复刻音色不能用在 Flash 上。");
+    }
+    message
+}
+
+async fn send_bailian_websocket_json(
+    sink: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
+    payload: &Value,
+) -> Result<(), String> {
+    sink.send(Message::text(payload.to_string()))
+        .await
+        .map_err(|error| format!("发送配音任务失败：{error}"))
+}
+
+async fn synthesize_bailian_websocket_tts(
+    url: &str,
+    api_key: &str,
+    model: &str,
+    voice: &str,
+    text: &str,
+    format: &str,
+    speed: f32,
+    instruction: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let mut request = url
+        .into_client_request()
+        .map_err(|error| format!("配音地址无效：{error}"))?;
+    let authorization = format!("bearer {api_key}");
+    let headers = request.headers_mut();
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&authorization).map_err(|_| "API Key 无效".to_string())?,
+    );
+    headers.insert(
+        "X-DashScope-DataInspection",
+        HeaderValue::from_static("enable"),
+    );
+    if let Ok(user_agent) = HeaderValue::from_str("visual-python/0.1.0") {
+        headers.insert("user-agent", user_agent);
+    }
+    let (stream, _) = tokio::time::timeout(
+        Duration::from_secs(20),
+        tokio_tungstenite::connect_async(request),
+    )
+    .await
+    .map_err(|_| "配音 WebSocket 连接超时".to_string())?
+    .map_err(|error| format!("配音 WebSocket 连接失败：{error}"))?;
+    let (mut sink, mut incoming) = stream.split();
+    let task_id = tts_websocket_task_id();
+    send_bailian_websocket_json(
+        &mut sink,
+        &bailian_websocket_run_task(&task_id, model, voice, format, speed, instruction),
+    )
+    .await?;
+
+    let mut audio = Vec::new();
+    let mut started = false;
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(90), incoming.next())
+            .await
+            .map_err(|_| "配音 WebSocket 等待超时".to_string())?
+            .ok_or_else(|| "配音 WebSocket 已关闭".to_string())?
+            .map_err(|error| format!("读取配音数据失败：{error}"))?;
+        match message {
+            Message::Binary(data) => audio.extend_from_slice(data.as_ref()),
+            Message::Ping(payload) => {
+                sink.send(Message::Pong(payload))
+                    .await
+                    .map_err(|error| format!("配音心跳响应失败：{error}"))?;
+            }
+            Message::Close(_) => break,
+            Message::Text(payload) => {
+                let event: Value = serde_json::from_str(&payload.to_string())
+                    .map_err(|_| "配音服务返回了无效的任务事件".to_string())?;
+                match bailian_websocket_event_name(&event) {
+                    "task-started" if !started => {
+                        started = true;
+                        send_bailian_websocket_json(
+                            &mut sink,
+                            &bailian_websocket_continue_task(&task_id, text),
+                        )
+                        .await?;
+                        send_bailian_websocket_json(
+                            &mut sink,
+                            &bailian_websocket_finish_task(&task_id),
+                        )
+                        .await?;
+                    }
+                    "task-finished" => break,
+                    "task-failed" => {
+                        return Err(format!(
+                            "百炼配音失败：{}",
+                            bailian_websocket_error_message(&event)
+                        ));
+                    }
+                    _ => {
+                        if let Some(data) = find_audio_base64(&event) {
+                            let encoded = data.rsplit_once(',').map(|(_, value)| value).unwrap_or(data);
+                            if let Ok(bytes) =
+                                base64::engine::general_purpose::STANDARD.decode(encoded)
+                            {
+                                audio.extend_from_slice(&bytes);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if audio.is_empty() {
+        return Err("配音服务没有返回音频数据".into());
+    }
+    Ok(audio)
 }
 
 fn openai_speech_endpoint(base_url: &str) -> String {
@@ -1191,16 +1459,15 @@ fn openai_responses_endpoint(base_url: &str) -> String {
     }
 }
 
-fn responses_connection_request_body(base_url: &str, model: &str) -> Value {
+fn responses_connection_request_body(model: &str, profile: AiReasoningProfile) -> Value {
     let mut body = serde_json::json!({
         "model": model,
         "input": "请仅回复：连接成功",
-        "max_output_tokens": 128,
+        "max_output_tokens": 512,
         "stream": false
     });
-    if should_disable_ai_thinking(base_url, model) {
-        body["enable_thinking"] = Value::Bool(false);
-    }
+    apply_ai_reasoning_controls(&mut body, Some("high"), profile, true)
+        .expect("default reasoning controls are valid");
     body
 }
 
@@ -1245,6 +1512,13 @@ fn is_responses_endpoint_unsupported(status: u16, body: &str) -> bool {
         || (lower.contains("responses") && lower.contains("not found"))
 }
 
+fn should_fallback_responses_probe_to_chat(error: &str) -> bool {
+    is_responses_endpoint_unsupported(0, error)
+        || ai_reasoning_error_kind(400, error).is_some()
+        || error.contains("关闭思考")
+        || error.contains("始终思考")
+}
+
 fn uses_openai_chat_audio(base_url: &str) -> bool {
     let lower = base_url.to_ascii_lowercase();
     lower.ends_with("/chat/completions")
@@ -1252,6 +1526,9 @@ fn uses_openai_chat_audio(base_url: &str) -> bool {
 }
 
 fn bailian_speech_endpoint(base_url: &str) -> String {
+    if !is_http_tts_url(base_url) {
+        return base_url.to_string();
+    }
     let lower = base_url.to_ascii_lowercase();
     if lower.ends_with("/speechsynthesizer") {
         base_url.to_string()
@@ -1263,6 +1540,7 @@ fn bailian_speech_endpoint(base_url: &str) -> String {
 }
 
 fn bailian_api_endpoint(base_url: &str, service_path: &str) -> String {
+    let base_url = bailian_http_base_url(base_url);
     let lower = base_url.to_ascii_lowercase();
     if let Some(index) = lower.find("/api/v1/") {
         format!("{}/{}", &base_url[..index + "/api/v1".len()], service_path)
@@ -1277,16 +1555,24 @@ fn bailian_voice_customization_endpoint(base_url: &str) -> String {
     bailian_api_endpoint(base_url, "services/audio/tts/customization")
 }
 
+fn bailian_voice_list_endpoint(base_url: &str) -> String {
+    bailian_api_endpoint(base_url, "services/audio/tts/voice-list")
+}
+
 fn bailian_uploads_endpoint(base_url: &str) -> String {
     bailian_api_endpoint(base_url, "uploads")
 }
 
-fn is_cloned_voice_id(voice: &str) -> bool {
-    !voice.is_empty()
-        && voice.len() <= 160
-        && voice
+fn is_valid_tts_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 160
+        && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn is_cloned_voice_id(voice: &str) -> bool {
+    is_valid_tts_id(voice)
 }
 
 fn is_bailian_plus_cloned_voice(voice: &str) -> bool {
@@ -1478,12 +1764,91 @@ fn tts_instruction(config: &TtsConfig) -> Result<Option<String>, String> {
 }
 
 fn is_bailian_voice_compatible(model: &str, voice: &str) -> bool {
-    match model {
-        BAILIAN_VOICE_CLONE_MODEL => {
-            BAILIAN_PLUS_BUILTIN_VOICES.contains(&voice) || is_bailian_plus_cloned_voice(voice)
-        }
-        _ => false,
+    is_valid_tts_id(model) && is_valid_tts_id(voice)
+}
+
+fn tts_voice_option_label(id: &str, name: Option<&str>) -> String {
+    match name.map(str::trim).filter(|value| !value.is_empty() && *value != id) {
+        Some(name) => format!("{name} · {id}"),
+        None => id.to_string(),
     }
+}
+
+fn push_tts_voice_option(out: &mut Vec<TtsVoiceOption>, seen: &mut HashSet<String>, id: &str, label: Option<&str>) {
+    let id = id.trim();
+    if !is_valid_tts_id(id) || !seen.insert(id.to_string()) {
+        return;
+    }
+    out.push(TtsVoiceOption {
+        id: id.to_string(),
+        label: tts_voice_option_label(id, label),
+    });
+}
+
+fn collect_tts_voice_options(value: &Value, out: &mut Vec<TtsVoiceOption>, seen: &mut HashSet<String>) {
+    match value {
+        Value::Object(object) => {
+            let id = ["voice", "voice_id", "id"]
+                .iter()
+                .find_map(|key| object.get(*key).and_then(Value::as_str));
+            let label = ["name", "desc", "label", "description", "voice_name"]
+                .iter()
+                .find_map(|key| object.get(*key).and_then(Value::as_str));
+            if let Some(id) = id {
+                push_tts_voice_option(out, seen, id, label);
+            }
+            for key in ["voices", "voice_list", "data", "output", "result", "list"] {
+                if let Some(child) = object.get(key) {
+                    collect_tts_voice_options(child, out, seen);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                if let Some(id) = item.as_str() {
+                    push_tts_voice_option(out, seen, id, None);
+                } else {
+                    collect_tts_voice_options(item, out, seen);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_tts_voice_options(payload: &Value) -> Vec<TtsVoiceOption> {
+    let mut voices = Vec::new();
+    let mut seen = HashSet::new();
+    collect_tts_voice_options(payload, &mut voices, &mut seen);
+    voices
+}
+
+fn builtin_tts_voices(model: &str) -> Vec<TtsVoiceOption> {
+    let voices: &[(&str, &str)] = match model {
+        "qwen-audio-3.0-tts-plus" => &[("longanlingxin", "龙安灵心"), ("longanlufeng", "龙安鲁风")],
+        "qwen-audio-3.0-tts-flash" => &[
+            ("longanfengyue", "龙安风悦"),
+            ("longanyuanfei", "龙安元妃"),
+            ("longanlingxi", "龙安灵希"),
+            ("longanxiaoxin", "龙安小昕"),
+            ("longanhuan_v3.6", "龙安欢"),
+            ("longjielidou_v3.6", "龙杰力豆"),
+            ("longpaopao_v3.6", "龙泡泡"),
+            ("longhuohuo_v3.6", "龙火火"),
+            ("longchuanshu_v3.6", "龙川叔"),
+            ("loongmary", "loongmary"),
+            ("loongeva_v3.6", "loongeva"),
+            ("loongjohn", "loongJohn"),
+        ],
+        _ => &[],
+    };
+    voices
+        .iter()
+        .map(|(id, label)| TtsVoiceOption {
+            id: (*id).into(),
+            label: format!("{label} · {id}"),
+        })
+        .collect()
 }
 
 fn find_audio_url(value: &Value) -> Option<&str> {
@@ -2068,72 +2433,167 @@ fn ai_stream_finish_reason(payload: &Value) -> Option<&str> {
         .as_str()
 }
 
-fn should_disable_ai_thinking(base_url: &str, model: &str) -> bool {
-    let is_aliyun = url::Url::parse(base_url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
-        .is_some_and(|host| host == "aliyuncs.com" || host.ends_with(".aliyuncs.com"));
-    let model = model.to_ascii_lowercase();
-    is_aliyun && (model.starts_with("qwen") || model.starts_with("qwq"))
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AiReasoningProfile {
+    Enabled,
+    AlwaysOn,
+    EffortOnly,
+    Omitted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AiReasoningErrorKind {
+    AlwaysOnRequired,
+    UnknownEnableThinking,
+    UnknownReasoningParameter,
+}
+
+fn default_ai_reasoning_effort<'a>(effort: Option<&'a str>) -> Result<&'a str, String> {
+    match effort {
+        None => Ok("high"),
+        Some(value) if matches!(value, "low" | "medium" | "high" | "xhigh") => Ok(value),
+        Some(_) => Err("AI 思考强度无效".into()),
+    }
+}
+
+fn always_on_reasoning_effort(effort: &str) -> &'static str {
+    match effort {
+        "low" => "low",
+        "xhigh" => "max",
+        _ => "high",
+    }
+}
+
+fn openai_reasoning_effort(effort: &str) -> &'static str {
+    match effort {
+        "max" => "high",
+        "low" => "low",
+        "medium" => "medium",
+        "xhigh" => "xhigh",
+        _ => "high",
+    }
 }
 
 fn apply_ai_reasoning_effort(
     body: &mut Value,
     reasoning_effort: Option<&str>,
 ) -> Result<(), String> {
-    let Some(effort) = reasoning_effort else {
-        return Ok(());
-    };
-    if !matches!(effort, "low" | "medium" | "high" | "xhigh") {
-        return Err("AI 思考强度无效".into());
-    }
+    let effort = default_ai_reasoning_effort(reasoning_effort)?;
     body["reasoning_effort"] = Value::String(effort.into());
     Ok(())
 }
 
 fn apply_ai_reasoning_controls(
     body: &mut Value,
-    base_url: &str,
-    model: &str,
     reasoning_effort: Option<&str>,
+    profile: AiReasoningProfile,
+    include_responses_reasoning: bool,
 ) -> Result<(), String> {
-    if should_disable_ai_thinking(base_url, model) {
-        body["enable_thinking"] = Value::Bool(false);
-        return Ok(());
+    let effort = default_ai_reasoning_effort(reasoning_effort)?;
+    match profile {
+        AiReasoningProfile::Omitted => Ok(()),
+        AiReasoningProfile::EffortOnly => {
+            body["reasoning_effort"] = Value::String(effort.into());
+            if include_responses_reasoning {
+                body["reasoning"] = serde_json::json!({ "effort": effort });
+            }
+            Ok(())
+        }
+        AiReasoningProfile::Enabled => {
+            body["enable_thinking"] = Value::Bool(true);
+            body["reasoning_effort"] = Value::String(effort.into());
+            if include_responses_reasoning {
+                body["reasoning"] = serde_json::json!({ "effort": effort });
+            }
+            Ok(())
+        }
+        AiReasoningProfile::AlwaysOn => {
+            let compatible = always_on_reasoning_effort(effort);
+            body["enable_thinking"] = Value::Bool(true);
+            body["reasoning_effort"] = Value::String(compatible.into());
+            if include_responses_reasoning {
+                body["reasoning"] =
+                    serde_json::json!({ "effort": openai_reasoning_effort(compatible) });
+            }
+            Ok(())
+        }
     }
-    apply_ai_reasoning_effort(body, reasoning_effort)
 }
 
-fn should_retry_without_reasoning(
-    force_disable_thinking: bool,
-    omit_reasoning_controls: bool,
-    truncated: bool,
-    content: &str,
-    tool_call_count: usize,
-    received_reasoning: bool,
-) -> bool {
-    !force_disable_thinking
-        && !omit_reasoning_controls
-        && !truncated
-        && content.is_empty()
-        && tool_call_count == 0
-        && received_reasoning
+fn ai_reasoning_error_kind(status: u16, body: &str) -> Option<AiReasoningErrorKind> {
+    if !matches!(status, 400 | 422) {
+        return None;
+    }
+    let lower = body.to_ascii_lowercase();
+    if body.contains("关闭思考")
+        || body.contains("始终思考")
+        || lower.contains("always think")
+        || lower.contains("thinking cannot be disabled")
+        || (lower.contains("low")
+            && lower.contains("high")
+            && lower.contains("max")
+            && (lower.contains("reasoning") || lower.contains("effort") || body.contains("思考")))
+    {
+        return Some(AiReasoningErrorKind::AlwaysOnRequired);
+    }
+    if lower.contains("enable_thinking") {
+        return Some(AiReasoningErrorKind::UnknownEnableThinking);
+    }
+    if lower.contains("reasoning_effort")
+        || lower.contains("reasoning effort")
+        || lower.contains("thinking parameter")
+        || lower.contains("unknown parameter: reasoning")
+    {
+        return Some(AiReasoningErrorKind::UnknownReasoningParameter);
+    }
+    None
 }
 
-fn should_retry_for_reasoning_parameter_error(
-    status: u16,
-    body: &str,
-    reasoning_effort: Option<&str>,
-    omit_reasoning_controls: bool,
-) -> bool {
-    if omit_reasoning_controls || reasoning_effort.is_none() || !matches!(status, 400 | 422) {
-        return false;
+fn next_ai_reasoning_profile(
+    current: AiReasoningProfile,
+    kind: AiReasoningErrorKind,
+) -> Option<AiReasoningProfile> {
+    match (current, kind) {
+        (AiReasoningProfile::Enabled, AiReasoningErrorKind::AlwaysOnRequired) => {
+            Some(AiReasoningProfile::AlwaysOn)
+        }
+        (AiReasoningProfile::Enabled, AiReasoningErrorKind::UnknownEnableThinking)
+        | (AiReasoningProfile::AlwaysOn, AiReasoningErrorKind::UnknownEnableThinking) => {
+            Some(AiReasoningProfile::EffortOnly)
+        }
+        (AiReasoningProfile::Enabled, AiReasoningErrorKind::UnknownReasoningParameter)
+        | (AiReasoningProfile::AlwaysOn, AiReasoningErrorKind::UnknownReasoningParameter)
+        | (AiReasoningProfile::EffortOnly, AiReasoningErrorKind::UnknownReasoningParameter) => {
+            Some(AiReasoningProfile::Omitted)
+        }
+        _ => None,
     }
-    let body = body.to_ascii_lowercase();
-    body.contains("reasoning_effort")
-        || body.contains("reasoning effort")
-        || body.contains("enable_thinking")
-        || body.contains("thinking parameter")
+}
+
+fn build_ai_http_client(stream: bool) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(20));
+    builder = if stream {
+        // Streaming turns with thinking can last several minutes. Fail only when
+        // the connection goes idle, not when the whole response exceeds 90s.
+        builder.read_timeout(Duration::from_secs(180))
+    } else {
+        builder.timeout(Duration::from_secs(120))
+    };
+    builder
+        .build()
+        .map_err(|error| format!("无法创建 AI 请求：{error}"))
+}
+
+fn format_ai_stream_read_error(error: reqwest::Error) -> String {
+    if error.is_timeout() {
+        return "AI 流式响应超时。深度思考或较长回复需要保持连接，请重试当前任务。".into();
+    }
+    let detail = error.to_string();
+    if error.is_decode() || detail.contains("decoding response body") || detail.contains("error reading a body")
+    {
+        return "AI 流式响应中断，连接被关闭或超时。请重试当前任务。".into();
+    }
+    format!("读取 AI 流式响应失败：{error}")
 }
 
 fn supports_ai_stream_usage(base_url: &str) -> bool {
@@ -2245,8 +2705,7 @@ async fn perform_ai_chat_completion(
         max_tokens,
         reasoning_effort,
         stream_target,
-        false,
-        false,
+        AiReasoningProfile::Enabled,
     )
     .await
 }
@@ -2261,8 +2720,7 @@ async fn perform_ai_chat_completion_attempt(
     max_tokens: u32,
     reasoning_effort: Option<String>,
     stream_target: Option<AiStreamTarget>,
-    force_disable_thinking: bool,
-    omit_reasoning_controls: bool,
+    reasoning_profile: AiReasoningProfile,
 ) -> Result<AiChatCompletionResult, String> {
     let base_url = validate_ai_base_url(&config.base_url)?;
     let model = config.model.trim();
@@ -2328,10 +2786,7 @@ async fn perform_ai_chat_completion_attempt(
         .or(load_stored_ai_api_key(&base_url)?)
         .or_else(|| ai_environment_api_key(&base_url))
         .ok_or_else(|| "请先填写 API Key".to_string())?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(90))
-        .build()
-        .map_err(|error| format!("无法创建 AI 请求：{error}"))?;
+    let client = build_ai_http_client(stream_target.is_some())?;
     if let Some(definitions) = &tools {
         if definitions.is_empty() || definitions.len() > 128 {
             return Err("Function Calling 工具数量需要在 1 到 128 之间".into());
@@ -2387,18 +2842,12 @@ async fn perform_ai_chat_completion_attempt(
         "max_tokens": max_tokens,
         "stream": stream_target.is_some()
     });
-    if omit_reasoning_controls {
-        // Some OpenAI-compatible providers reject both standard and vendor-specific reasoning fields.
-    } else if force_disable_thinking {
-        request_body["enable_thinking"] = Value::Bool(false);
-    } else {
-        apply_ai_reasoning_controls(
-            &mut request_body,
-            &base_url,
-            model,
-            reasoning_effort.as_deref(),
-        )?;
-    }
+    apply_ai_reasoning_controls(
+        &mut request_body,
+        reasoning_effort.as_deref(),
+        reasoning_profile,
+        false,
+    )?;
     if stream_target.is_some() && supports_ai_stream_usage(&base_url) {
         request_body["stream_options"] = serde_json::json!({ "include_usage": true });
     }
@@ -2433,26 +2882,22 @@ async fn perform_ai_chat_completion_attempt(
             .text()
             .await
             .map_err(|error| format!("无法读取 AI 响应：{error}"))?;
-        if should_retry_for_reasoning_parameter_error(
-            status.as_u16(),
-            &body,
-            reasoning_effort.as_deref(),
-            omit_reasoning_controls,
-        ) {
-            return Box::pin(perform_ai_chat_completion_attempt(
-                config,
-                messages,
-                tools,
-                tool_choice,
-                omit_tool_choice,
-                api_key,
-                max_tokens,
-                None,
-                stream_target.clone(),
-                false,
-                true,
-            ))
-            .await;
+        if let Some(kind) = ai_reasoning_error_kind(status.as_u16(), &body) {
+            if let Some(next_profile) = next_ai_reasoning_profile(reasoning_profile, kind) {
+                return Box::pin(perform_ai_chat_completion_attempt(
+                    config,
+                    messages,
+                    tools,
+                    tool_choice,
+                    omit_tool_choice,
+                    api_key,
+                    max_tokens,
+                    reasoning_effort,
+                    stream_target.clone(),
+                    next_profile,
+                ))
+                .await;
+            }
         }
         return Err(format!(
             "AI 请求失败（HTTP {}）：{}",
@@ -2475,7 +2920,7 @@ async fn perform_ai_chat_completion_attempt(
         loop {
             let next_chunk = response.chunk();
             let chunk = tokio::select! {
-                result = next_chunk => result.map_err(|error| format!("读取 AI 流式响应失败：{error}"))?,
+                result = next_chunk => result.map_err(format_ai_stream_read_error)?,
                 _ = target.cancellation.wait() => return Err("AI 生成已停止".into()),
             };
             let Some(chunk) = chunk else {
@@ -2634,31 +3079,8 @@ async fn perform_ai_chat_completion_attempt(
         let truncated = finish_reason.as_deref() == Some("length");
         let content = content.trim().to_string();
         let tool_calls = finish_ai_stream_tool_calls(streamed_tool_calls);
-        if should_retry_without_reasoning(
-            force_disable_thinking,
-            omit_reasoning_controls,
-            truncated,
-            &content,
-            tool_calls.len(),
-            received_reasoning,
-        ) {
-            return Box::pin(perform_ai_chat_completion_attempt(
-                config,
-                messages,
-                tools,
-                tool_choice,
-                omit_tool_choice,
-                api_key,
-                max_tokens,
-                None,
-                stream_target.clone(),
-                true,
-                false,
-            ))
-            .await;
-        }
         if !truncated && content.is_empty() && tool_calls.is_empty() && received_reasoning {
-            return Err("模型连续两次仅返回思考过程，没有生成最终内容".into());
+            return Err("模型只返回了思考过程，没有生成最终内容。请提高输出长度或降低思考强度后重试".into());
         }
         if !truncated && content.is_empty() && tool_calls.is_empty() {
             return Err("AI 流式响应中没有找到文本或工具调用".into());
@@ -2748,8 +3170,10 @@ async fn perform_ai_responses_connection(
         .build()
         .map_err(|error| format!("无法创建 AI 请求：{error}"))?;
     let endpoint = openai_responses_endpoint(&base_url);
-    let request_body = responses_connection_request_body(&base_url, model);
-    for attempt in 0..2 {
+    let mut profile = AiReasoningProfile::Enabled;
+    let mut empty_content_retries = 0;
+    loop {
+        let request_body = responses_connection_request_body(model, profile);
         let response = client
             .post(&endpoint)
             .bearer_auth(&key)
@@ -2763,10 +3187,17 @@ async fn perform_ai_responses_connection(
             .await
             .map_err(|error| format!("无法读取 AI 响应：{error}"))?;
         if !status.is_success() {
+            let error_body = ai_error_body(&body);
+            if let Some(kind) = ai_reasoning_error_kind(status.as_u16(), &error_body) {
+                if let Some(next_profile) = next_ai_reasoning_profile(profile, kind) {
+                    profile = next_profile;
+                    continue;
+                }
+            }
             return Err(format!(
                 "AI 请求失败（HTTP {}）：{}",
                 status.as_u16(),
-                ai_error_body(&body)
+                error_body
             ));
         }
         let payload: Value = serde_json::from_str(&body)
@@ -2799,12 +3230,12 @@ async fn perform_ai_responses_connection(
                 cache_creation_tokens,
             });
         }
-        if should_retry_responses_connection(attempt, None) {
+        if should_retry_responses_connection(empty_content_retries, None) {
+            empty_content_retries += 1;
             continue;
         }
         return Err("AI 响应中没有找到文本".to_string());
     }
-    Err("AI 响应中没有找到文本".to_string())
 }
 
 #[tauri::command]
@@ -2826,8 +3257,8 @@ async fn test_ai_connection(
             None,
             false,
             api_key,
-            128,
-            None,
+            512,
+            Some("high".into()),
             None,
         )
         .await;
@@ -2838,8 +3269,7 @@ async fn test_ai_connection(
     match perform_ai_responses_connection(config.clone(), api_key.clone()).await {
         Ok(result) => Ok(result),
         Err(error) => {
-            let unsupported = is_responses_endpoint_unsupported(0, &error);
-            if unsupported {
+            if should_fallback_responses_probe_to_chat(&error) {
                 return perform_ai_chat_completion(
                     config,
                     vec![AiChatMessage {
@@ -2852,8 +3282,8 @@ async fn test_ai_connection(
                     None,
                     false,
                     api_key,
-                    128,
-                    None,
+                    512,
+                    Some("high".into()),
                     None,
                 )
                 .await;
@@ -3268,6 +3698,33 @@ async fn list_cloned_voices(
 }
 
 #[tauri::command]
+async fn list_tts_voices(
+    config: TtsConfig,
+    api_key: Option<String>,
+) -> Result<Vec<TtsVoiceOption>, String> {
+    if config.provider != "aliyun-bailian" {
+        return Err("当前版本仅支持阿里百炼配音服务".into());
+    }
+    let model = config.model.trim();
+    if !is_valid_tts_id(model) {
+        return Err("配音模型名称无效".into());
+    }
+    let mut voices = builtin_tts_voices(model);
+    let mut seen: HashSet<String> = voices.iter().map(|voice| voice.id.clone()).collect();
+    if model == BAILIAN_VOICE_CLONE_MODEL {
+        if let Ok(cloned) = list_cloned_voices(config.clone(), api_key.clone()).await {
+            for item in cloned {
+                push_tts_voice_option(&mut voices, &mut seen, &item.voice, Some("复刻音色"));
+            }
+        }
+    }
+    if voices.is_empty() {
+        return Err("百炼没有为该模型提供音色列表接口，请按文档手动填写音色 ID".into());
+    }
+    Ok(voices)
+}
+
+#[tauri::command]
 async fn delete_cloned_voice(
     config: TtsConfig,
     voice: String,
@@ -3389,22 +3846,26 @@ async fn synthesize_tts_preview(
         .build()
         .map_err(|error| format!("无法创建配音请求：{error}"))?;
     let audio = if config.provider == "aliyun-bailian" {
-        let voice = match (config.model.as_str(), config.voice.as_str()) {
-            ("qwen-audio-3.0-tts-plus", "longanlingxi") => "longanlingxin",
-            (_, "longanhuan_v3") => "longanhuan_v3.6",
-            (_, "longjielidou_v3") => "longjielidou_v3.6",
-            (_, "longpaopao_v3") => "longpaopao_v3.6",
-            (_, "longhuohuo_v3") => "longhuohuo_v3.6",
-            (_, "longchuanshu_v3") => "longchuanshu_v3.6",
-            (_, "loongeva_v3") => "loongeva_v3.6",
-            _ => config.voice.as_str(),
-        };
+        let voice = resolve_bailian_voice(config.model.as_str(), config.voice.as_str());
         if !is_bailian_voice_compatible(&config.model, voice) {
             return Err(format!(
                 "音色 {voice} 不适用于模型 {}，请重新选择模型和音色",
                 config.model
             ));
         }
+        if is_websocket_tts_url(&base_url) {
+            synthesize_bailian_websocket_tts(
+                &base_url,
+                &key,
+                config.model.trim(),
+                voice,
+                text,
+                format,
+                config.speed,
+                instruction.as_deref(),
+            )
+            .await?
+        } else {
         let mut input = serde_json::json!({
             "text": text,
             "voice": voice,
@@ -3453,6 +3914,7 @@ async fn synthesize_tts_preview(
             .await
             .map_err(|error| format!("读取配音文件失败：{error}"))?
             .to_vec()
+        }
     } else if config.provider == "openai-compatible" {
         if uses_openai_chat_audio(&base_url) {
             let mut messages = Vec::new();
@@ -5377,7 +5839,7 @@ fn install_python_packages(
         }
         let (success, error) = match result {
             Ok(status) if status.success() => (true, None),
-            Ok(status) if stopped_by_user => (false, None),
+            Ok(_status) if stopped_by_user => (false, None),
             Ok(status) => (false, Some(format!("pip exited with status: {status}"))),
             Err(error) => (false, Some(error.to_string())),
         };
@@ -6573,6 +7035,7 @@ pub fn run() {
             delete_voice_clone_recording,
             create_cloned_voice,
             list_cloned_voices,
+            list_tts_voices,
             delete_cloned_voice,
             synthesize_tts_preview,
             has_ai_api_key,
@@ -6652,6 +7115,37 @@ mod tests {
     }
 
     #[test]
+    fn parses_tts_voice_lists_from_provider_payloads() {
+        let voices = parse_tts_voice_options(&json!({
+            "output": {
+                "voice_list": [
+                    { "voice": "Cherry", "name": "芊悦" },
+                    { "voice_id": "longanlingxin", "desc": "龙安灵心" },
+                    { "id": "bad id" }
+                ]
+            }
+        }));
+        assert_eq!(
+            voices,
+            vec![
+                TtsVoiceOption {
+                    id: "Cherry".into(),
+                    label: "芊悦 · Cherry".into(),
+                },
+                TtsVoiceOption {
+                    id: "longanlingxin".into(),
+                    label: "龙安灵心 · longanlingxin".into(),
+                },
+            ]
+        );
+        assert!(is_bailian_voice_compatible(
+            "qwen-audio-3.0-tts-flash",
+            "loongmary"
+        ));
+        assert!(!is_bailian_voice_compatible("qwen-audio-3.0-tts-flash", ""));
+    }
+
+    #[test]
     fn builds_tts_endpoints_from_service_roots() {
         assert_eq!(
             openai_speech_endpoint("https://example.com/v1"),
@@ -6685,13 +7179,43 @@ mod tests {
     #[test]
     fn reports_missing_tts_address_separately_from_invalid_addresses() {
         assert!(validate_tts_url("  ").unwrap_err().contains("尚未配置"));
-        assert_eq!(
-            validate_tts_url("not a url").unwrap_err(),
-            "配音接口地址无效"
-        );
+        assert_eq!(validate_tts_url("wss://example.com/tts").unwrap(), "wss://example.com/tts");
         assert_eq!(
             validate_tts_url("https://example.com/").unwrap(),
             "https://example.com"
+        );
+        assert_eq!(
+            bailian_speech_endpoint("wss://example.com/live"),
+            "wss://example.com/live"
+        );
+        assert_eq!(
+            bailian_http_base_url("wss://dashscope.aliyuncs.com/api-ws/v1/inference"),
+            "https://dashscope.aliyuncs.com"
+        );
+        assert_eq!(
+            bailian_voice_list_endpoint("wss://dashscope.aliyuncs.com/api-ws/v1/inference"),
+            "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/voice-list"
+        );
+        assert!(is_websocket_tts_url(
+            "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+        ));
+        let start = bailian_websocket_run_task(
+            "task-1",
+            "qwen-audio-3.0-tts-flash",
+            "longanhuan_v3.6",
+            "mp3",
+            1.0,
+            Some("请使用稍快且清晰的语速朗读。"),
+        );
+        assert_eq!(start["header"]["action"], "run-task");
+        assert_eq!(start["header"]["streaming"], "duplex");
+        assert_eq!(start["payload"]["model"], "qwen-audio-3.0-tts-flash");
+        assert_eq!(start["payload"]["parameters"]["voice"], "longanhuan_v3.6");
+        assert_eq!(start["payload"]["input"], serde_json::json!({}));
+        assert!(start["payload"]["parameters"].get("instruction").is_none());
+        assert_eq!(
+            bailian_websocket_continue_task("task-1", "今天天气怎么样？")["payload"]["input"]["text"],
+            "今天天气怎么样？"
         );
     }
 
@@ -6737,20 +7261,21 @@ mod tests {
     }
 
     #[test]
-    fn builds_connection_probe_with_room_for_final_text() {
-        let body = responses_connection_request_body(
-            "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "qwen3.7-flash",
-        );
-        assert_eq!(body["max_output_tokens"], 128);
-        assert_eq!(body["enable_thinking"], false);
+    fn builds_connection_probe_with_thinking_enabled() {
+        let body = responses_connection_request_body("qwen3.7-flash", AiReasoningProfile::Enabled);
+        assert_eq!(body["max_output_tokens"], 512);
+        assert_eq!(body["enable_thinking"], true);
+        assert_eq!(body["reasoning_effort"], "high");
+        assert_eq!(body["reasoning"]["effort"], "high");
     }
 
     #[test]
-    fn does_not_send_vendor_reasoning_controls_to_generic_responses_providers() {
-        let body = responses_connection_request_body("https://example.com/v1", "reasoning-model");
-        assert!(body.get("enable_thinking").is_none());
-        assert!(body.get("reasoning").is_none());
+    fn enables_thinking_for_generic_openai_compatible_providers() {
+        let body =
+            responses_connection_request_body("reasoning-model", AiReasoningProfile::Enabled);
+        assert_eq!(body["enable_thinking"], true);
+        assert_eq!(body["reasoning_effort"], "high");
+        assert_eq!(body["reasoning"]["effort"], "high");
     }
 
     #[test]
@@ -6924,67 +7449,91 @@ mod tests {
         let mut body = json!({ "model": "reasoning-model" });
         apply_ai_reasoning_effort(&mut body, Some("xhigh")).unwrap();
         assert_eq!(body["reasoning_effort"], "xhigh");
+        apply_ai_reasoning_effort(&mut body, None).unwrap();
+        assert_eq!(body["reasoning_effort"], "high");
 
         assert!(apply_ai_reasoning_effort(&mut body, Some("extra-high")).is_err());
     }
 
     #[test]
-    fn disables_qwen_thinking_without_sending_reasoning_effort() {
+    fn enables_thinking_by_default_for_openai_compatible_models() {
         let mut body = json!({ "model": "qwen3.7-flash" });
         apply_ai_reasoning_controls(
             &mut body,
-            "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "qwen3.7-flash",
             Some("high"),
+            AiReasoningProfile::Enabled,
+            false,
         )
         .unwrap();
-        assert_eq!(body["enable_thinking"], false);
-        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(body["enable_thinking"], true);
+        assert_eq!(body["reasoning_effort"], "high");
+        assert!(body.get("reasoning").is_none());
     }
 
     #[test]
-    fn retries_only_when_a_stream_contains_reasoning_without_output() {
-        assert!(should_retry_without_reasoning(false, false, false, "", 0, true));
-        assert!(!should_retry_without_reasoning(true, false, false, "", 0, true));
-        assert!(!should_retry_without_reasoning(false, true, false, "", 0, true));
-        assert!(!should_retry_without_reasoning(false, false, true, "", 0, true));
-        assert!(!should_retry_without_reasoning(false, false, false, "完成", 0, true));
-        assert!(!should_retry_without_reasoning(false, false, false, "", 1, true));
-        assert!(!should_retry_without_reasoning(false, false, false, "", 0, false));
-    }
-
-    #[test]
-    fn retries_when_a_provider_rejects_reasoning_parameters() {
-        assert!(should_retry_for_reasoning_parameter_error(
-            400,
-            r#"{"error":{"message":"Unknown parameter: reasoning_effort"}}"#,
-            Some("high"),
+    fn maps_always_on_thinking_effort_to_provider_values() {
+        let mut body = json!({ "model": "ZHIPU/GLM-5.3-Flash" });
+        apply_ai_reasoning_controls(
+            &mut body,
+            Some("xhigh"),
+            AiReasoningProfile::AlwaysOn,
             false,
-        ));
-        assert!(should_retry_for_reasoning_parameter_error(
-            422,
-            "enable_thinking is not supported",
+        )
+        .unwrap();
+        assert_eq!(body["enable_thinking"], true);
+        assert_eq!(body["reasoning_effort"], "max");
+
+        apply_ai_reasoning_controls(
+            &mut body,
             Some("medium"),
+            AiReasoningProfile::AlwaysOn,
             false,
-        ));
-        assert!(!should_retry_for_reasoning_parameter_error(
-            401,
-            "reasoning_effort is invalid",
-            Some("high"),
-            false,
-        ));
-        assert!(!should_retry_for_reasoning_parameter_error(
-            400,
-            "reasoning_effort is invalid",
-            None,
-            false,
-        ));
-        assert!(!should_retry_for_reasoning_parameter_error(
-            400,
-            "reasoning_effort is invalid",
-            Some("high"),
-            true,
-        ));
+        )
+        .unwrap();
+        assert_eq!(body["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn retries_reasoning_profiles_for_provider_errors() {
+        assert_eq!(
+            ai_reasoning_error_kind(
+                400,
+                "该模型始终思考，不支持关闭思考；请使用 low、high 或 max。"
+            ),
+            Some(AiReasoningErrorKind::AlwaysOnRequired)
+        );
+        assert_eq!(
+            next_ai_reasoning_profile(
+                AiReasoningProfile::Enabled,
+                AiReasoningErrorKind::AlwaysOnRequired
+            ),
+            Some(AiReasoningProfile::AlwaysOn)
+        );
+        assert_eq!(
+            next_ai_reasoning_profile(
+                AiReasoningProfile::Enabled,
+                AiReasoningErrorKind::UnknownEnableThinking
+            ),
+            Some(AiReasoningProfile::EffortOnly)
+        );
+        assert_eq!(
+            next_ai_reasoning_profile(
+                AiReasoningProfile::EffortOnly,
+                AiReasoningErrorKind::UnknownReasoningParameter
+            ),
+            Some(AiReasoningProfile::Omitted)
+        );
+        assert_eq!(
+            next_ai_reasoning_profile(
+                AiReasoningProfile::AlwaysOn,
+                AiReasoningErrorKind::AlwaysOnRequired
+            ),
+            None
+        );
+        assert_eq!(
+            ai_reasoning_error_kind(401, "reasoning_effort is invalid"),
+            None
+        );
     }
 
     #[test]
@@ -6996,23 +7545,22 @@ mod tests {
     }
 
     #[test]
-    fn disables_thinking_only_for_qwen_on_aliyun() {
-        assert!(should_disable_ai_thinking(
-            "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "qwen-plus"
+    fn falls_back_to_chat_when_responses_thinking_is_rejected() {
+        assert!(should_fallback_responses_probe_to_chat(
+            "AI 请求失败（HTTP 400）：该模型始终思考，不支持关闭思考；请使用 low、high 或 max。"
         ));
-        assert!(should_disable_ai_thinking(
-            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
-            "qwen3.7-flash"
+        assert!(should_fallback_responses_probe_to_chat(
+            "AI 请求失败（HTTP 404）：Not support"
         ));
-        assert!(!should_disable_ai_thinking(
-            "https://api.openai.com/v1",
-            "qwen-plus"
+        assert!(!should_fallback_responses_probe_to_chat(
+            "AI 请求失败（HTTP 401）：Unauthorized"
         ));
-        assert!(!should_disable_ai_thinking(
-            "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "other-model"
-        ));
+    }
+
+    #[test]
+    fn builds_streaming_ai_client_without_a_short_total_timeout() {
+        assert!(build_ai_http_client(true).is_ok());
+        assert!(build_ai_http_client(false).is_ok());
     }
 
     #[test]
