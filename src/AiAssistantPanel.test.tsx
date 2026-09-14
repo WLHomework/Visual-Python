@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
 
@@ -69,6 +69,8 @@ describe("AI assistant Markdown", () => {
       { label: "继续完善", prompt: "继续完善当前结果" },
     ]);
     expect(parsed.content).toBe("已完成。");
+    expect(normalizeAssistantMarkdown("已完成。\n<!-- visual-python-followups: [{\"label\":\"检查结果\",\"prompt\":\"检查当前结果\"}] -->")).toBe("已完成。");
+    expect(normalizeAssistantMarkdown("已完成。\n<!-- visual-python-followups: [{\"label\":\"检查结果\"")).toBe("已完成。");
   });
 
   it("builds follow-up suggestions from the current work instead of fixed labels", () => {
@@ -171,6 +173,20 @@ describe("AI assistant Markdown", () => {
     expect(html).toContain("复制");
     expect(html).not.toContain(">完成<");
     expect(html).toContain('title="缓存详情"');
+  });
+
+  it("separates tool work from assistant replies in the run body", () => {
+    const body = composeAgentRunBody([
+      { id: "thinking-1", kind: "message", channel: "thinking", status: "done", title: "思考过程", markdown: "先读代码" },
+      { id: "tool-1", kind: "tool", status: "done", title: "读取当前工程", toolName: "get_context" },
+      { id: "message-1", kind: "message", status: "done", title: "已经看过当前工程。" },
+    ]);
+    expect(body.map((block) => block.kind)).toEqual(["timeline", "reply"]);
+  });
+
+  it("keeps an empty running reply mounted so tokens can stream in", () => {
+    const html = renderToStaticMarkup(<StreamingRichText id="message-1" text="" live/>);
+    expect(html).toContain("ai-markdown-stream");
   });
 
   it("keeps the task activity stream separate from the final answer", () => {

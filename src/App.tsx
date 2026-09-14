@@ -5111,6 +5111,7 @@ export default function App() {
         channel: event.kind,
         status: event.status,
         title: event.markdown ?? event.title,
+        markdown: event.markdown ?? event.title,
         detail: event.detail,
         toolName: event.toolName as AiAgentToolName | undefined,
         result: event.resultText,

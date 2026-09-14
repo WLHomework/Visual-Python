@@ -4,6 +4,7 @@ import { CodexAgentClient, mapCodexServerRequest, type CodexDynamicTool, type Co
 import type { AgentModelEvent } from "./agentEvents";
 import { compactAgentToolResult } from "./agentV2/context";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
+import { publishLiveStream } from "./agentV2/liveStream";
 import { coreAgentTools } from "./agentV2/toolRegistry";
 import { buildCodexPrompt } from "./codexPrompt";
 import { getCodexThread } from "./codexThreadStore";
@@ -113,12 +114,14 @@ export async function runCodexVisualPythonAgent(
       const itemId = event.itemId || "assistant";
       const content = `${messages.get(itemId) || ""}${event.delta}`;
       messages.set(itemId, content);
+      publishLiveStream(`message-${itemId}`, content);
       if (!shouldEmitUi(`message-${itemId}`)) return;
       emit({ id: `message-${itemId}`, kind: "message", status: "running", title: content, markdown: content });
     } else if (event.type === "reasoningDelta") {
       const itemId = event.itemId || "reasoning";
       const content = `${reasoning.get(itemId) || ""}${event.delta}`;
       reasoning.set(itemId, content);
+      publishLiveStream(`thinking-${itemId}`, content);
       if (!shouldEmitUi(`thinking-${itemId}`)) return;
       emit({ id: `thinking-${itemId}`, kind: "thinking", status: "running", title: "思考过程", markdown: content });
     } else if (event.type === "tokenUsage") {

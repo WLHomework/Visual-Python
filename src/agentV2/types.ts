@@ -50,6 +50,7 @@ export type AiAgentActivity = {
   kind: "message" | "tool";
   status: AgentActivityStatus;
   title: string;
+  markdown?: string;
   channel?: AgentActivityKind;
   detail?: string;
   result?: string;

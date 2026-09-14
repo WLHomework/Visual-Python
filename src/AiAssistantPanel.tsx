@@ -1,4 +1,4 @@
-import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { isValidElement, memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, ArrowDown, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, RefreshCw, SearchCheck, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
@@ -20,6 +20,8 @@ import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, A
 import { getAiAgentPermissionMode, getAiReasoningEffort, saveAiReasoningEffort, type AiAgentPermissionMode, type AiReasoningEffort } from "./aiConfig";
 import { buildAiConversationHistory } from "./aiConversationContext";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
+import { stripAgentFollowUpMarkup } from "./agentV2/followUps";
+import { nextStreamRevealLength, subscribeLiveStream } from "./agentV2/liveStream";
 
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("css", css);
@@ -691,7 +693,7 @@ export function normalizeAssistantMarkdown(value: string): string {
     markdown = markdown.replace(/\\r\\n|\\n|\\r/g, "\n");
   }
   const outerFence = markdown.match(/^(```|~~~)(?:markdown|md|mdown)\s*\n([\s\S]*?)\n\1\s*$/i);
-  return (outerFence?.[2] ?? markdown).trim();
+  return stripAgentFollowUpMarkup(outerFence?.[2] ?? markdown);
 }
 
 export const MarkdownContent = memo(function MarkdownContent({ children, className = "" }: { children: string; className?: string }) {
@@ -699,28 +701,44 @@ export const MarkdownContent = memo(function MarkdownContent({ children, classNa
 });
 
 export function activityDisplayText(activity: Pick<AiAgentActivity, "title" | "markdown">): string {
-  return (activity.markdown?.trim() || activity.title || "").trim();
+  return stripAgentFollowUpMarkup(activity.markdown?.trim() || activity.title || "");
 }
 
-const streamMarkdownIntervalMs = 180;
+const LiveStreamText = memo(function LiveStreamText({ id }: { id: string }) {
+  const nodeRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = nodeRef.current;
+    if (!node) return;
+    let shown = "";
+    let target = "";
+    let frame: number | null = null;
+    const paint = () => {
+      frame = null;
+      const next = stripAgentFollowUpMarkup(target);
+      if (shown.startsWith(next) || !next.startsWith(shown)) shown = next;
+      else shown = next.slice(0, nextStreamRevealLength(shown.length, next.length));
+      node.textContent = shown;
+      if (shown.length < next.length) frame = requestAnimationFrame(paint);
+    };
+    const unsubscribe = subscribeLiveStream(id, (value) => {
+      target = value;
+      if (frame === null) frame = requestAnimationFrame(paint);
+    });
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      unsubscribe();
+    };
+  }, [id]);
+  return <div ref={nodeRef} className="ai-markdown ai-markdown-live ai-markdown-stream" />;
+});
 
-export function StreamingRichText({ text, live = false }: { text: string; live?: boolean }) {
-  const [visible, setVisible] = useState(text);
-  const latest = useRef(text);
-  latest.current = text;
-
-  useEffect(() => {
-    if (!live) {
-      setVisible(text);
-      return;
-    }
-    if (visible === text) return;
-    const timer = window.setTimeout(() => setVisible(latest.current), visible ? streamMarkdownIntervalMs : 0);
-    return () => window.clearTimeout(timer);
-  }, [live, text, visible]);
-
-  if (!text.trim() && !visible.trim()) return null;
-  return <div className={live ? "ai-markdown-live" : undefined}><MarkdownContent>{visible || text}</MarkdownContent></div>;
+export function StreamingRichText({ id, text, live = false }: { id?: string; text: string; live?: boolean }) {
+  if (!live) {
+    if (!text.trim()) return null;
+    return <MarkdownContent>{text}</MarkdownContent>;
+  }
+  if (!id) return <div className="ai-markdown ai-markdown-live ai-markdown-stream">{stripAgentFollowUpMarkup(text)}</div>;
+  return <LiveStreamText id={id} />;
 }
 
 function codeDiffStartLine(result?: string): number | null {
@@ -730,6 +748,34 @@ function codeDiffStartLine(result?: string): number | null {
 
 function isCodeChangeTool(toolName?: AiAgentToolName) {
   return toolName === "rename_scene" || toolName === "replace_code" || toolName === "edit_code" || toolName === "insert_statements" || toolName === "replace_function_body" || toolName === "add_import" || toolName === "add_voiceover" || toolName === "add_synchronized_voiceover";
+}
+
+function isAssistantReplyActivity(activity: AiAgentActivity) {
+  return activity.kind === "message" && (!activity.channel || activity.channel === "message");
+}
+
+export type AgentRunBodyBlock =
+  | { kind: "timeline"; id: string; entries: AgentActivityEntry[] }
+  | { kind: "reply"; activity: AiAgentActivity };
+
+export function composeAgentRunBody(activities: AiAgentActivity[], hiddenToolName?: AiAgentToolName): AgentRunBodyBlock[] {
+  const blocks: AgentRunBodyBlock[] = [];
+  let timeline: AgentActivityEntry[] = [];
+  const flushTimeline = () => {
+    if (!timeline.length) return;
+    blocks.push({ kind: "timeline", id: `timeline-${timeline.map((entry) => entry.kind === "group" ? entry.id : entry.activity.id).join("-").slice(0, 80)}`, entries: timeline });
+    timeline = [];
+  };
+  for (const entry of groupAgentActivities(activities, hiddenToolName)) {
+    if (entry.kind === "activity" && isAssistantReplyActivity(entry.activity)) {
+      flushTimeline();
+      blocks.push({ kind: "reply", activity: entry.activity });
+    } else {
+      timeline.push(entry);
+    }
+  }
+  flushTimeline();
+  return blocks;
 }
 
 export function groupAgentActivities(activities: AiAgentActivity[], hiddenToolName?: AiAgentToolName): AgentActivityEntry[] {
@@ -1122,7 +1168,7 @@ export const AgentActivityRow = memo(function AgentActivityRow({ activity, onRev
 }) {
   if (activity.channel === "thinking") return <details className={`ai-agent-thinking ${activity.status}`} open={activity.status === "running"}>
     <summary><ChevronRight className="ai-agent-tool-chevron" size={14}/><strong>思考过程</strong>{activity.status === "running" && <LoaderCircle className="spin" size={13}/>}</summary>
-    <StreamingRichText text={activityDisplayText(activity) || "模型正在形成下一步决策。"} live={activity.status === "running"}/>
+    <StreamingRichText id={activity.id} text={activityDisplayText(activity)} live={activity.status === "running"}/>
   </details>;
   const verificationTitle = successfulToolVerificationTitle(activity);
   if (verificationTitle) return <div className={`ai-agent-event verification ${activity.status}`}>
@@ -1136,9 +1182,9 @@ export const AgentActivityRow = memo(function AgentActivityRow({ activity, onRev
   </div>;
   if (activity.kind === "message") {
     const messageText = activityDisplayText(activity);
-    if (activity.status === "running" && !messageText) return null;
+    if (activity.status !== "running" && !messageText) return null;
     return <div className={`ai-agent-narration ${activity.status}`}>
-      <StreamingRichText text={messageText} live={activity.status === "running"}/>
+      <StreamingRichText id={activity.id} text={messageText} live={activity.status === "running"}/>
     </div>;
   }
   if (activity.execution) return <AgentExecutionResult execution={activity.execution} onRevealProblem={onRevealProblem}/>;
@@ -1258,10 +1304,10 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   };
 
   useEffect(() => {
-    if (!shouldPersistConversationRuns(runs)) return;
+    if (running || !shouldPersistConversationRuns(runs)) return;
     const failed = !storeConversationState(conversationScope, conversationState);
     setConversationPersistenceFailed((current) => current === failed ? current : failed);
-  }, [conversationScope, conversationState, runs]);
+  }, [conversationScope, conversationState, running, runs]);
 
   useEffect(() => {
     mountedRef.current = true;

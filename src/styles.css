@@ -5348,7 +5348,6 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   overflow-y: auto;
   overflow-x: hidden;
   overflow-anchor: none;
-
   padding: 18px;
   scrollbar-width: none;
 }
@@ -6208,4 +6207,12 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 
 .voiceover-role-fields .tts-id-card {
   padding: 8px 9px 9px;
+}
+
+.ai-markdown-stream {
+  min-height: 1.4em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.6;
 }

@@ -6,6 +6,7 @@ import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessag
 import { createAgentTokenUsage, mergeProviderTokenUsage, recordAgentRequest, recordAgentToolResult } from "./agentV2/tokenLedger";
 import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
+import { publishLiveStream } from "./agentV2/liveStream";
 import { isStreamingCodeTool, previewCodeFromStreamingTool } from "./agentV2/streamingCodePreview";
 
 export type { AgentActivityEvent, AgentCapability, AgentCodeChange, AgentConversationTurn, AgentHost, AgentMode, AgentProgress, AgentRunResult, AgentTokenUsage, AgentTool, RunVisualPythonAgentArgs, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiCodeEdit, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2/types";
@@ -306,27 +307,31 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
       onEvent: (event) => {
         if (event.type === "textDelta") {
           content += event.delta;
+          publishLiveStream(messageId, content);
           const now = Date.now();
           if (now - lastContentUiUpdate < streamUiUpdateIntervalMs) return;
           lastContentUiUpdate = now;
           emit({ id: messageId, kind: "message", status: "running", title: content, markdown: content });
         } else if (event.type === "reasoningDelta") {
           reasoning += event.delta;
+          const thinkingId = `thinking-${round}`;
+          publishLiveStream(thinkingId, reasoning);
           const now = Date.now();
           if (thinkingEmitted && now - lastReasoningUiUpdate < streamUiUpdateIntervalMs) return;
           thinkingEmitted = true;
           lastReasoningUiUpdate = now;
-          emit({ id: `thinking-${round}`, kind: "thinking", status: "running", title: "思考过程", markdown: reasoning });
+          emit({ id: thinkingId, kind: "thinking", status: "running", title: "思考过程", markdown: reasoning });
         } else if (event.type === "toolCallDelta" && host.previewStreamingCode) {
           const current = toolArgumentBuffers.get(event.index) || { arguments: "" };
           if (event.name) current.name = event.name;
           current.arguments += event.delta;
           toolArgumentBuffers.set(event.index, current);
-          if (!isStreamingCodeTool(current.name) || host.getSnapshot().workspaceMode !== "code") return;
+          const toolName = current.name;
+          if (!toolName || !isStreamingCodeTool(toolName) || host.getSnapshot().workspaceMode !== "code") return;
           const now = Date.now();
           if (now - lastCodePreviewAt < 80) return;
           lastCodePreviewAt = now;
-          const preview = previewCodeFromStreamingTool(current.name, current.arguments, baselineCode);
+          const preview = previewCodeFromStreamingTool(toolName, current.arguments, baselineCode);
           if (preview === null || preview === lastCodePreview) return;
           lastCodePreview = preview;
           host.previewStreamingCode(preview);
