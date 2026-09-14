@@ -6216,3 +6216,26 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   font-size: 13px;
   line-height: 1.6;
 }
+
+.workbench.mode-code .panel-head {
+  z-index: 1;
+}
+
+.workbench.mode-code .editor-wrap {
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+}
+
+.monaco-editor .find-widget.visible {
+  overflow: visible;
+}
+
+.monaco-hover,
+.monaco-editor .monaco-hover {
+  z-index: 120 !important;
+}
+
+.context-view:has(.monaco-hover.workbench-hover.compact) {
+  pointer-events: none !important;
+}

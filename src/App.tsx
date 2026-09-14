@@ -2058,6 +2058,7 @@ export default function App() {
       setSourceCodeInitialized(true);
     }
     setCodeOutlineOpen(false);
+    if (isBlockWorkspaceMode(nextMode) && workspace.current) setCode(generateWorkspacePython(workspace.current));
     setWorkspaceMode(nextMode);
     if (nextMode !== "code") {
       codeValidationVersion.current += 1;
@@ -3966,6 +3967,9 @@ export default function App() {
     loadingWorkspace.current = true;
     Blockly.serialization.workspaces.load(migrateWorkspaceState(example.workspace), currentWorkspace);
     currentWorkspace.clearUndo();
+    const generated = generateWorkspacePython(currentWorkspace);
+    const document = createCodeDocumentFromSource(generated, "main");
+    const stayInCode = workspaceModeRef.current === "code";
     setProjectName(example.projectName);
     const nextProjectId = createProjectId();
     projectIdRef.current = nextProjectId;
@@ -3975,12 +3979,12 @@ export default function App() {
     setProjectResources([]);
     setProjectPath(null);
     setDirty(true);
-    setCode(generateWorkspacePython(currentWorkspace));
-    setSceneDocuments([]);
-    setActiveSceneId("");
-    setSourceCode("");
-    setSourceCodeInitialized(false);
-    setWorkspaceMode("split");
+    setCode(generated);
+    setSceneDocuments([document]);
+    setActiveSceneId(document.id);
+    setSourceCode(generated);
+    setSourceCodeInitialized(true);
+    setWorkspaceMode(stayInCode ? "code" : "split");
     setBottomPanelOpen(true);
     setProblems([]);
     setManimRenderOutput(null);
@@ -3988,7 +3992,17 @@ export default function App() {
     setExampleMenuOpen(false);
     localStorage.removeItem("visual-python:draft");
     requestAnimationFrame(() => {
-      if (workspace.current === currentWorkspace) { currentWorkspace.clearUndo(); currentWorkspace.zoomToFit(); }
+      if (workspace.current === currentWorkspace) {
+        currentWorkspace.clearUndo();
+        currentWorkspace.zoomToFit();
+        const nextGenerated = generateWorkspacePython(currentWorkspace);
+        if (nextGenerated !== generated) {
+          setCode(nextGenerated);
+          const nextDocument = createCodeDocumentFromSource(nextGenerated, "main", document.id);
+          setSceneDocuments([nextDocument]);
+          setSourceCode(nextGenerated);
+        }
+      }
       loadingWorkspace.current = false;
     });
   }, [cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, openConsolePanel]);
@@ -4073,7 +4087,9 @@ export default function App() {
     taskId.current = 0;
     pythonRunStartedAt.current = Date.now();
     pythonRunElapsed.current = 0;
-    setRunning(true); setOutput([{ id: outputId.current++, stream: "system", data: `> Python 运行 ${projectName}\n\n` }]);
+    setRunning(true);
+    setActivePanel("output");
+    setOutput([{ id: outputId.current++, stream: "system", data: `> Python 运行 ${projectName}\n\n` }]);
     try {
       const startedTaskId = await invoke<number>("start_python", {
         code: runSource.code,
@@ -5830,7 +5846,7 @@ export default function App() {
       <aside className="right-panel">
         <div className="panel-head"><div className="code-scene-tabs" role="tablist" aria-label="Python 代码文档">{workspaceMode === "code" ? sceneDocuments.map((scene) => { const aiStatus = sceneAiStatuses[scene.id]; const aiStatusLabel = aiStatus ? ({ working: "AI 正在处理", changed: "AI 已修改", error: "AI 处理出错", validated: "AI 已校验" } as const)[aiStatus] : ""; return <div key={scene.id} className={`scene-tab ${scene.id === activeSceneId ? "active" : ""}`} role="tab" aria-selected={scene.id === activeSceneId}><button className="scene-tab-label" onClick={() => focusManimSceneTab(scene.id)} title={`打开文档 ${scene.name}`}><Code2 size={13}/><span>{scene.name}</span>{aiStatus && <i className={`scene-ai-status ${aiStatus}`} title={aiStatusLabel} aria-label={aiStatusLabel}/>}</button><button className="scene-tab-close" onClick={() => closeManimSceneTab(scene.id)} title={`删除文档 ${scene.name}`} aria-label={`删除文档 ${scene.name}`}><X size={12}/></button></div>; }) : <div className="panel-tab active"><Braces size={14}/> Python</div>}{workspaceMode === "code" && <button className="scene-tab-add" onClick={addManimSceneTab} title="新建代码文档" aria-label="新建代码文档"><Plus size={14}/></button>}</div><div className="panel-head-actions"><span className="read-only">{workspaceMode === "code" ? "代码文档" : "实时生成"}</span>{workspaceMode === "code" && <div className="code-outline-wrap" ref={codeOutlineRef}><button ref={codeOutlineTriggerRef} className="code-outline-trigger" disabled={!codeOutline.length} aria-label="代码结构大纲" title="代码结构大纲" aria-haspopup="menu" aria-expanded={codeOutlineOpen} onClick={() => setCodeOutlineOpen((open) => !open)}><ListTree size={15}/></button>{codeOutlineOpen && <div className="code-outline-menu" role="menu" aria-label="代码结构">{codeOutline.map((item) => <button key={`${item.kind}-${item.lineNumber}-${item.label}`} role="menuitem" onClick={() => focusCodeOutlineItem(item)} title={`第 ${item.lineNumber} 行`}><span className={`code-outline-icon outline-${item.kind}`}>{item.kind === "function" ? <Braces size={14}/> : <Box size={14}/>}</span><span className="code-outline-label"><strong>{item.label}</strong><small>{item.kind === "function" ? item.signature : `class ${item.label}`}</small></span><span className="code-outline-line">{item.lineNumber}</span></button>)}</div>}</div>}</div></div>
         <div className="editor-wrap" onContextMenu={openCodeEditorContextMenu}>
-          <Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `document-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", contextmenu: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense>
+          <Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `document-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel={workspaceMode === "code"} language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", contextmenu: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense>
           {aiCodeReview && aiCodeReviewTop !== null && <div className="ai-code-review-actions" style={{ top: aiCodeReviewTop }} role="toolbar" aria-label="AI 代码修改操作">
             <button type="button" className="undo" onClick={undoAiCodeReview} aria-label="撤销 AI 修改，快捷键 Alt+N"><kbd>Alt+N</kbd><span>撤销</span></button>
             <button type="button" className="keep" onClick={clearAiCodeChange} aria-label="保留 AI 修改，快捷键 Alt+Y"><kbd>Alt+Y</kbd><span>保留</span></button>
