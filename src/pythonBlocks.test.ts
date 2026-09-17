@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
-import { buildDefinedClassConstructorToolbox, buildDefinedFunctionCallToolbox, defaultVisualThemeId, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, starterState, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
+import { buildDefinedClassConstructorToolbox, buildDefinedFunctionCallToolbox, defaultVisualThemeId, deferHeavyStatementInputs, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateDeferredInputs, loadWorkspaceFast, markHeavyStacksCollapsed, restoreDeferredIntoState, saveWorkspaceState, starterState, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
 import { getManimVoiceoverContextWarning, getPythonCollectionTypeWarning, getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 
 const variableFields: Record<string, string[]> = {
@@ -11,6 +11,114 @@ const variableFields: Record<string, string[]> = {
   python_generator_expression: ["VAR"], python_with_two: ["ALIAS1", "ALIAS2"],
   python_async_for: ["VAR"], python_async_with: ["ALIAS"],
 };
+
+const longPrintFunctionState = () => {
+  const prints = Array.from({ length: 30 }, (_, index) => ({
+    type: "python_print",
+    inputs: { VALUE: { block: { type: "text", fields: { TEXT: String(index) } } } },
+  })) as Array<Record<string, unknown>>;
+  for (let index = 0; index < prints.length - 1; index += 1) prints[index].next = { block: prints[index + 1] };
+  return {
+    blocks: {
+      languageVersion: 0,
+      blocks: [{
+        type: "python_function_structured",
+        fields: { NAME: "demo", PARAM_NAME0: "value" },
+        extraState: { parameters: [{ kind: "positional", name: "value" }] },
+        inputs: { BODY: { block: prints[0] } },
+      }],
+    },
+  };
+};
+
+describe("bulk workspace loading", () => {
+  it("defers long statement stacks out of the live Blockly tree", () => {
+    const state = longPrintFunctionState();
+    deferHeavyStatementInputs(state, 16, 40);
+    const top = state.blocks.blocks[0] as Record<string, unknown> & { inputs?: Record<string, unknown>; data?: string; collapsed?: boolean };
+    expect(top.inputs?.BODY).toBeUndefined();
+    expect(top.collapsed).toBe(true);
+    expect(String(top.data || "")).toContain("vpDeferred");
+    restoreDeferredIntoState(state);
+    expect((state.blocks.blocks[0] as { inputs?: { BODY?: { block?: { type?: string } } } }).inputs?.BODY?.block?.type).toBe("python_print");
+  });
+
+  it("does not mutate a short starter workspace as collapsed", () => {
+    const before = JSON.stringify(starterState);
+    markHeavyStacksCollapsed(starterState);
+    expect(JSON.stringify(starterState)).toBe(before);
+  });
+
+  it("restores Blockly events after loadWorkspaceFast", () => {
+    const workspace = new Blockly.Workspace();
+    const wasEnabled = Blockly.Events.isEnabled();
+    try {
+      loadWorkspaceFast(workspace, starterState);
+      expect(Blockly.Events.isEnabled()).toBe(wasEnabled);
+      expect(workspace.getAllBlocks(false).length).toBeGreaterThan(0);
+    } finally {
+      workspace.dispose();
+    }
+  });
+
+  it("loads a long stack without creating every child block", () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      loadWorkspaceFast(workspace, longPrintFunctionState(), { collapseIfBlocks: 10 });
+      expect(workspace.getAllBlocks(false).length).toBeLessThan(10);
+      expect(generateWorkspacePython(workspace)).toContain("print('29')");
+      const saved = saveWorkspaceState(workspace) as { blocks?: { blocks?: Array<{ inputs?: { BODY?: { block?: unknown } } }> } };
+      expect(saved.blocks?.blocks?.[0]?.inputs?.BODY?.block).toBeTruthy();
+    } finally {
+      workspace.dispose();
+    }
+  });
+
+  it("hydrates deferred inputs when a collapsed block is expanded", () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      loadWorkspaceFast(workspace, longPrintFunctionState(), { collapseIfBlocks: 10 });
+      const top = workspace.getTopBlocks(false)[0];
+      expect(top).toBeTruthy();
+      hydrateDeferredInputs(top!, { sync: true });
+      expect(workspace.getAllBlocks(false).length).toBeGreaterThan(20);
+    } finally {
+      workspace.dispose();
+    }
+  });
+
+  it("does not freeze the workspace on the first hydration frame", async () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      loadWorkspaceFast(workspace, longPrintFunctionState(), { collapseIfBlocks: 10 });
+      const top = workspace.getTopBlocks(false)[0];
+      expect(top).toBeTruthy();
+      hydrateDeferredInputs(top!);
+      expect(workspace.getAllBlocks(false).length).toBeLessThan(10);
+      await new Promise<void>((resolve) => {
+        const tick = (left: number) => {
+          if (left <= 0) resolve();
+          else requestAnimationFrame(() => tick(left - 1));
+        };
+        tick(50);
+      });
+      expect(workspace.getAllBlocks(false).length).toBeGreaterThan(20);
+    } finally {
+      workspace.dispose();
+    }
+  });
+
+  it("re-enables Blockly events if a bulk load fails", () => {
+    const workspace = new Blockly.Workspace();
+    const wasEnabled = Blockly.Events.isEnabled();
+    try {
+      expect(() => loadWorkspaceFast(workspace, { blocks: { languageVersion: 0, blocks: [{ type: "does_not_exist" }] } })).toThrow();
+      expect(Blockly.Events.isEnabled()).toBe(wasEnabled);
+    } finally {
+      workspace.dispose();
+    }
+  });
+});
 
 describe("Manim voiceover context validation", () => {
   it("requires voiceover blocks to be nested in a Manim scene", () => {

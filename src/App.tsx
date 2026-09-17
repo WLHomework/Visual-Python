@@ -9,7 +9,7 @@ import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { OnMount } from "@monaco-editor/react";
 import type { CancellationToken as MonacoCancellationToken, editor as MonacoEditor, IRange as MonacoRange, languages as MonacoLanguages, Position as MonacoPosition } from "monaco-editor";
-import { AlertCircle, AlignLeft, ArrowLeft, Blocks, BookOpen, Box, Braces, Check, ChevronDown, ChevronRight, ChevronUp, ClipboardPaste, Cloud, Code2, Columns2, Copy, Download, ExternalLink, FileCode2, FilePlus2, Film, FolderOpen, Image as ImageIcon, Link2, ListOrdered, ListTree, Mic2, Minus, PanelBottomClose, PanelBottomOpen, Pause, Play, Plug, Plus, Power, RefreshCw, Replace, Save, SaveAll, Scissors, Search, Send, Settings, SlidersHorizontal, Sparkles, Square, Terminal, TextSelect, Trash2, Undo2, Redo2, Unlink2, Upload, Volume2, X } from "lucide-react";
+import { AlertCircle, AlignLeft, ArrowLeft, Blocks, BookOpen, Box, Braces, Check, ChevronDown, ChevronRight, ChevronUp, ClipboardPaste, Cloud, Code2, Columns2, Copy, Download, ExternalLink, FileCode2, FilePlus2, Film, FolderOpen, Image as ImageIcon, Link2, ListOrdered, ListTree, Mic2, Minus, PanelBottomClose, PanelBottomOpen, Pause, Play, Plug, Plus, Power, RefreshCw, Replace, Save, SaveAll, Scissors, Search, Send, Settings, Sigma, SlidersHorizontal, Sparkles, Square, Terminal, TextSelect, Trash2, Undo2, Redo2, Unlink2, Upload, Volume2, X } from "lucide-react";
 import { AiAssistantPanel } from "./AiAssistantPanel";
 import { AiModelSettings } from "./AiModelSettings";
 import { createVisualPythonHostAdapter } from "./agentV2/hostAdapter";
@@ -20,7 +20,7 @@ import { runAgentWithProtocolFallback } from "./codexAgentRunner";
 import type { AiAgentPermissionMode, AiReasoningEffort } from "./aiConfig";
 import { createAiConversationScope } from "./aiConversationContext";
 import { inspectVoiceovers } from "./aiVoiceover";
-import { defaultVisualThemeId, findWorkspaceBlockCodeRange, generateWorkspacePython, generateWorkspacePythonWithBlockMap, registerUsedVariablesToolbox, starterState, toolbox, visualPythonThemes, type VisualThemeId } from "./pythonBlocks";
+import { defaultVisualThemeId, findWorkspaceBlockCodeRange, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateAllDeferredInputs, hydrateDeferredInputs, installDeferredHydration, isHydratingWorkspace, loadWorkspaceFast, registerUsedVariablesToolbox, saveWorkspaceState, starterState, toolbox, visualPythonThemes, type VisualThemeId } from "./pythonBlocks";
 import { validatePythonBlockContexts, type PythonContextIssue } from "./pythonSyntaxBlocks";
 import { diagnosePythonError } from "./pythonDiagnostics";
 import { findPythonCallContext, findPythonIdentifierOccurrences, getPythonCompletions, getPythonOutline, getPythonSignatures, isPythonCompletionContext, isValidPythonIdentifier, type PythonCompletionKind, type PythonOutlineItem } from "./pythonCompletions";
@@ -1205,11 +1205,16 @@ export default function App() {
 
   const focusBlock = useCallback((blockId: string) => {
     const ws = workspace.current;
-    const block = ws?.getBlockById(blockId);
-    if (!ws || !block) return;
+    if (!ws) return;
+    if (!ws.getBlockById(blockId)) hydrateAllDeferredInputs(ws);
+    const block = ws.getBlockById(blockId);
+    if (!block) return;
     let parent = block.getSurroundParent();
     while (parent) {
-      if (parent.isCollapsed()) parent.setCollapsed(false);
+      if (parent.isCollapsed()) {
+        hydrateDeferredInputs(parent);
+        parent.setCollapsed(false);
+      }
       parent = parent.getSurroundParent();
     }
     ws.getToolbox()?.setSelectedItem(null);
@@ -1274,6 +1279,15 @@ export default function App() {
       toolboxAutoHideTimer.current = null;
     }, 250);
   }, []);
+
+  useEffect(() => {
+    if (exampleLibrary) return;
+    let cancelled = false;
+    void import("./examples").then((library) => {
+      if (!cancelled) setExampleLibrary(library);
+    });
+    return () => { cancelled = true; };
+  }, [exampleLibrary]);
 
   useEffect(() => {
     if (!projectMenuOpen && !exampleMenuOpen && !shortcutMenuOpen && !helpMenuOpen) return;
@@ -1403,6 +1417,11 @@ export default function App() {
       document.removeEventListener("pointerdown", closeOutline);
       document.removeEventListener("keydown", closeOutlineWithKeyboard);
     };
+  }, [blockOutlineOpen]);
+
+  useEffect(() => {
+    if (!blockOutlineOpen || !workspace.current) return;
+    hydrateAllDeferredInputs(workspace.current);
   }, [blockOutlineOpen]);
 
   const blockSearchLabelForType = useCallback((type: string) => {
@@ -1681,11 +1700,12 @@ export default function App() {
     const initialToolbox = pluginRegistry.extendToolbox(toolbox);
     blockSearchDefinition.current = initialToolbox;
     const ws = Blockly.inject(host.current, {
-      toolbox: initialToolbox, renderer: "zelos", theme: visualPythonThemes[visualThemeId], trashcan: true,
+      toolbox: initialToolbox, renderer: "zelos", theme: visualPythonThemes[visualThemeId], trashcan: true, sounds: false,
       grid: { spacing: 24, length: 2, colour: "#3a424d", snap: true },
       zoom: { controls: true, wheel: true, startScale: .88, maxScale: 1.4, minScale: .45, scaleSpeed: 1.1 },
       move: { scrollbars: true, drag: true, wheel: true },
     });
+    installDeferredHydration(ws);
     const functionCallLinks = installFunctionCallLinks(ws);
     const workspaceWithResizeHandler = ws as unknown as { resizeHandlerWrapper: Blockly.browserEvents.Data | null };
     if (workspaceWithResizeHandler.resizeHandlerWrapper) {
@@ -1758,7 +1778,7 @@ export default function App() {
       try {
         pluginRegistry.loadProjectData(draft.plugins);
         setVoiceoverRoles(getVoiceoverRoles());
-        Blockly.serialization.workspaces.load(migrateWorkspaceState(draft.workspace), ws);
+        loadWorkspaceFast(ws, migrateWorkspaceState(draft.workspace));
         restoredDraft = true;
       } catch {
         draft = null;
@@ -1767,11 +1787,12 @@ export default function App() {
         localStorage.removeItem("visual-python:draft");
       }
     }
-    if (!restoredDraft) Blockly.serialization.workspaces.load(starterState, ws);
+    if (!restoredDraft) loadWorkspaceFast(ws, starterState);
     if (draft?.blockInputLayout) {
       blockInputLayoutRef.current = draft.blockInputLayout;
       setBlockInputLayout(draft.blockInputLayout);
     }
+    applyBlockInputLayout(ws, blockInputLayoutRef.current);
     pruneUnusedVariables();
     setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
     ws.clearUndo();
@@ -1809,11 +1830,10 @@ export default function App() {
         });
       }
       scheduleVariablePrune();
+      if (loadingWorkspace.current || isHydratingWorkspace(ws)) return;
       setCode(generateWorkspacePython(ws));
-      if (!loadingWorkspace.current) {
-        setDirty(true);
-        setWorkspaceRevision((revision) => revision + 1);
-      }
+      setDirty(true);
+      setWorkspaceRevision((revision) => revision + 1);
       if (blockSearchQueryRef.current) queueMicrotask(() => showBlockSearchResults(blockSearchQueryRef.current));
     };
     ws.addChangeListener(update);
@@ -3711,7 +3731,7 @@ export default function App() {
     const currentSceneId = activeSceneIdRef.current;
     const savedSource = sourceOverride ?? sourceCodeRef.current;
     const persistedDocuments = sceneDocumentsRef.current.map((document) => document.id === currentSceneId ? { ...document, code: savedSource, name: resolveCodeDocumentName(savedSource, document.name) } : document);
-    const data: ProjectFile = { version: 1, projectId: projectIdRef.current, name: path.split(/[\\/]/).pop() || projectName, workspace: Blockly.serialization.workspaces.save(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: currentSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
+    const data: ProjectFile = { version: 1, projectId: projectIdRef.current, name: path.split(/[\\/]/).pop() || projectName, workspace: saveWorkspaceState(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: currentSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
     const contents = JSON.stringify(data, null, 2);
     if (saveAs) {
       await invoke("save_project_as", { sourceProjectPath: projectPathRef.current, destinationProjectPath: path, contents });
@@ -3870,8 +3890,9 @@ export default function App() {
       pluginRegistry.clearProjectData();
       pluginRegistry.loadProjectData(data.plugins);
       setVoiceoverRoles(getVoiceoverRoles());
-      Blockly.serialization.workspaces.load(validatedWorkspace, workspace.current);
+      loadWorkspaceFast(workspace.current, validatedWorkspace);
       workspace.current.clearUndo();
+      applyBlockInputLayout(workspace.current, blockInputLayoutRef.current);
       const generatedCode = generateWorkspacePython(workspace.current);
       const loadedMode = normalizeWorkspaceMode(data.workspaceMode);
       const loadedSourceCode = typeof data.sourceCode === "string" ? data.sourceCode : loadedMode === "code" ? generatedCode : "";
@@ -3897,7 +3918,7 @@ export default function App() {
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `无法打开工程：${String(error)}\n` }]);
       if (!projectFileExists) setRecentProjects((items) => { const next = items.filter((item) => item.path !== path); localStorage.setItem("visual-python:recent", JSON.stringify(next)); return next; });
     }
-  }, [cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, rememberRecent]);
+  }, [applyBlockInputLayout, cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, rememberRecent]);
 
   useEffect(() => {
     let disposed = false;
@@ -3928,7 +3949,7 @@ export default function App() {
     cancelAutosave();
     pluginRegistry.clearProjectData();
     setVoiceoverRoles(getVoiceoverRoles());
-    loadingWorkspace.current = true; Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [] } }, workspace.current);
+    loadingWorkspace.current = true; loadWorkspaceFast(workspace.current, { blocks: { languageVersion: 0, blocks: [] } });
     workspace.current.clearUndo();
     projectPathRef.current = null;
     const nextProjectId = createProjectId();
@@ -3965,47 +3986,48 @@ export default function App() {
     pluginRegistry.loadProjectData(example.plugins);
     setVoiceoverRoles(getVoiceoverRoles());
     loadingWorkspace.current = true;
-    Blockly.serialization.workspaces.load(migrateWorkspaceState(example.workspace), currentWorkspace);
-    currentWorkspace.clearUndo();
-    const generated = generateWorkspacePython(currentWorkspace);
-    const document = createCodeDocumentFromSource(generated, "main");
-    const stayInCode = workspaceModeRef.current === "code";
-    setProjectName(example.projectName);
-    const nextProjectId = createProjectId();
-    projectIdRef.current = nextProjectId;
-    setProjectId(nextProjectId);
-    projectPathRef.current = null;
-    projectResourcesRef.current = [];
-    setProjectResources([]);
-    setProjectPath(null);
-    setDirty(true);
-    setCode(generated);
-    setSceneDocuments([document]);
-    setActiveSceneId(document.id);
-    setSourceCode(generated);
-    setSourceCodeInitialized(true);
-    setWorkspaceMode(stayInCode ? "code" : "split");
-    setBottomPanelOpen(true);
-    setProblems([]);
-    setManimRenderOutput(null);
-    setOutput([{ id: outputId.current++, stream: "system", data: `已加载示例：${example.title}\n` }]);
-    setExampleMenuOpen(false);
-    localStorage.removeItem("visual-python:draft");
-    requestAnimationFrame(() => {
-      if (workspace.current === currentWorkspace) {
-        currentWorkspace.clearUndo();
-        currentWorkspace.zoomToFit();
-        const nextGenerated = generateWorkspacePython(currentWorkspace);
-        if (nextGenerated !== generated) {
-          setCode(nextGenerated);
-          const nextDocument = createCodeDocumentFromSource(nextGenerated, "main", document.id);
-          setSceneDocuments([nextDocument]);
-          setSourceCode(nextGenerated);
+    try {
+      loadWorkspaceFast(currentWorkspace, migrateWorkspaceState(example.workspace));
+      currentWorkspace.clearUndo();
+      applyBlockInputLayout(currentWorkspace, blockInputLayoutRef.current);
+      const generated = generateWorkspacePython(currentWorkspace);
+      const document = createCodeDocumentFromSource(generated, "main");
+      const stayInCode = workspaceModeRef.current === "code";
+      setProjectName(example.projectName);
+      const nextProjectId = createProjectId();
+      projectIdRef.current = nextProjectId;
+      setProjectId(nextProjectId);
+      projectPathRef.current = null;
+      projectResourcesRef.current = [];
+      setProjectResources([]);
+      setProjectPath(null);
+      setDirty(true);
+      setCode(generated);
+      setSceneDocuments([document]);
+      setActiveSceneId(document.id);
+      setSourceCode(generated);
+      setSourceCodeInitialized(true);
+      setWorkspaceMode(stayInCode ? "code" : "split");
+      setBottomPanelOpen(true);
+      setProblems([]);
+      setManimRenderOutput(null);
+      setOutput([{ id: outputId.current++, stream: "system", data: `已加载示例：${example.title}\n` }]);
+      setExampleMenuOpen(false);
+      localStorage.removeItem("visual-python:draft");
+      requestAnimationFrame(() => {
+        if (workspace.current === currentWorkspace) {
+          currentWorkspace.clearUndo();
+          currentWorkspace.zoomToFit();
         }
-      }
+        loadingWorkspace.current = false;
+      });
+    } catch (error) {
       loadingWorkspace.current = false;
-    });
-  }, [cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, openConsolePanel]);
+      const message = `无法加载示例：${String(error)}`;
+      setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
+      openConsolePanel("output");
+    }
+  }, [applyBlockInputLayout, cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, openConsolePanel]);
 
   const exportPython = useCallback(async () => {
     const currentScene = sceneDocuments.find((document) => document.id === activeSceneId);
@@ -4651,6 +4673,9 @@ export default function App() {
   const manimExampleCatalog = exampleLibrary?.manimExampleCatalog ?? [];
   const manimDifficultyOrder = exampleLibrary?.manimDifficultyOrder ?? [];
   const manimDifficultyLabels: Record<string, string> = exampleLibrary?.manimDifficultyLabels ?? {};
+  const mathDifficultyOrder = exampleLibrary?.mathDifficultyOrder ?? [];
+  const mathDifficultyLabels: Record<string, string> = exampleLibrary?.mathDifficultyLabels ?? {};
+  const mathExampleCatalog = exampleLibrary?.mathExampleCatalog ?? [];
   const projectResourceUsage = useMemo(() => {
     const usage = new Map<string, number>();
     const ws = workspace.current;
@@ -5274,7 +5299,7 @@ export default function App() {
               const ws = workspace.current;
               if (!ws) throw new Error("图形化工作区尚未就绪");
               Blockly.Events.disable();
-              try { Blockly.serialization.workspaces.load(state, ws); ws.clearUndo(); } finally { Blockly.Events.enable(); }
+              try { loadWorkspaceFast(ws, state); ws.clearUndo(); } finally { Blockly.Events.enable(); }
               setCode(generatedCode);
               setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
               setDirty(true);
@@ -5773,6 +5798,7 @@ export default function App() {
       </div>}</div><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={exampleMenuOpen} onClick={() => { setExampleMenuOpen((open) => !open); setProjectMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); }}>示例 <ChevronDown size={13}/></button>{exampleMenuOpen && <div className="project-menu example-menu">
         <div className="example-category"><button className="example-category-trigger"><BookOpen size={15}/><span>Python 基础</span><ChevronRight size={14}/></button><div className="project-menu example-submenu grouped-example-submenu">{pythonDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{pythonDifficultyLabels[difficulty]}</div>{pythonExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><BookOpen size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
         <div className="example-category"><button className="example-category-trigger"><Film size={15}/><span>Manim</span><ChevronRight size={14}/></button><div className="project-menu example-submenu manim-example-submenu">{manimDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{manimDifficultyLabels[difficulty]}</div>{manimExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><Film size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
+        <div className="example-category"><button className="example-category-trigger"><Sigma size={15}/><span>数学教学</span><ChevronRight size={14}/></button><div className="project-menu example-submenu grouped-example-submenu">{mathDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{mathDifficultyLabels[difficulty]}</div>{mathExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><Sigma size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
       </div>}</div><div className="project-menu-wrap">
         <button className="project-menu-trigger" aria-expanded={shortcutMenuOpen} disabled={workspaceMode !== "code"} onClick={() => { setShortcutMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setHelpMenuOpen(false); }}>编辑 <ChevronDown size={13}/></button>
         {shortcutMenuOpen && <div className="project-menu shortcut-menu" role="menu" aria-label="编辑">

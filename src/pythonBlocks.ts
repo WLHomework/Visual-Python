@@ -1488,8 +1488,351 @@ export function generatePython(state: object): string {
   return code;
 }
 
+const DEFERRED_INPUTS_KEY = "vpDeferred";
+const STATEMENT_INPUT_NAMES = new Set([
+  "BODY", "STACK", "DO", "DO0", "DO1", "DO2", "DO3", "TRY", "EXCEPT", "ELSE", "FINALLY", "THEN", "STATEMENT", "COMMANDS",
+]);
+
+type SerializedBlock = Record<string, unknown> & {
+  data?: string;
+  collapsed?: boolean;
+  inputs?: Record<string, { block?: SerializedBlock; shadow?: SerializedBlock }>;
+  next?: { block?: SerializedBlock };
+};
+
+type DeferredPayload = {
+  [DEFERRED_INPUTS_KEY]?: Record<string, SerializedBlock>;
+  vpUserData?: string;
+};
+
+function statementInputBlock(block: SerializedBlock | undefined) {
+  const inputs = block?.inputs;
+  return inputs?.BODY?.block || inputs?.STACK?.block || inputs?.DO?.block || inputs?.DO0?.block;
+}
+
+function nextChainLength(block: SerializedBlock | undefined) {
+  let count = 0;
+  let current = block;
+  while (current) {
+    count += 1;
+    current = current.next?.block;
+  }
+  return count;
+}
+
+export function countSerializedBlocks(state: object) {
+  let count = 0;
+  const visit = (block: SerializedBlock | undefined) => {
+    if (!block) return;
+    count += 1;
+    if (block.inputs) for (const connection of Object.values(block.inputs)) visit(connection?.block);
+    visit(block.next?.block);
+  };
+  const tops = (state as { blocks?: { blocks?: SerializedBlock[] } }).blocks?.blocks;
+  if (Array.isArray(tops)) for (const block of tops) visit(block);
+  return count;
+}
+
+function readDeferredPayload(data: string | undefined | null): DeferredPayload {
+  if (!data) return {};
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && (DEFERRED_INPUTS_KEY in parsed || "vpUserData" in parsed)) {
+      return parsed as DeferredPayload;
+    }
+  } catch {
+    // Preserve non-JSON block data as opaque user data.
+  }
+  return { vpUserData: data };
+}
+
+function writeDeferredPayload(payload: DeferredPayload) {
+  const deferred = payload[DEFERRED_INPUTS_KEY];
+  if (!deferred || !Object.keys(deferred).length) return payload.vpUserData;
+  return JSON.stringify(payload);
+}
+
+function isStatementConnection(name: string, child: SerializedBlock) {
+  return STATEMENT_INPUT_NAMES.has(name) || Boolean(child.next);
+}
+
+function deferBlockInputs(block: SerializedBlock | undefined, minStatements: number, minTree: number) {
+  if (!block) return;
+  if (block.inputs) {
+    for (const [name, connection] of Object.entries(block.inputs)) {
+      const child = connection?.block;
+      if (!child) continue;
+      const treeSize = countSerializedBlocks({ blocks: { languageVersion: 0, blocks: [child] } });
+      if (isStatementConnection(name, child) && (nextChainLength(child) >= minStatements || treeSize >= minTree)) {
+        const payload = readDeferredPayload(typeof block.data === "string" ? block.data : undefined);
+        payload[DEFERRED_INPUTS_KEY] = { ...payload[DEFERRED_INPUTS_KEY], [name]: child };
+        const nextData = writeDeferredPayload(payload);
+        if (nextData) block.data = nextData;
+        else delete block.data;
+        delete block.inputs[name];
+        block.collapsed = true;
+        continue;
+      }
+      deferBlockInputs(child, minStatements, minTree);
+    }
+  }
+  deferBlockInputs(block.next?.block, minStatements, minTree);
+}
+
+export function deferHeavyStatementInputs(state: object, minStatements = 16, minTree = 40) {
+  const tops = (state as { blocks?: { blocks?: SerializedBlock[] } }).blocks?.blocks;
+  if (!Array.isArray(tops)) return state;
+  for (const block of tops) deferBlockInputs(block, minStatements, minTree);
+  return state;
+}
+
+function restoreBlockInputs(block: SerializedBlock | undefined) {
+  if (!block) return;
+  const payload = readDeferredPayload(typeof block.data === "string" ? block.data : undefined);
+  const deferred = payload[DEFERRED_INPUTS_KEY];
+  if (deferred) {
+    block.inputs = block.inputs ?? {};
+    for (const [name, child] of Object.entries(deferred)) {
+      const existing = block.inputs[name]?.block;
+      if (existing) {
+        let tail = existing;
+        while (tail.next?.block) tail = tail.next.block;
+        tail.next = { block: child };
+      } else {
+        block.inputs[name] = { ...(block.inputs[name] ?? {}), block: child };
+      }
+      restoreBlockInputs(child);
+    }
+    delete payload[DEFERRED_INPUTS_KEY];
+    const nextData = writeDeferredPayload(payload);
+    if (nextData) block.data = nextData;
+    else delete block.data;
+  }
+  if (block.inputs) for (const connection of Object.values(block.inputs)) restoreBlockInputs(connection?.block);
+  restoreBlockInputs(block.next?.block);
+}
+
+export function restoreDeferredIntoState(state: object) {
+  const tops = (state as { blocks?: { blocks?: SerializedBlock[] } }).blocks?.blocks;
+  if (Array.isArray(tops)) for (const block of tops) restoreBlockInputs(block);
+  return state;
+}
+
+export function markHeavyStacksCollapsed(state: object, minStatements = 24) {
+  const tops = (state as { blocks?: { blocks?: SerializedBlock[] } }).blocks?.blocks;
+  if (!Array.isArray(tops)) return state;
+  for (const block of tops) {
+    if (nextChainLength(statementInputBlock(block)) >= minStatements) block.collapsed = true;
+  }
+  return state;
+}
+
+export function collapseHeavyStatementBlocks(workspace: Blockly.Workspace, minStatements = 24) {
+  for (const block of workspace.getTopBlocks(false)) {
+    const input = block.getInput("BODY") || block.getInput("STACK") || block.getInput("DO") || block.getInput("DO0");
+    const start = input?.connection?.targetBlock();
+    if (!start) continue;
+    let count = 0;
+    for (let current: Blockly.Block | null = start; current; current = current.getNextBlock()) count += 1;
+    if (count >= minStatements) block.setCollapsed(true);
+  }
+}
+
+function workspaceHasDeferred(workspace: Blockly.Workspace) {
+  return workspace.getAllBlocks(false).some((block) => String(block.data || "").includes(`"${DEFERRED_INPUTS_KEY}"`));
+}
+
+type HydrationJob = { cancelled: boolean };
+const hydrationJobs = new WeakMap<Blockly.Block, HydrationJob>();
+const hydratingWorkspaces = new WeakSet<Blockly.Workspace>();
+
+export function isHydratingWorkspace(workspace: Blockly.Workspace) {
+  return hydratingWorkspaces.has(workspace);
+}
+
+function splitStatementChain(root: SerializedBlock) {
+  const parts: SerializedBlock[] = [];
+  let current: SerializedBlock | undefined = root;
+  while (current) {
+    const next = current.next?.block;
+    const part: SerializedBlock = { ...current };
+    delete part.next;
+    parts.push(part);
+    current = next;
+  }
+  return parts;
+}
+
+function linkStatementChain(parts: SerializedBlock[]) {
+  if (!parts.length) return undefined;
+  const nodes = parts.map((part) => {
+    const node: SerializedBlock = { ...part };
+    delete node.next;
+    return node;
+  });
+  for (let index = 0; index < nodes.length - 1; index += 1) nodes[index].next = { block: nodes[index + 1] };
+  return nodes[0];
+}
+
+function appendSerializedStatement(parent: Blockly.Block, inputName: string, state: SerializedBlock) {
+  const child = Blockly.serialization.blocks.append(state, parent.workspace, { recordUndo: false });
+  const input = parent.getInput(inputName);
+  if (!input?.connection) return child;
+  const existing = input.connection.targetBlock();
+  if (existing && child.previousConnection) {
+    let tail: Blockly.Block = existing;
+    while (tail.getNextBlock()) tail = tail.getNextBlock()!;
+    tail.nextConnection?.connect(child.previousConnection);
+  } else {
+    const target = child.previousConnection || child.outputConnection;
+    if (target) input.connection.connect(target);
+  }
+  return child;
+}
+
+function persistHydrationQueue(block: Blockly.Block, queue: Array<{ name: string; remaining: SerializedBlock[] }>) {
+  const payload = readDeferredPayload(block.data);
+  const deferred: Record<string, SerializedBlock> = {};
+  for (const item of queue) {
+    const root = linkStatementChain(item.remaining);
+    if (root) deferred[item.name] = root;
+  }
+  if (Object.keys(deferred).length) payload[DEFERRED_INPUTS_KEY] = deferred;
+  else delete payload[DEFERRED_INPUTS_KEY];
+  block.data = writeDeferredPayload(payload) ?? null;
+}
+
+function finishHydration(block: Blockly.Block, job: HydrationJob) {
+  if (job.cancelled) return;
+  hydrationJobs.delete(block);
+  const workspace = block.workspace;
+  if (workspace) hydratingWorkspaces.delete(workspace);
+  const svgWorkspace = workspace as Blockly.WorkspaceSvg | undefined;
+  svgWorkspace?.getInjectionDiv?.()?.classList.remove("blocklyHydrating");
+  if (!workspace || job.cancelled) return;
+  const event = new Blockly.Events.BlockChange(block, "collapsed", null, true, false);
+  event.recordUndo = false;
+  Blockly.Events.fire(event);
+}
+
+export function hydrateDeferredInputs(block: Blockly.Block, options?: { sync?: boolean }) {
+  const existingJob = hydrationJobs.get(block);
+  if (existingJob && !options?.sync) return false;
+  if (existingJob && options?.sync) existingJob.cancelled = true;
+  const payload = readDeferredPayload(block.data);
+  const deferred = payload[DEFERRED_INPUTS_KEY];
+  if (!deferred) return false;
+  const queue = Object.entries(deferred).map(([name, root]) => ({ name, remaining: splitStatementChain(root) }));
+  if (!queue.some((item) => item.remaining.length)) return false;
+  const job: HydrationJob = { cancelled: false };
+  hydrationJobs.set(block, job);
+  const workspace = block.workspace;
+  hydratingWorkspaces.add(workspace);
+  const svgWorkspace = workspace as Blockly.WorkspaceSvg;
+  svgWorkspace.getInjectionDiv?.()?.classList.add("blocklyHydrating");
+  const frameBudgetMs = options?.sync ? Number.POSITIVE_INFINITY : 7;
+  const runChunk = () => {
+    if (job.cancelled || !block.workspace) {
+      hydrationJobs.delete(block);
+      hydratingWorkspaces.delete(workspace);
+      svgWorkspace.getInjectionDiv?.()?.classList.remove("blocklyHydrating");
+      return;
+    }
+    const eventsWereEnabled = typeof Blockly.Events.isEnabled === "function" ? Blockly.Events.isEnabled() : true;
+    Blockly.Events.disable();
+    const canToggleResize = typeof svgWorkspace.setResizesEnabled === "function";
+    try {
+      if (canToggleResize) svgWorkspace.setResizesEnabled(false);
+      const deadline = performance.now() + frameBudgetMs;
+      for (const item of queue) {
+        while (item.remaining.length && performance.now() < deadline) {
+          appendSerializedStatement(block, item.name, item.remaining.shift()!);
+        }
+        if (performance.now() >= deadline) break;
+      }
+      persistHydrationQueue(block, queue);
+    } finally {
+      if (canToggleResize) svgWorkspace.setResizesEnabled(true);
+      if (eventsWereEnabled) Blockly.Events.enable();
+    }
+    if (queue.some((item) => item.remaining.length)) {
+      if (options?.sync) runChunk();
+      else requestAnimationFrame(runChunk);
+      return;
+    }
+    finishHydration(block, job);
+  };
+  if (options?.sync) runChunk();
+  else requestAnimationFrame(runChunk);
+  return true;
+}
+
+export function hydrateAllDeferredInputs(workspace: Blockly.Workspace) {
+  let hydrated = false;
+  for (const block of workspace.getAllBlocks(false)) {
+    if (hydrateDeferredInputs(block, { sync: true })) hydrated = true;
+  }
+  return hydrated;
+}
+
+export function installDeferredHydration(workspace: Blockly.Workspace) {
+  workspace.addChangeListener((event) => {
+    if (event.type === Blockly.Events.BLOCK_CHANGE) {
+      const change = event as Blockly.Events.BlockChange;
+      if (change.element !== "collapsed" || change.newValue !== false || !change.blockId) return;
+      const block = workspace.getBlockById(change.blockId);
+      if (block) hydrateDeferredInputs(block);
+      return;
+    }
+    if (event.type !== Blockly.Events.BLOCK_MOVE && event.type !== Blockly.Events.BLOCK_CREATE) return;
+    const blockId = (event as Blockly.Events.BlockCreate | Blockly.Events.BlockMove).blockId;
+    const block = blockId ? workspace.getBlockById(blockId) : null;
+    let current = block?.getParent() ?? null;
+    while (current) {
+      if (hydrateDeferredInputs(current)) break;
+      current = current.getParent();
+    }
+  });
+}
+
+export function saveWorkspaceState(workspace: Blockly.Workspace) {
+  const state = Blockly.serialization.workspaces.save(workspace) as object;
+  restoreDeferredIntoState(state);
+  return state;
+}
+
+function withRestoredWorkspace<T>(workspace: Blockly.Workspace, read: (workspace: Blockly.Workspace) => T) {
+  if (!workspaceHasDeferred(workspace)) return read(workspace);
+  const temp = new Blockly.Workspace();
+  try {
+    Blockly.serialization.workspaces.load(saveWorkspaceState(workspace), temp);
+    return read(temp);
+  } finally {
+    temp.dispose();
+  }
+}
+
 export function generateWorkspacePython(workspace: Blockly.Workspace): string {
-  return stripGeneratedVariableDeclarations(pythonGenerator.workspaceToCode(workspace));
+  return withRestoredWorkspace(workspace, (current) => stripGeneratedVariableDeclarations(pythonGenerator.workspaceToCode(current)));
+}
+
+export function loadWorkspaceFast(workspace: Blockly.Workspace, state: object, options?: { collapseIfBlocks?: number }) {
+  const eventsWereEnabled = typeof Blockly.Events.isEnabled === "function" ? Blockly.Events.isEnabled() : true;
+  Blockly.Events.disable();
+  const svgWorkspace = workspace as Blockly.WorkspaceSvg;
+  const canToggleResize = typeof svgWorkspace.setResizesEnabled === "function";
+  try {
+    if (canToggleResize) svgWorkspace.setResizesEnabled(false);
+    const nextState = structuredClone(state) as object;
+    const collapseAt = options?.collapseIfBlocks ?? 80;
+    if (collapseAt > 0 && countSerializedBlocks(nextState) >= collapseAt) deferHeavyStatementInputs(nextState);
+    else if (collapseAt > 0) markHeavyStacksCollapsed(nextState);
+    Blockly.serialization.workspaces.load(nextState, workspace);
+    if (workspace.getAllBlocks(false).length >= collapseAt) collapseHeavyStatementBlocks(workspace);
+  } finally {
+    if (canToggleResize) svgWorkspace.setResizesEnabled(true);
+    if (eventsWereEnabled) Blockly.Events.enable();
+  }
 }
 
 export type GeneratedBlockMap = { code: string; blockIdByLine: Map<number, string> };
@@ -1499,26 +1842,29 @@ export function generateWorkspacePythonWithBlockMap(workspace: Blockly.Workspace
   const previousPrefix = pythonGenerator.STATEMENT_PREFIX;
   pythonGenerator.STATEMENT_PREFIX = "# __visual_python_block_%1__\n";
   try {
-    const code = stripGeneratedVariableDeclarations(pythonGenerator.workspaceToCode(workspace));
-    const blockIdByLine = new Map<number, string>();
-    let currentBlockId = "";
-    code.split("\n").forEach((line, index) => {
-      const marker = line.match(/# __visual_python_block_(.+?)__\s*$/);
-      if (marker) {
-        const encodedId = marker[1];
-        currentBlockId = encodedId.length >= 2 && encodedId[0] === encodedId.at(-1) && (encodedId[0] === "'" || encodedId[0] === '"')
-          ? encodedId.slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, "\\")
-          : encodedId;
-      }
-      if (currentBlockId) blockIdByLine.set(index + 1, currentBlockId);
+    return withRestoredWorkspace(workspace, (current) => {
+      const code = stripGeneratedVariableDeclarations(pythonGenerator.workspaceToCode(current));
+      const blockIdByLine = new Map<number, string>();
+      let currentBlockId = "";
+      code.split("\n").forEach((line, index) => {
+        const marker = line.match(/# __visual_python_block_(.+?)__\s*$/);
+        if (marker) {
+          const encodedId = marker[1];
+          currentBlockId = encodedId.length >= 2 && encodedId[0] === encodedId.at(-1) && (encodedId[0] === "'" || encodedId[0] === '"')
+            ? encodedId.slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, "\\")
+            : encodedId;
+        }
+        if (currentBlockId) blockIdByLine.set(index + 1, currentBlockId);
+      });
+      return { code, blockIdByLine };
     });
-    return { code, blockIdByLine };
   } finally {
     pythonGenerator.STATEMENT_PREFIX = previousPrefix;
   }
 }
 
 export function findWorkspaceBlockCodeRange(workspace: Blockly.Workspace, blockId: string): BlockCodeRange | null {
+  if (!workspace.getBlockById(blockId)) hydrateAllDeferredInputs(workspace);
   let candidate = workspace.getBlockById(blockId);
   if (!candidate) return null;
   const generated = generateWorkspacePythonWithBlockMap(workspace);

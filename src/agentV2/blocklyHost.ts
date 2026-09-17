@@ -3,6 +3,7 @@ import type { AgentHost } from "./types";
 import type { AiChatToolDefinition } from "../aiConfig";
 import type { AgentTool } from "./types";
 import type { WorkspaceMode } from "../workspaceMode";
+import { hydrateAllDeferredInputs, saveWorkspaceState } from "../pythonBlocks";
 
 export type BlockInputSlot = {
   name: string;
@@ -64,7 +65,7 @@ const blockSummary = (block: Blockly.Block) => ({
   nextId: block.getNextBlock()?.id ?? null,
 });
 
-const workspaceState = (workspace: Blockly.Workspace) => Blockly.serialization.workspaces.save(workspace) as object;
+const workspaceState = (workspace: Blockly.Workspace) => saveWorkspaceState(workspace);
 
 export function describeBlocklyBlockInputs(type: string): BlockInputSlot[] {
   const previewWorkspace = new Blockly.Workspace();
@@ -117,6 +118,7 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
     if (signal.aborted) throw new Error("已停止生成");
 
     if (name === "get_workspace") {
+      hydrateAllDeferredInputs(services.workspace);
       const blocks = services.workspace.getAllBlocks(false);
       const selectedBlockId = services.selectedBlockId();
       return {
@@ -149,6 +151,7 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
     }
 
     if (name === "add_workspace_block") {
+      hydrateAllDeferredInputs(services.workspace);
       const blockValue = args.block;
       if (!blockValue || typeof blockValue !== "object" || Array.isArray(blockValue)) throw new Error("block 必须是单个 Blockly 积木状态对象");
       const blockState = structuredClone(blockValue) as Blockly.serialization.blocks.State;
