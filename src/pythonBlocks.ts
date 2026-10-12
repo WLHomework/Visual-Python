@@ -135,6 +135,7 @@ Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
   { type: "python_import", message0: "导入模块 %1", args0: [{ type: "field_input", name: "MODULE", text: "math" }], previousStatement: null, nextStatement: null, colour: colours.module },
   { type: "python_from_import", message0: "从 %1 导入 %2", args0: [{ type: "field_input", name: "MODULE", text: "math" }, { type: "field_input", name: "NAME", text: "sqrt" }], previousStatement: null, nextStatement: null, colour: colours.module },
   { type: "python_raw_expression", message0: "Python 表达式 %1", args0: [{ type: "field_input", name: "CODE", text: "len(items)" }], output: null, colour: colours.module },
+  { type: "python_raw_statement", message0: "Python 语句 %1", args0: [{ type: "field_input", name: "CODE", text: "pass" }], previousStatement: null, nextStatement: null, colour: colours.module, tooltip: "直接写入一条 Python 语句。无法用其他积木表达时使用。" },
   { type: "python_floor_divide", message0: "%1 整除 %2", args0: [{ type: "input_value", name: "A", check: "Number" }, { type: "input_value", name: "B", check: "Number" }], inputsInline: true, output: "Number", colour: "#4f72b8" },
   { type: "python_bitwise", message0: "%1 %2 %3", args0: [{ type: "input_value", name: "A", check: "Number" }, { type: "field_dropdown", name: "OP", options: [["按位与", "&"], ["按位或", "|"], ["按位异或", "^"], ["左移", "<<"], ["右移", ">>"]] }, { type: "input_value", name: "B", check: "Number" }], inputsInline: true, output: "Number", colour: "#4f72b8" },
   { type: "python_bitwise_not", message0: "按位取反 ~ %1", args0: [{ type: "input_value", name: "VALUE", check: "Number" }], output: "Number", colour: "#4f72b8" },
@@ -884,6 +885,11 @@ const safeParameters = (input: string) => input.split(",").map((part) => part.tr
 const safeAnnotation = (input: string, fallback = "object") => isPythonAnnotation(input) ? String(input).trim().normalize("NFKC") : fallback;
 const suite = (generator: typeof pythonGenerator, block: Blockly.Block, name: string) => generator.statementToCode(block, name) || `${generator.INDENT}pass\n`;
 
+pythonGenerator.forBlock.python_raw_expression = (block) => [String(block.getFieldValue("CODE") || "None"), Order.ATOMIC];
+pythonGenerator.forBlock.python_raw_statement = (block) => {
+  const code = String(block.getFieldValue("CODE") || "pass").trim();
+  return `${code}${code.endsWith("\n") ? "" : "\n"}`;
+};
 pythonGenerator.forBlock.python_print = (block, generator) => `print(${value(generator, block, "VALUE", "''")})\n`;
 pythonGenerator.forBlock.python_print_many = (block, generator) => {
   const count = Math.max(1, (block as Blockly.Block & { itemCount_?: number }).itemCount_ ?? 2);
@@ -1654,7 +1660,7 @@ function splitStatementChain(root: SerializedBlock) {
   const parts: SerializedBlock[] = [];
   let current: SerializedBlock | undefined = root;
   while (current) {
-    const next = current.next?.block;
+    const next: SerializedBlock | undefined = current.next?.block;
     const part: SerializedBlock = { ...current };
     delete part.next;
     parts.push(part);
@@ -1675,7 +1681,7 @@ function linkStatementChain(parts: SerializedBlock[]) {
 }
 
 function appendSerializedStatement(parent: Blockly.Block, inputName: string, state: SerializedBlock) {
-  const child = Blockly.serialization.blocks.append(state, parent.workspace, { recordUndo: false });
+  const child = Blockly.serialization.blocks.append(state as unknown as Blockly.serialization.blocks.State, parent.workspace, { recordUndo: false });
   const input = parent.getInput(inputName);
   if (!input?.connection) return child;
   const existing = input.connection.targetBlock();

@@ -46,7 +46,7 @@ describe("Visual Python Agent Core", () => {
 
   it("exposes permission-gated plugin authoring tools in the core set", () => {
     const names = coreAgentTools.map((tool) => tool.definition.function.name);
-    expect(names).toEqual(expect.arrayContaining(["list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft_file", "create_plugin_draft", "update_plugin_draft", "validate_plugin_draft", "install_plugin_draft"]));
+    expect(names).toEqual(expect.arrayContaining(["inspect_plugin_api", "create_plugin_plan", "list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft_file", "create_plugin_draft", "update_plugin_draft", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"]));
     expect(requiresPermission("install_plugin_draft")).toBe(true);
     expect(coreAgentTools.find((tool) => tool.definition.function.name === "install_plugin_draft")).toMatchObject({ requiresPermission: true, changesState: true });
   });
@@ -92,12 +92,15 @@ describe("Visual Python Agent Core", () => {
   it("teaches the model the plugin authoring workflow", async () => {
     mocks.streamAiChat.mockImplementationOnce(async (messages) => {
       const system = (messages as AiChatMessage[]).find((message) => message.role === "system")?.content || "";
-      expect(system).toContain("create_plugin_draft");
+    expect(system).toContain("inspect_plugin_api");
+    expect(system).toContain("create_plugin_plan");
+    expect(system).toContain("create_plugin_draft");
       expect(system).toContain("list_installed_plugins");
       expect(system).toContain("import_installed_plugin_draft");
       expect(system).toContain("read_plugin_draft_file");
       expect(system).toContain("update_plugin_draft");
       expect(system).toContain("validate_plugin_draft");
+    expect(system).toContain("run_plugin_draft_checks");
       expect(system).toContain("install_plugin_draft");
       expect(system).toContain("不要把插件代码写入当前普通 Python 文档");
       expect(system).toContain("只有用户明确确认安装");

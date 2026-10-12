@@ -829,10 +829,10 @@ export function removeFinalMessageActivity(activities: AiAgentActivity[], summar
 
 function agentToolCategory(toolName?: AiAgentToolName | "inspect_rendered_video"): AgentToolCategory {
   if (!toolName) return "other";
-  if (["get_context", "list_scenes", "get_scene", "list_resources", "get_resource", "get_voiceover_context", "inspect_python_structure"].includes(toolName)) return "explore";
-  if (["create_document", "switch_document", "rename_document", "delete_document", "create_scene", "switch_scene", "rename_scene", "delete_scene", "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "add_voiceover", "add_synchronized_voiceover", "format_code", "undo_code", "redo_code"].includes(toolName)) return "edit";
-  if (["validate_scene", "check_resources", "check_dependencies", "check_voiceover", "check_code", "inspect_rendered_output", "inspect_rendered_video"].includes(toolName)) return "verify";
-  if (["run_project", "render_manim", "get_execution_state", "wait", "stop_execution"].includes(toolName)) return "execute";
+  if (["get_context", "list_scenes", "get_scene", "list_resources", "get_resource", "get_voiceover_context", "inspect_python_structure", "inspect_plugin_api", "list_installed_plugins", "read_plugin_draft_file"].includes(toolName)) return "explore";
+  if (["create_document", "switch_document", "rename_document", "delete_document", "create_scene", "switch_scene", "rename_scene", "delete_scene", "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "add_voiceover", "add_synchronized_voiceover", "format_code", "undo_code", "redo_code", "create_plugin_plan", "create_plugin_draft", "update_plugin_draft", "import_installed_plugin_draft"].includes(toolName)) return "edit";
+  if (["validate_scene", "check_resources", "check_dependencies", "check_voiceover", "check_code", "inspect_rendered_output", "inspect_rendered_video", "validate_plugin_draft", "run_plugin_draft_checks"].includes(toolName)) return "verify";
+  if (["run_project", "render_manim", "get_execution_state", "wait", "stop_execution", "install_plugin_draft"].includes(toolName)) return "execute";
   return "other";
 }
 
@@ -1023,6 +1023,33 @@ function structuredAgentMessage(value: unknown): string | null {
   return structuredAgentMessage(record.message) || structuredAgentMessage(record.error);
 }
 
+const pluginWorkflowLabels: Record<string, string> = {
+  create_plugin_plan: "\u63d2\u4ef6\u8ba1\u5212\u5df2\u5efa\u7acb",
+  create_plugin_draft: "\u63d2\u4ef6\u8349\u7a3f\u5df2\u521b\u5efa",
+  update_plugin_draft: "\u63d2\u4ef6\u8349\u7a3f\u5df2\u66f4\u65b0",
+  validate_plugin_draft: "\u63d2\u4ef6\u9759\u6001\u68c0\u67e5\u901a\u8fc7",
+  run_plugin_draft_checks: "\u63d2\u4ef6\u8fd0\u884c\u68c0\u67e5\u901a\u8fc7",
+  install_plugin_draft: "\u63d2\u4ef6\u5df2\u5b89\u88c5\u5e76\u542f\u7528",
+};
+
+function formatPluginWorkflowResult(toolName: string | undefined, parsed: Record<string, unknown>): string | null {
+  if (!toolName || !Object.prototype.hasOwnProperty.call(pluginWorkflowLabels, toolName)) return null;
+  const validation = parsed.validation && typeof parsed.validation === "object" && !Array.isArray(parsed.validation)
+    ? parsed.validation as Record<string, unknown>
+    : undefined;
+  const valid = parsed.valid === true || validation?.valid === true;
+  if (parsed.installed === true) return pluginWorkflowLabels.install_plugin_draft;
+  if (parsed.planned === true) return pluginWorkflowLabels.create_plugin_plan;
+  if (parsed.created === true) return pluginWorkflowLabels.create_plugin_draft;
+  if (parsed.updated === true) return pluginWorkflowLabels.update_plugin_draft;
+  if (valid) return pluginWorkflowLabels[toolName];
+  const issueSource = Array.isArray(parsed.issues) ? parsed.issues : Array.isArray(validation?.issues) ? validation.issues : [];
+  const issues = issueSource
+    .map(structuredAgentMessage).filter((item): item is string => Boolean(item));
+  if (issues.length) return issues.join("\n");
+  return null;
+}
+
 export function formatAgentRunError(value: string): string {
   const text = value.trim();
   if (/assistant message with ['"]tool_calls['"].*followed by tool messages/i.test(text)) return "模型返回的工具调用响应不完整，请重试。";
@@ -1052,6 +1079,8 @@ export function formatAgentToolResult(activity: AiAgentActivity): string | null 
     return stripManagedAudioMetadataForDisplay(parsed.diff).trim() || null;
   }
   if (!parsed) return sanitizeAgentDisplayText(raw);
+  const pluginResult = formatPluginWorkflowResult(activity.toolName, parsed);
+  if (pluginResult) return pluginResult;
   if (activity.toolName === "check_dependencies") {
     const missing = Array.isArray(parsed.missing)
       ? parsed.missing.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
@@ -1178,7 +1207,7 @@ export const AgentActivityRow = memo(function AgentActivityRow({ activity, onRev
   if (activity.channel === "decision" || activity.channel === "observation" || activity.channel === "verification" || activity.channel === "question") return <div className={`ai-agent-event ${activity.channel} ${activity.status}`}>
     <div className="ai-agent-event-header"><strong>{activity.channel === "question" ? "需要你的选择" : activity.title}</strong>{activity.status === "running" && <LoaderCircle className="spin" size={13}/>}</div>
     {activity.title && activity.channel === "question" ? <MarkdownContent>{activity.title}</MarkdownContent> : null}
-    {(failure || (activity.status !== "error" && sanitizeAgentDisplayText(activity.detail))) && <small>{failure || sanitizeAgentDisplayText(activity.detail)}</small>}
+    {(failure || (activity.status !== "error" && sanitizeAgentDisplayText(activity.detail))) && <small title={failure || sanitizeAgentDisplayText(activity.detail) || undefined}>{failure || sanitizeAgentDisplayText(activity.detail)}</small>}
   </div>;
   if (activity.kind === "message") {
     const messageText = activityDisplayText(activity);
@@ -1192,7 +1221,7 @@ export const AgentActivityRow = memo(function AgentActivityRow({ activity, onRev
   const displayResult = formatAgentToolResult(activity);
   if (activity.status === "error") {
     const denied = failure === "已取消";
-    return <div className={`ai-agent-tool-line ${denied ? "denied" : "error"}`}><strong>{activity.title}</strong><small>{failure}</small></div>;
+    return <div className={`ai-agent-tool-line ${denied ? "denied" : "error"}`} title={[activity.title, failure].filter(Boolean).join("\n")}><strong>{activity.title}</strong><small>{failure}</small></div>;
   }
   if (!displayResult) return <div className={`ai-agent-tool-line ${activity.status}`}>
     {activity.status === "running" && <LoaderCircle className="spin" size={13}/>}<strong>{activity.title}</strong>
@@ -1735,7 +1764,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
           </div>}
           {run.status === "queued" && <div className="ai-agent-run-state queued"><Clock3 size={14}/><span>等待当前任务完成</span><span className="ai-agent-queued-actions"><button disabled={running} title="立即执行" aria-label="立即执行排队任务" onClick={() => startQueuedRun(run)}><Play size={13}/></button><button title="移出队列" aria-label="移出任务队列" onClick={() => removeQueuedRun(run.id)}><X size={14}/></button></span></div>}
           {run.status === "stopped" && <div className="ai-agent-run-state stopped"><Square size={12}/><span>已停止{run.startedAt ? ` · ${formatAgentElapsed(run.startedAt, run.finishedAt)}` : ""}</span><span className="ai-run-failure-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])} onClick={() => resumeRun(run)}><Play size={13}/></button> : <button className="ai-run-retry" disabled={running} title="重新执行此任务" aria-label="重新执行此任务" onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)}><RefreshCw size={13}/></button>}</span></div>}
-          {run.error && <div className="ai-agent-error"><span className="ai-agent-error-content"><strong>任务未完成</strong><span>{formatAgentRunError(run.error)}</span>{run.startedAt ? <small>{formatAgentElapsed(run.startedAt, run.finishedAt)}</small> : null}</span><span className="ai-agent-error-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} onClick={() => resumeRun(run)} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])}><Play size={14}/></button> : <button disabled={running} onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)} title="重新执行此任务" aria-label="重新执行此任务"><RefreshCw size={15}/></button>}<button onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={15}/></button></span></div>}
+          {run.error && <div className="ai-agent-error"><span className="ai-agent-error-content"><strong>任务未完成</strong><span title={run.error}>{formatAgentRunError(run.error)}</span>{run.startedAt ? <small>{formatAgentElapsed(run.startedAt, run.finishedAt)}</small> : null}</span><span className="ai-agent-error-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} onClick={() => resumeRun(run)} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])}><Play size={14}/></button> : <button disabled={running} onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)} title="重新执行此任务" aria-label="重新执行此任务"><RefreshCw size={15}/></button>}<button onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={15}/></button></span></div>}
         </article>)}
         {runs.length > 0 && shouldShowAiFollowUpSuggestions(runs) && !runs.at(-1)?.result?.clarification && <div className="ai-agent-followups"><AiAssistantSuggestionButtons onSelect={selectSuggestion} suggestions={getAiFollowUpSuggestions(runs.at(-1)!, contextName)} className="followups"/></div>}
         </div>

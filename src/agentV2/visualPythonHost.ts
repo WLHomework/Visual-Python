@@ -5,7 +5,7 @@ import { parsePythonSyntaxDiagnostic, type PythonCodeDiagnostic } from "../pytho
 import { createCodeDocument, renameCodeDocument, type CodeDocument } from "../sceneDocuments";
 import { projectResourceReference, resolveProjectResourceReference, type ProjectResource } from "../projectResources";
 import { applyExactCodeEdits, createCodeChangePreview } from "./codeChanges";
-import { pluginDraftSummary, validatePluginDraft, type PluginDraft, type PluginDraftFiles, type PluginDraftStore } from "./pluginAuthoring";
+import { pluginAuthoringContract, pluginDraftSummary, validatePluginDraft, type PluginDraft, type PluginDraftFiles, type PluginDraftStore, type PluginRuntimeValidation } from "./pluginAuthoring";
 import type { AgentCapability, AgentHost, AiCodeEdit } from "./types";
 
 type Ref<T> = { current: T };
@@ -66,6 +66,7 @@ export type VisualPythonHostServices = {
   pluginDraftStore?: PluginDraftStore;
   listInstalledPlugins?: () => Promise<InstalledPluginSummary[]>;
   readInstalledPluginFiles?: (pluginId: string) => Promise<PluginDraftFiles>;
+  runPluginDraftChecks?: (draft: PluginDraft, signal: AbortSignal) => Promise<PluginRuntimeValidation>;
   installPluginDraft?: (draft: PluginDraft, signal: AbortSignal) => Promise<Record<string, unknown>>;
   assertActive: (signal: AbortSignal) => void;
   agentCapabilities?: AgentCapability[];
@@ -164,9 +165,22 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
 
   return async (name, args, signal) => {
     if (signal.aborted) throw new Error("已停止生成");
-    if (["list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft_file", "create_plugin_draft", "update_plugin_draft", "validate_plugin_draft", "install_plugin_draft"].includes(name)) {
+    if (["inspect_plugin_api", "create_plugin_plan", "list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft_file", "create_plugin_draft", "update_plugin_draft", "edit_plugin_draft_file", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"].includes(name)) {
+      if (name === "inspect_plugin_api") return { contract: pluginAuthoringContract };
       const store = services.pluginDraftStore;
       if (!store) throw new Error("插件草稿服务尚未就绪");
+      if (name === "create_plugin_plan") {
+        const plan = store.createPlan({
+          id: checkedString(args, "id"),
+          name: checkedString(args, "name"),
+          description: checkedString(args, "description"),
+          ...(args.kind === "extension" ? { kind: "extension" as const } : {}),
+          ...(Array.isArray(args.files) ? { files: args.files.filter((item): item is { path: string; purpose: string } => Boolean(item && typeof item === "object" && typeof (item as Record<string, unknown>).path === "string" && typeof (item as Record<string, unknown>).purpose === "string")) } : {}),
+          ...(Array.isArray(args.blocks) ? { blocks: args.blocks.filter((item): item is { type: string; purpose: string; inputs: string[]; output?: string; statementInput?: string } => Boolean(item && typeof item === "object" && typeof (item as Record<string, unknown>).type === "string" && typeof (item as Record<string, unknown>).purpose === "string" && Array.isArray((item as Record<string, unknown>).inputs))) } : {}),
+          ...(Array.isArray(args.dependencies) ? { dependencies: args.dependencies.filter((item): item is string => typeof item === "string") } : {}),
+        });
+        return { planned: true, ...plan };
+      }
       if (name === "list_installed_plugins") {
         if (!services.listInstalledPlugins) throw new Error("已安装插件查询服务尚未就绪");
         return { plugins: await services.listInstalledPlugins() };
@@ -185,6 +199,7 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
           name: checkedString(args, "name"),
           description: checkedString(args, "description"),
           ...(typeof args.version === "string" && args.version.trim() ? { version: args.version.trim() } : {}),
+          ...(typeof args.planId === "string" && args.planId.trim() ? { planId: args.planId.trim() } : {}),
           ...(args.files !== undefined ? { files: checkedDraftFiles(args) } : {}),
         });
         return { created: true, ...pluginDraftSummary(draft, pluginValidationContext()), files: draft.files };
@@ -214,11 +229,38 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
         const updated = store.update(draftId, checkedDraftFiles(args));
         return { updated: true, ...pluginDraftSummary(updated, pluginValidationContext()), files: updated.files };
       }
+      if (name === "edit_plugin_draft_file") {
+        const updated = store.editFile(
+          draftId,
+          checkedString(args, "path"),
+          checkedString(args, "oldText"),
+          checkedString(args, "newText", true),
+          args.replaceAll === true,
+        );
+        return { edited: true, ...pluginDraftSummary(updated, pluginValidationContext()), files: updated.files };
+      }
       const validation = validatePluginDraft(draft, pluginValidationContext());
-      if (name === "validate_plugin_draft") return { ...pluginDraftSummary(draft, pluginValidationContext()), validation };
-      if (!validation.valid) return { installed: false, ...pluginDraftSummary(draft, pluginValidationContext()), validation };
+      if (name === "validate_plugin_draft") {
+        const validated = store.markValidation(draft.id, validation);
+        return { ...pluginDraftSummary(validated, pluginValidationContext()), validation };
+      }
+      if (name === "run_plugin_draft_checks") {
+        const validated = store.markValidation(draft.id, validation);
+        if (!validation.valid) return { ...pluginDraftSummary(validated, pluginValidationContext()), runtimeValidation: { valid: false, checks: [], issues: validation.issues } };
+        if (!services.runPluginDraftChecks) throw new Error("插件运行检查服务尚未就绪");
+        const runtimeValidation = await services.runPluginDraftChecks(validated, signal);
+        const checked = store.markRuntimeValidation(draft.id, runtimeValidation);
+        return { ...pluginDraftSummary(checked, pluginValidationContext()), ...runtimeValidation, runtimeValidation };
+      }
+      const validated = store.markValidation(draft.id, validation);
+      if (!validation.valid) return { installed: false, ...pluginDraftSummary(validated, pluginValidationContext()), validation };
+      if (validated.phase !== "ready" || validated.runtimeValidation?.valid !== true) {
+        return { installed: false, ...pluginDraftSummary(validated, pluginValidationContext()), validation, error: "插件必须先通过运行检查" };
+      }
       if (!services.installPluginDraft) throw new Error("插件安装服务尚未就绪");
-      return { installed: true, ...await services.installPluginDraft(draft, signal), capabilities: getAgentCapabilities(), validation };
+      const installed = await services.installPluginDraft(draft, signal);
+      const marked = store.markInstalled(draft.id);
+      return { installed: true, ...installed, ...pluginDraftSummary(marked, pluginValidationContext()), capabilities: getAgentCapabilities(), validation };
     }
     const codeOnly = new Set(["list_documents", "get_document", "switch_document", "create_document", "rename_document", "delete_document", "inspect_python_structure", "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "check_code", "format_code", "undo_code", "redo_code"]);
     if (codeOnly.has(name) && services.workspaceModeRef.current !== "code") throw new Error("当前工具只适用于纯代码工作区");

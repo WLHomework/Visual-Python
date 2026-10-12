@@ -16,6 +16,7 @@ import { createVisualPythonHostAdapter } from "./agentV2/hostAdapter";
 import type { AgentActivityEvent, AgentTokenUsage, AiAgentActivity, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
 import { blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockInputs } from "./agentV2/blocklyHost";
 import { createPluginDraftStore, validatePluginDraft, type PluginDraft } from "./agentV2/pluginAuthoring";
+import { restoreInstalledPluginFiles, restorePluginAfterFailure } from "./agentV2/pluginRuntime";
 import { runAgentWithProtocolFallback } from "./codexAgentRunner";
 import type { AiAgentPermissionMode, AiReasoningEffort } from "./aiConfig";
 import { createAiConversationScope } from "./aiConversationContext";
@@ -34,6 +35,7 @@ import type { ExampleProject } from "./examples/types";
 import { ensureProjectPlugins, getActiveAgentCapabilities, getPluginEnabledPreference, isCorePlugin, pluginRegistry, setPluginEnabled } from "./plugins";
 import type { ExternalPluginDiscovery, ExternalPluginDiscoveryResponse, ExternalPluginEntry, PluginRecord, VisualPythonPlugin } from "./plugins/api/types";
 import { validatePluginGeneratedPython } from "./plugins/core/pluginGeneratedCodeValidation";
+import { PluginRegistry } from "./plugins/core/pluginRegistry";
 import { getManimRenderConfig, setManimRenderConfig, subscribeManimRenderConfig, type ManimRenderConfig } from "./plugins/builtin/manim/renderConfig";
 import { createManimCapabilityExecutor } from "./plugins/builtin/manim/agentRuntime";
 import { manimPlugin } from "./plugins/builtin/manim";
@@ -3460,6 +3462,9 @@ export default function App() {
       return true;
     } catch (error) {
       const message = `外部插件加载失败：${String(error)}`;
+      if (pluginId && pluginRegistry.getRecord(pluginId)) {
+        try { await pluginRegistry.unregister(pluginId); } catch { /* Keep the original load error visible. */ }
+      }
       setExternalPluginErrors((current) => ({ ...current, [pluginId]: String(error) }));
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
       if (!options.silent) openConsolePanel("output");
@@ -5225,6 +5230,79 @@ export default function App() {
             });
           },
           readInstalledPluginFiles: (pluginId: string) => invoke<Record<string, string>>("read_external_plugin_files", { pluginId }),
+          runPluginDraftChecks: async (draft: PluginDraft, draftSignal: AbortSignal) => {
+            const validation = validatePluginDraft(draft, {
+              availableCapabilities: getActiveAgentCapabilities().map((capability) => ({ id: capability.id, ...capability.codegen })),
+            });
+            if (!validation.valid || !validation.manifest?.entry) {
+              return { valid: false, checks: [], issues: validation.issues };
+            }
+            if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
+            const source = draft.files[validation.manifest.entry];
+            if (typeof source !== "string") return { valid: false, checks: ["manifest"], issues: ["鎵句笉鍒版彃浠跺叆鍙ｆ枃浠?"] };
+            const runtimeRegistry = new PluginRegistry();
+            const pluginId = validation.manifest.id;
+            const existingPlugin = pluginRegistry.getRecord(pluginId)?.state === "active" ? pluginRegistry.getRecord(pluginId)?.plugin : undefined;
+            if (pluginRegistry.getRecord(pluginId)?.state === "loading") return { valid: false, checks: ["manifest"], issues: [`鎻掍欢 ${pluginId} 姝ｅ湪鍔犺浇锛岃绋嶅悗閲嶈瘯`] };
+            if (existingPlugin) await pluginRegistry.unregister(pluginId);
+            if (pluginRegistry.getRecord(pluginId)) {
+              return { valid: false, checks: ["manifest"], issues: [`鎻掍欢 ${pluginId} 宸插湪褰撳墠浼氳瘽涓瓨鍦紝璇峰厛鍋滅敤鎴栨洿鎹㈡彃浠跺悕绉?`] };
+            }
+            let objectUrl: string | undefined;
+            let failedCheck = "entry_import";
+            try {
+              if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
+              objectUrl = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+              const module = await import(/* @vite-ignore */ objectUrl) as Record<string, unknown>;
+              if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
+              const exported = module.default ?? module.plugin ?? module;
+              if (!exported || typeof exported !== "object" || typeof (exported as { activate?: unknown }).activate !== "function") {
+                return { valid: false, checks: ["entry_activation"], issues: ["鎻掍欢鍏ュ彛蹇呴』瀵煎嚭 activate(context)"] };
+              }
+              runtimeRegistry.register({
+                manifest: validation.manifest,
+                activate: (context) => (exported as { activate: (context: unknown) => void | Promise<void> }).activate(context),
+                deactivate: typeof (exported as { deactivate?: unknown }).deactivate === "function"
+                  ? () => (exported as { deactivate: () => void | Promise<void> }).deactivate()
+                  : undefined,
+              });
+              failedCheck = "activation";
+              await runtimeRegistry.activate(pluginId);
+              const record = runtimeRegistry.getRecord(pluginId);
+              if (record?.state !== "active") return { valid: false, checks: ["entry_activation"], issues: [record?.error || "plugin activation failed"] };
+              /*
+              if (record?.state !== "active") return { valid: false, checks: ["entry_activation"], issues: [record?.error || "鎻掍欢婵€娲诲け璐?] };
+              */
+              if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
+              failedCheck = "python_syntax";
+              const samples = runtimeRegistry.generatePythonSamples(pluginId);
+              await validatePluginGeneratedPython(samples, async (candidate) => {
+                if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
+                await invoke("validate_python_code", { code: candidate, pythonPath: pythonEnvironment?.path || null });
+              });
+              return { valid: true, checks: ["activation", "toolbox", "block_samples", "python_syntax"] };
+            } catch (error) {
+              if (draftSignal.aborted) throw error;
+              return { valid: false, checks: [failedCheck], issues: [String(error)] };
+            } finally {
+              if (runtimeRegistry.getRecord(pluginId)) await runtimeRegistry.unregister(pluginId);
+              if (objectUrl) URL.revokeObjectURL(objectUrl);
+              if (existingPlugin) {
+                try {
+                  await restorePluginAfterFailure({
+                    pluginId,
+                    previousPlugin: existingPlugin,
+                    previousWasActive: true,
+                    hasCurrentPlugin: () => Boolean(pluginRegistry.getRecord(pluginId)),
+                    register: (plugin) => pluginRegistry.register(plugin),
+                    activate: (id) => pluginRegistry.activate(id),
+                  });
+                } catch (error) {
+                  setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `鎭㈠鎻掍欢澶辫触锛?{String(error)}\n` }]);
+                }
+              }
+            }
+          },
           installPluginDraft: async (draft: PluginDraft, draftSignal: AbortSignal) => {
             if (draftSignal.aborted) throw new Error("已停止生成");
             const draftValidation = validatePluginDraft(draft, {
@@ -5233,15 +5311,58 @@ export default function App() {
             const draftPluginId = draftValidation.manifest?.id;
             if (!draftValidation.valid || !draftPluginId) throw new Error(`插件草稿验证失败：${draftValidation.issues.join("；")}`);
             if (isCorePlugin(draftPluginId)) throw new Error(`插件 ID 与内置插件冲突：${draftPluginId}`);
+            const previousRecord = pluginRegistry.getRecord(draftPluginId);
+            const previousPlugin = previousRecord?.plugin;
+            const previousWasActive = previousRecord?.state === "active";
+            let previousFiles: Record<string, string> | undefined;
+            try {
+              previousFiles = await invoke<Record<string, string>>("read_external_plugin_files", { pluginId: draftPluginId });
+            } catch (error) {
+              if (previousRecord) throw new Error(`Cannot snapshot existing plugin files: ${String(error)}`);
+            }
             const discovery = await invoke<ExternalPluginDiscovery>("install_external_plugin_draft", { files: draft.files });
-            await discoverExternalPlugins();
             const pluginId = discovery.manifest?.id;
+            const restorePreviousPlugin = async () => {
+              if (!pluginId) return;
+              await restoreInstalledPluginFiles({
+                path: discovery.path,
+                previousFiles,
+                install: async (files) => { await invoke("install_external_plugin_draft", { files }); },
+                remove: async (path) => { await invoke("delete_external_plugin", { pluginPath: path }); },
+              });
+              await discoverExternalPlugins();
+              await restorePluginAfterFailure({
+                pluginId,
+                previousPlugin,
+                previousWasActive,
+                hasCurrentPlugin: () => Boolean(pluginRegistry.getRecord(pluginId)),
+                register: (plugin) => pluginRegistry.register(plugin),
+                activate: (id) => pluginRegistry.activate(id),
+              });
+            };
+            if (draftSignal.aborted) {
+              await restorePreviousPlugin();
+              throw new Error("宸插仠姝㈢敓鎴?");
+            }
             if (!pluginId) throw new Error("插件安装结果缺少插件 ID");
-            if (pluginId && pluginRegistry.getRecord(pluginId)) {
-              await setPluginEnabled(pluginId, false);
-              await pluginRegistry.unregister(pluginId);
+            if (pluginId && previousRecord) {
+              if (pluginRegistry.getRecord(pluginId)) {
+                await setPluginEnabled(pluginId, false);
+                await pluginRegistry.unregister(pluginId);
+              }
+            }
+            if (draftSignal.aborted) {
+              await restorePreviousPlugin();
+              throw new Error("宸插仠姝㈢敓鎴?");
             }
             const activated = await loadExternalPlugin(discovery, { promptForTrust: false, trustConfirmed: true });
+            if (!activated) {
+              if (pluginRegistry.getRecord(pluginId)) {
+                await setPluginEnabled(pluginId, false);
+                await pluginRegistry.unregister(pluginId);
+              }
+              await restorePreviousPlugin();
+            }
             if (!activated) throw new Error("插件已安装，但未能启用");
             try {
               await validatePluginGeneratedPython(
@@ -5249,8 +5370,11 @@ export default function App() {
                 (candidate) => invoke("validate_python_code", { code: candidate, pythonPath: pythonEnvironment?.path || null }),
               );
             } catch (error) {
-              await setPluginEnabled(pluginId, false);
-              await pluginRegistry.unregister(pluginId);
+              if (pluginRegistry.getRecord(pluginId)) {
+                await setPluginEnabled(pluginId, false);
+                await pluginRegistry.unregister(pluginId);
+              }
+              await restorePreviousPlugin();
               throw new Error(`插件生成的 Python 校验失败，已停用插件：${String(error)}`);
             }
             return { pluginId, name: discovery.manifest?.name, path: discovery.path, active: true };
@@ -5797,8 +5921,8 @@ export default function App() {
         <div className="project-menu-category recent-projects-category"><button aria-haspopup="menu"><FileCode2 size={15}/><span>最近工程</span><ChevronRight size={14}/></button><div className="project-menu project-submenu recent-projects-menu" role="menu" aria-label="最近工程">{recentProjects.length > 0 ? recentProjects.map((item) => <button className="recent-project" role="menuitem" key={item.path} title={item.path} onClick={() => { setProjectMenuOpen(false); void loadProject(item.path); }}><FileCode2 size={15}/><span><strong>{item.name}</strong><small>{item.path}</small></span></button>) : <button className="recent-project-empty" role="menuitem" disabled><FileCode2 size={15}/><span>暂无最近工程</span></button>}</div></div>
       </div>}</div><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={exampleMenuOpen} onClick={() => { setExampleMenuOpen((open) => !open); setProjectMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); }}>示例 <ChevronDown size={13}/></button>{exampleMenuOpen && <div className="project-menu example-menu">
         <div className="example-category"><button className="example-category-trigger"><BookOpen size={15}/><span>Python 基础</span><ChevronRight size={14}/></button><div className="project-menu example-submenu grouped-example-submenu">{pythonDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{pythonDifficultyLabels[difficulty]}</div>{pythonExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><BookOpen size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
-        <div className="example-category"><button className="example-category-trigger"><Film size={15}/><span>Manim</span><ChevronRight size={14}/></button><div className="project-menu example-submenu manim-example-submenu">{manimDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{manimDifficultyLabels[difficulty]}</div>{manimExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><Film size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
-        <div className="example-category"><button className="example-category-trigger"><Sigma size={15}/><span>数学教学</span><ChevronRight size={14}/></button><div className="project-menu example-submenu grouped-example-submenu">{mathDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{mathDifficultyLabels[difficulty]}</div>{mathExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><Sigma size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
+         <div className="example-category"><button className="example-category-trigger"><Film size={15}/><span>Manim</span><ChevronRight size={14}/></button><div className="project-menu example-submenu manim-example-submenu">{manimDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{manimDifficultyLabels[difficulty]}</div>{manimExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><Film size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
+         <div className="example-category"><button className="example-category-trigger"><Sigma size={15}/><span>数学教学</span><ChevronRight size={14}/></button><div className="project-menu example-submenu grouped-example-submenu">{mathDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{mathDifficultyLabels[difficulty]}</div>{mathExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><Sigma size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>
       </div>}</div><div className="project-menu-wrap">
         <button className="project-menu-trigger" aria-expanded={shortcutMenuOpen} disabled={workspaceMode !== "code"} onClick={() => { setShortcutMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setHelpMenuOpen(false); }}>编辑 <ChevronDown size={13}/></button>
         {shortcutMenuOpen && <div className="project-menu shortcut-menu" role="menu" aria-label="编辑">

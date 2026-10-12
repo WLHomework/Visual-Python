@@ -6,12 +6,64 @@ const MAX_FILES = 24;
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 let draftSequence = 0;
+let planSequence = 0;
 
 export type PluginDraftFiles = Record<string, string>;
+
+export type PluginDraftPhase = "planned" | "drafted" | "implementing" | "needs_fix" | "validated" | "ready" | "installed";
+
+export type PluginPlanBlock = {
+  type: string;
+  purpose: string;
+  inputs: string[];
+  output?: string;
+  statementInput?: string;
+};
+
+export type PluginPlan = {
+  id: string;
+  pluginId: string;
+  name: string;
+  goal: string;
+  kind: "standalone" | "extension";
+  files: Array<{ path: string; purpose: string }>;
+  blocks: PluginPlanBlock[];
+  dependencies: string[];
+  validationChecks: string[];
+};
+
+export type CreatePluginPlanInput = {
+  id: string;
+  name: string;
+  description: string;
+  kind?: "standalone" | "extension";
+  files?: Array<{ path: string; purpose: string }>;
+  blocks?: PluginPlanBlock[];
+  dependencies?: string[];
+};
+
+export type PluginRuntimeValidation = {
+  valid: boolean;
+  checks: string[];
+  issues?: string[];
+  diagnostics?: PluginRuntimeDiagnostic[];
+};
+
+export type PluginRuntimeDiagnostic = {
+  phase: "entry_import" | "activation" | "toolbox" | "block_samples" | "python_syntax";
+  file?: string;
+  line?: number;
+  message: string;
+  suggestion?: string;
+};
 
 export type PluginDraft = {
   id: string;
   files: PluginDraftFiles;
+  phase: PluginDraftPhase;
+  plan: PluginPlan;
+  validation?: PluginDraftValidation;
+  runtimeValidation?: PluginRuntimeValidation;
   createdAt: number;
   updatedAt: number;
 };
@@ -45,13 +97,20 @@ export type CreatePluginDraftInput = {
   description: string;
   version?: string;
   files?: PluginDraftFiles;
+  planId?: string;
 };
 
 export type PluginDraftStore = {
+  createPlan(input: CreatePluginPlanInput): { id: string; plan: PluginPlan };
+  getPlan(id: string): PluginPlan | undefined;
   create(input: CreatePluginDraftInput): PluginDraft;
   createFromFiles(files: PluginDraftFiles): PluginDraft;
   get(id: string): PluginDraft | undefined;
   update(id: string, files: PluginDraftFiles): PluginDraft;
+  editFile(id: string, path: string, oldText: string, newText: string, replaceAll?: boolean): PluginDraft;
+  markValidation(id: string, validation: PluginDraftValidation): PluginDraft;
+  markRuntimeValidation(id: string, result: PluginRuntimeValidation): PluginDraft;
+  markInstalled(id: string): PluginDraft;
 };
 
 const objectSchema = (properties: Record<string, unknown> = {}, required: string[] = []) => ({
@@ -71,76 +130,110 @@ const tool = (name: string, description: string, parameters: Record<string, unkn
 const pluginPrefix = (id: string) => `${id.replace(/[^A-Za-z0-9_]/g, "_")}_`;
 
 const draftId = () => `draft-${Date.now().toString(36)}-${(draftSequence += 1).toString(36)}`;
+const planId = () => `plan-${Date.now().toString(36)}-${(planSequence += 1).toString(36)}`;
 
-const scaffoldFiles = (input: CreatePluginDraftInput): PluginDraftFiles => {
+const defaultValidationChecks = ["manifest", "entry_activation", "toolbox_references", "block_samples", "python_syntax"];
+
+export const pluginAuthoringContract = {
+  apiVersion: "1",
+  requiredFiles: ["plugin.json", "codegen.json", "index.js"],
+  entry: "index.js or another relative .js/.mjs file exporting activate(context)",
+  registration: ["context.registerBlock", "context.registerToolboxCategory", "context.registerSetting", "context.registerCommand", "context.registerAgentTool"],
+  stages: ["inspect_plugin_api", "create_plugin_plan", "create_plugin_draft", "read_plugin_draft_file", "edit_plugin_draft_file", "update_plugin_draft", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"],
+  rules: ["block and category ids must use the plugin id namespace", "generated Python must use four spaces and no tabs", "installation is allowed only after static and runtime validation"],
+};
+
+const normalizePlan = (input: CreatePluginPlanInput, id = planId()): PluginPlan => ({
+  id,
+  pluginId: input.id,
+  name: input.name,
+  goal: input.description,
+  kind: input.kind || "standalone",
+  files: input.files?.length ? input.files : [
+    { path: "plugin.json", purpose: "插件清单和依赖声明" },
+    { path: "codegen.json", purpose: "代码生成契约" },
+    { path: "index.js", purpose: "插件入口、积木和工具箱" },
+    { path: "README.md", purpose: "使用说明" },
+  ],
+  blocks: input.blocks || [],
+  dependencies: [...new Set(input.dependencies || [])],
+  validationChecks: defaultValidationChecks,
+});
+
+const scaffoldFiles = (input: CreatePluginDraftInput, plan: PluginPlan): PluginDraftFiles => {
   const version = input.version?.trim() || "1.0.0";
   const prefix = pluginPrefix(input.id);
+  const blocks = (plan.blocks.length ? plan.blocks : [{ type: `${prefix}print`, purpose: "Output text", inputs: ["TEXT"] }]).map((block, index) => ({
+    ...block,
+    type: block.type.trim() || `${prefix}block_${index + 1}`,
+    inputs: [...new Set(block.inputs.map((name) => name.trim()).filter(Boolean))],
+  }));
+  const definitions = blocks.map((block) => {
+    const args = [
+      ...block.inputs.map((name) => ({ type: "input_value", name })),
+      ...(block.statementInput?.trim() ? [{ type: "input_statement", name: block.statementInput.trim() }] : []),
+    ];
+    const message = [block.purpose.trim() || block.type, ...args.map(() => "%1")].join(" ");
+    const definition = {
+      type: block.type,
+      message0: message,
+      ...(args.length ? { args0: args } : {}),
+      ...(block.output ? { output: block.output } : { previousStatement: null, nextStatement: null }),
+      colour: "#397ca5",
+    };
+    const functionName = block.type.replace(/[^A-Za-z0-9_]/g, "_");
+    const values = block.inputs.map((name) => `generator.valueToCode(block, ${JSON.stringify(name)}, 0) || "None"`);
+    const generator = block.output
+      ? `return [${JSON.stringify(functionName)} + "(" + [${values.join(", ")}].join(", ") + ")", 0];`
+      : block.statementInput?.trim()
+        ? `const body = generator.statementToCode(block, ${JSON.stringify(block.statementInput.trim())}) || "";\n        return body || "pass\\n";`
+        : `return ${JSON.stringify(`# ${functionName}\\n`)};`;
+    const definitionSource = JSON.stringify(definition, null, 2).replace(/"([A-Za-z_$][A-Za-z0-9_$]*)":/g, "$1:");
+    return `    { definition: ${definitionSource}, generator(block, generator) { ${generator} } }`;
+  }).join(",\n");
+  const toolbox = blocks.map((block, index) => `{ kind: "block", type: ${index === 0 ? "BLOCK_TYPE" : JSON.stringify(block.type)} }`).join(", ");
+  const codegenBlocks = Object.fromEntries(blocks.map((block) => [block.type, {
+    purpose: block.purpose,
+    inputs: block.inputs,
+    ...(block.output ? { output: block.output } : {}),
+    ...(block.statementInput ? { statementInput: block.statementInput } : {}),
+  }]));
   return {
-    "plugin.json": JSON.stringify({
-      id: input.id,
-      name: input.name,
-      version,
-      apiVersion: "1",
-      description: input.description,
-      entry: "index.js",
-      agent: {
-        description: input.description,
-        detect: "project",
-      },
-    }, null, 2) + "\n",
-    "codegen.json": JSON.stringify({
-      version: 1,
-      mode: "standalone",
-    }, null, 2) + "\n",
-    "index.js": `const BLOCK_TYPE = "${prefix}print";
-
-export default {
-  activate(context) {
-    context.registerBlock({
-      type: BLOCK_TYPE,
-      message0: "输出 %1",
-      args0: [{ type: "input_value", name: "TEXT" }],
-      previousStatement: null,
-      nextStatement: null,
-      colour: "#397ca5",
-    }, (block, generator) => {
-      const text = generator.valueToCode(block, "TEXT", 0) || "''";
-      return \`print(\${text})\\n\`;
-    });
-
-    context.registerToolboxCategory({
-      id: "${input.id}.toolbox",
-      name: "${input.name}",
-      colour: "#397ca5",
-      contents: [{ kind: "block", type: BLOCK_TYPE }],
-    });
-  },
-};
-`,
-    "README.md": `# ${input.name}
-
-${input.description}
-
-## 使用
-
-安装并启用插件后，在图形化工具箱中使用“${input.name}”。
-`,
+    "plugin.json": JSON.stringify({ id: input.id, name: input.name, version, apiVersion: "1", description: input.description, entry: "index.js", agent: { description: input.description, detect: "project" } }, null, 2) + "\n",
+    "codegen.json": JSON.stringify({ version: 1, mode: plan.kind, blocks: codegenBlocks }, null, 2) + "\n",
+    "index.js": `const BLOCK_TYPE = ${JSON.stringify(blocks[0].type)};\nconst BLOCKS = [\n${definitions}\n];\n\nexport default {\n  activate(context) {\n    for (const item of BLOCKS) context.registerBlock(item.definition, item.generator);\n    context.registerToolboxCategory({ id: ${JSON.stringify(`${input.id}.toolbox`)}, name: ${JSON.stringify(input.name)}, colour: "#397ca5", contents: [${toolbox}] });\n  },\n};\n`,
+    "README.md": `# ${input.name}\n\n${input.description}\n`,
     ...(input.files || {}),
   };
 };
-
 export function createPluginDraftStore(): PluginDraftStore {
   const drafts = new Map<string, PluginDraft>();
+  const plans = new Map<string, PluginPlan>();
   return {
+    createPlan(input) {
+      const id = planId();
+      const plan = normalizePlan(input, id);
+      plans.set(id, plan);
+      return { id, plan };
+    },
+    getPlan(id) {
+      return plans.get(id);
+    },
     create(input) {
       const now = Date.now();
-      const draft: PluginDraft = { id: draftId(), files: scaffoldFiles(input), createdAt: now, updatedAt: now };
+      const plan = input.planId ? plans.get(input.planId) : undefined;
+      const draftPlan = plan || normalizePlan({ id: input.id, name: input.name, description: input.description });
+      plans.set(draftPlan.id, draftPlan);
+      const draft: PluginDraft = { id: draftId(), files: scaffoldFiles(input, draftPlan), phase: "drafted", plan: draftPlan, createdAt: now, updatedAt: now };
       drafts.set(draft.id, draft);
       return draft;
     },
     createFromFiles(files) {
       const now = Date.now();
-      const draft: PluginDraft = { id: draftId(), files: { ...files }, createdAt: now, updatedAt: now };
+      const manifest = typeof files["plugin.json"] === "string" ? (() => { try { return JSON.parse(files["plugin.json"]) as Record<string, unknown>; } catch { return undefined; } })() : undefined;
+      const plan = normalizePlan({ id: typeof manifest?.id === "string" ? manifest.id : "com.example.plugin", name: typeof manifest?.name === "string" ? manifest.name : "Plugin", description: typeof manifest?.description === "string" ? manifest.description : "Imported plugin" });
+      plans.set(plan.id, plan);
+      const draft: PluginDraft = { id: draftId(), files: { ...files }, phase: "drafted", plan, createdAt: now, updatedAt: now };
       drafts.set(draft.id, draft);
       return draft;
     },
@@ -150,7 +243,56 @@ export function createPluginDraftStore(): PluginDraftStore {
     update(id, files) {
       const current = drafts.get(id);
       if (!current) throw new Error(`插件草稿不存在：${id}`);
-      const updated = { ...current, files: { ...current.files, ...files }, updatedAt: Date.now() };
+      const updated = { ...current, files: { ...current.files, ...files }, phase: "implementing" as const, validation: undefined, runtimeValidation: undefined, updatedAt: Date.now() };
+      drafts.set(id, updated);
+      return updated;
+    },
+    editFile(id, path, oldText, newText, replaceAll = false) {
+      const current = drafts.get(id);
+      if (!current) throw new Error(`插件草稿不存在：${id}`);
+      const content = current.files[path];
+      if (typeof content !== "string") throw new Error(`插件草稿文件不存在：${path}`);
+      if (!oldText) throw new Error("oldText 不能为空");
+      const occurrences = content.split(oldText).length - 1;
+      if (occurrences === 0) throw new Error("oldText 未找到，请重新读取当前文件");
+      if (!replaceAll && occurrences !== 1) throw new Error(`oldText 匹配到 ${occurrences} 处，请提供更完整的文本或启用 replaceAll`);
+      const updatedContent = replaceAll ? content.split(oldText).join(newText) : content.replace(oldText, newText);
+      const updated = {
+        ...current,
+        files: { ...current.files, [path]: updatedContent },
+        phase: "implementing" as const,
+        validation: undefined,
+        runtimeValidation: undefined,
+        updatedAt: Date.now(),
+      };
+      drafts.set(id, updated);
+      return updated;
+    },
+    markValidation(id, validation) {
+      const current = drafts.get(id);
+      if (!current) throw new Error(`插件草稿不存在：${id}`);
+      const runtimeValidation = validation.valid ? current.runtimeValidation : undefined;
+      const updated = { ...current, validation, runtimeValidation, phase: validation.valid ? (runtimeValidation?.valid ? "ready" as const : "validated" as const) : "needs_fix" as const, updatedAt: Date.now() };
+      drafts.set(id, updated);
+      return updated;
+    },
+    markRuntimeValidation(id, runtimeValidation) {
+      const current = drafts.get(id);
+      if (!current) throw new Error(`插件草稿不存在：${id}`);
+      if (current.phase !== "validated" || current.validation?.valid !== true) {
+        throw new Error("必须先通过 validate_plugin_draft 才能运行插件检查");
+      }
+      const updated = { ...current, runtimeValidation, phase: runtimeValidation.valid ? "ready" as const : "needs_fix" as const, updatedAt: Date.now() };
+      drafts.set(id, updated);
+      return updated;
+    },
+    markInstalled(id) {
+      const current = drafts.get(id);
+      if (!current) throw new Error(`插件草稿不存在：${id}`);
+      if (current.phase !== "ready" || current.validation?.valid !== true || current.runtimeValidation?.valid !== true) {
+        throw new Error("必须先通过 run_plugin_draft_checks 才能安装插件");
+      }
+      const updated = { ...current, phase: "installed" as const, updatedAt: Date.now() };
       drafts.set(id, updated);
       return updated;
     },
@@ -336,6 +478,24 @@ export function validatePluginDraft(draft: Pick<PluginDraft, "files">, context: 
 
 export const pluginAuthoringTools: AgentTool[] = [
   {
+    definition: tool("inspect_plugin_api", "读取插件开发契约、入口要求、积木注册规则、工具箱规则和验证阶段。创建插件前先调用。", objectSchema()),
+    label: "查看插件开发契约",
+    readOnly: true,
+  },
+  {
+    definition: tool("create_plugin_plan", "为插件建立结构化开发计划，记录文件、积木、输入、依赖和验证项目；计划不会安装插件。", objectSchema({
+      id: { type: "string", description: "小写插件 ID，例如 com.example.shapes" },
+      name: text,
+      description: text,
+      kind: { type: "string", enum: ["standalone", "extension"] },
+      files: { type: "array", items: objectSchema({ path: text, purpose: text }, ["path", "purpose"]) },
+      blocks: { type: "array", items: objectSchema({ type: text, purpose: text, inputs: { type: "array", items: text }, output: text, statementInput: text }, ["type", "purpose", "inputs"]) },
+      dependencies: { type: "array", items: text },
+    }, ["id", "name", "description"])),
+    label: "规划插件",
+    changesState: true,
+  },
+  {
     definition: tool("list_installed_plugins", "列出应用插件目录中已经安装的外部插件。修改已有插件前先用此工具取得准确的插件 ID。", objectSchema()),
     label: "查看已安装插件",
     readOnly: true,
@@ -362,6 +522,7 @@ export const pluginAuthoringTools: AgentTool[] = [
       description: text,
       version: text,
       files: textMap,
+      planId: text,
     }, ["id", "name", "description"])),
     label: "创建插件草稿",
     changesState: true,
@@ -369,6 +530,11 @@ export const pluginAuthoringTools: AgentTool[] = [
   {
     definition: tool("update_plugin_draft", "更新插件草稿中的一个或多个文本文件，然后继续验证。运行方式变化时同步更新 codegen.json；不要修改草稿 ID。", objectSchema({ draftId: text, files: textMap }, ["draftId", "files"])),
     label: "修改插件草稿",
+    changesState: true,
+  },
+  {
+    definition: tool("edit_plugin_draft_file", "读取真实文件后按 oldText 定点修改插件草稿。默认要求 oldText 只匹配一处；只有明确需要时才使用 replaceAll。优先使用本工具，不要整文件重写。", objectSchema({ draftId: text, path: text, oldText: text, newText: text, replaceAll: { type: "boolean" } }, ["draftId", "path", "oldText", "newText"])),
+    label: "定点修改插件文件",
     changesState: true,
   },
   {
@@ -382,14 +548,23 @@ export const pluginAuthoringTools: AgentTool[] = [
     changesState: true,
     requiresPermission: true,
   },
+  {
+    definition: tool("run_plugin_draft_checks", "Run the plugin draft in the host, verify activation, toolbox registration, and generated code before installation.", objectSchema({ draftId: text }, ["draftId"])),
+    label: "运行插件检查",
+    readOnly: true,
+    longRunning: true,
+  },
 ];
 
 export function pluginDraftSummary(draft: PluginDraft, context: PluginDraftValidationContext = {}) {
   const validation = validatePluginDraft(draft, context);
   return {
     draftId: draft.id,
+    phase: draft.phase,
+    plan: draft.plan,
     files: Object.keys(draft.files),
     validation,
+    ...(draft.runtimeValidation ? { runtimeValidation: draft.runtimeValidation } : {}),
     updatedAt: draft.updatedAt,
   };
 }

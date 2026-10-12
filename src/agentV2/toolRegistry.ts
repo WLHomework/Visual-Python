@@ -74,14 +74,14 @@ const labels: Record<string, string> = {
 
 const readOnlyTools = new Set([
   "get_context", "get_diagnostics", "list_documents", "get_document", "list_resources", "get_resource", "check_resources",
-  "check_dependencies", "inspect_python_structure", "check_code", "list_installed_plugins", "read_plugin_draft_file", "validate_plugin_draft",
+  "check_dependencies", "inspect_python_structure", "check_code", "inspect_plugin_api", "list_installed_plugins", "read_plugin_draft_file", "validate_plugin_draft", "run_plugin_draft_checks",
 ]);
 
 const stateChangingTools = new Set([
   "switch_document", "create_document", "rename_document", "delete_document", "install_dependencies",
   "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import",
   "format_code", "undo_code", "redo_code",
-  "run_project", "save_project", "stop_execution", "import_installed_plugin_draft", "create_plugin_draft", "update_plugin_draft", "install_plugin_draft",
+  "run_project", "save_project", "stop_execution", "import_installed_plugin_draft", "create_plugin_plan", "create_plugin_draft", "update_plugin_draft", "edit_plugin_draft_file", "install_plugin_draft",
 ]);
 
 const codeOnlyTools = new Set([
@@ -127,7 +127,7 @@ export function toolLabel(name: string): string {
 }
 
 export function isLongRunningTool(name: string): boolean {
-  return name === "run_project";
+  return name === "run_project" || name === "run_plugin_draft_checks";
 }
 
 export function requiresPermission(name: string): boolean {

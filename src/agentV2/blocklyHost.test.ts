@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as Blockly from "blockly/core";
 import { generateWorkspacePython } from "../pythonBlocks";
-import { blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockInputs, type BlocklyAgentServices } from "./blocklyHost";
+import { blocklyAgentTools, chainSerializedBlocks, createBlocklyToolExecutor, describeBlocklyBlockInputs, normalizeBlocklyWorkspaceState, visualBlockPolicyError, type BlocklyAgentServices } from "./blocklyHost";
 
 function services(workspace: Blockly.Workspace): BlocklyAgentServices {
   return {
@@ -22,10 +22,50 @@ describe("Blockly Agent host", () => {
       "get_workspace",
       "search_blocks",
       "get_block_templates",
+      "import_python_workspace",
+      "append_workspace_blocks",
+      "replace_workspace",
       "add_workspace_block",
       "apply_workspace",
     ]);
     expect(blocklyAgentTools.every((tool) => tool.workspaceModes?.includes("visual") && tool.workspaceModes?.includes("split"))).toBe(true);
+  });
+
+  it("chains a batch of statement blocks", () => {
+    const chained = chainSerializedBlocks([
+      { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "a" } } } } },
+      { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "b" } } } } },
+    ]) as { next?: { block?: { type?: string } } };
+    expect(chained.next?.block?.type).toBe("python_print");
+  });
+
+  it("appends a batch of statements onto a scene body", async () => {
+    if (!Blockly.Blocks.visual_python_manim_scene) {
+      Blockly.common.defineBlocksWithJsonArray([{
+        type: "visual_python_manim_scene",
+        message0: "scene %1 %2",
+        args0: [
+          { type: "field_input", name: "NAME", text: "MainScene" },
+          { type: "input_statement", name: "BODY" },
+        ],
+      }]);
+    }
+    const workspace = new Blockly.Workspace();
+    const scene = workspace.newBlock("visual_python_manim_scene");
+    scene.setFieldValue("Demo", "NAME");
+    const host = services(workspace);
+    host.generateCode = vi.fn(() => "print('a')\nprint('b')\n");
+    const execute = createBlocklyToolExecutor(host);
+    await execute("append_workspace_blocks", {
+      blocks: [
+        { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "a" } } } } },
+        { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "b" } } } } },
+      ],
+    }, new AbortController().signal);
+    const body = workspace.getTopBlocks(false)[0]?.getInputTargetBlock("BODY");
+    expect(body?.type).toBe("python_print");
+    expect(body?.getNextBlock()?.type).toBe("python_print");
+    workspace.dispose();
   });
 
   it("reads a compact workspace summary and an optional full state", async () => {
@@ -52,6 +92,64 @@ describe("Blockly Agent host", () => {
     expect(host.validateCode).toHaveBeenCalledWith(expect.stringContaining("print('hello')"));
     expect(host.commit).toHaveBeenCalledTimes(1);
     workspace.dispose();
+  });
+
+  it("replaces the whole workspace in one replace_workspace call", async () => {
+    const workspace = new Blockly.Workspace();
+    workspace.newBlock("math_number").setFieldValue(1, "NUM");
+    const host = services(workspace);
+    const execute = createBlocklyToolExecutor(host);
+    const tree = {
+      type: "python_print",
+      inputs: { VALUE: { block: { type: "text", fields: { TEXT: "once" } } } },
+      next: { block: { type: "python_print", inputs: { VALUE: { block: { type: "text", fields: { TEXT: "twice" } } } } } },
+    };
+
+    const result = await execute("replace_workspace", { workspaceJson: JSON.stringify(tree) }, new AbortController().signal);
+    expect(result).toMatchObject({ ok: true, changed: true, blockCount: 4 });
+    expect(host.validateCode).toHaveBeenCalledWith(expect.stringContaining("print('once')"));
+    expect(host.validateCode).toHaveBeenCalledWith(expect.stringContaining("print('twice')"));
+    expect(host.commit).toHaveBeenCalledTimes(1);
+    workspace.dispose();
+  });
+
+  it("rejects raw Python expression blocks in a workspace replacement", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    const execute = createBlocklyToolExecutor(host);
+    await expect(execute("replace_workspace", {
+      blocks: [{ type: "python_raw_statement", fields: { CODE: "title = Text('Visual Python')" } }],
+    }, new AbortController().signal)).rejects.toThrow("几乎全是表达式积木");
+    expect(host.commit).not.toHaveBeenCalled();
+    workspace.dispose();
+  });
+
+  it("flags raw expression blocks in a live workspace", () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      const block = workspace.newBlock("python_raw_expression");
+      block.setFieldValue("Text('Hello')", "CODE");
+      expect(visualBlockPolicyError(workspace)).toContain("几乎全是表达式积木");
+    } finally {
+      workspace.dispose();
+    }
+  });
+
+  it("allows leftover raw statements when dedicated blocks already exist", () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      workspace.newBlock("python_print");
+      workspace.newBlock("python_raw_statement").setFieldValue("helper()", "CODE");
+      expect(visualBlockPolicyError(workspace)).toBeNull();
+    } finally {
+      workspace.dispose();
+    }
+  });
+
+  it("accepts a full Blockly workspace object", () => {
+    expect(normalizeBlocklyWorkspaceState({
+      blocks: { languageVersion: 0, blocks: [{ type: "text", fields: { TEXT: "a" } }] },
+    })).toMatchObject({ blocks: { blocks: [{ type: "text" }] } });
   });
 
   it("does not commit when generated code validation fails", async () => {

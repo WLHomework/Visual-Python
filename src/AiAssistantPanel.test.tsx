@@ -312,6 +312,27 @@ describe("AI assistant Markdown", () => {
     })).toBeNull();
   });
 
+  it("summarizes plugin authoring stages without exposing tool JSON", () => {
+    const cases: Array<[AiAgentActivity["toolName"], Record<string, unknown>, string]> = [
+      ["create_plugin_plan", { planned: true, plan: { id: "plan-1" } }, "插件计划已建立"],
+      ["create_plugin_draft", { created: true, phase: "drafted" }, "插件草稿已创建"],
+      ["validate_plugin_draft", { validation: { valid: true } }, "插件静态检查通过"],
+      ["run_plugin_draft_checks", { valid: true, phase: "ready" }, "插件运行检查通过"],
+      ["install_plugin_draft", { installed: true, phase: "installed" }, "插件已安装并启用"],
+    ];
+    for (const [toolName, result, expected] of cases) {
+      expect(formatAgentToolResult({ id: String(toolName), kind: "tool", status: "done", title: "plugin", toolName, result: JSON.stringify(result) })).toBe(expected);
+    }
+    expect(formatAgentToolResult({
+      id: "plugin-check-failed",
+      kind: "tool",
+      status: "done",
+      title: "plugin",
+      toolName: "run_plugin_draft_checks",
+      result: JSON.stringify({ valid: false, issues: ["activate failed"] }),
+    })).toBe("activate failed");
+  });
+
   it("renders a failed tool once with its concise reason", () => {
     const html = renderToStaticMarkup(<AgentActivityRow
       activity={{
@@ -414,6 +435,24 @@ describe("AI assistant Markdown", () => {
     expect(html).toContain("ai-agent-code-change");
     expect(html).not.toContain("ai-agent-code-change-icon");
     expect(html.match(/<button/g)).toHaveLength(1);
+  });
+
+  it("puts the full tool failure on the hover title when the row is truncated", () => {
+    const html = renderToStaticMarkup(<AgentActivityRow
+      activity={{
+        id: "fail-1",
+        kind: "tool",
+        status: "error",
+        title: "从 Python 生成积木",
+        toolName: "import_python_workspace",
+        detail: "积木连接检查未通过：场景中的配音积木只能放在 Manim 场景内部。",
+      }}
+      onRevealCodeChange={() => undefined}
+      onRevealProblem={() => undefined}
+    />);
+    expect(html).toContain("title=\"从 Python 生成积木\n积木连接检查未通过：场景中的配音积木只能放在 Manim 场景内部。\"");
+    expect(html).toContain("从 Python 生成积木");
+    expect(html).toContain("积木连接检查未通过");
   });
 
   it("counts added and removed lines from a code diff", () => {

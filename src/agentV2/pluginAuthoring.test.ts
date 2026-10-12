@@ -2,6 +2,40 @@ import { describe, expect, it } from "vitest";
 import { createPluginDraftStore, validatePluginDraft } from "./pluginAuthoring";
 
 describe("plugin authoring drafts", () => {
+  it("rejects runtime validation and installation before the required phases", () => {
+    const store = createPluginDraftStore();
+    const draft = store.create({ id: "com.example.flow", name: "Flow", description: "Flow" });
+
+    expect(() => store.markRuntimeValidation(draft.id, { valid: true, checks: ["activation"] })).toThrow(/validate_plugin_draft/);
+    expect(() => store.markInstalled(draft.id)).toThrow(/run_plugin_draft_checks/);
+  });
+
+  it("applies a draft file edit only when the old text matches exactly", () => {
+    const store = createPluginDraftStore();
+    const draft = store.create({ id: "com.example.edit", name: "Edit", description: "Edit" });
+    const before = draft.files["index.js"];
+
+    expect(() => store.editFile(draft.id, "index.js", "missing", "replacement")).toThrow(/oldText/);
+    const updated = store.editFile(draft.id, "index.js", "const BLOCK_TYPE", "const BLOCK_TYPE = \"changed\"; //");
+
+    expect(updated.files["index.js"]).not.toBe(before);
+    expect(updated.phase).toBe("implementing");
+  });
+
+  it("builds planned block types into the generated plugin scaffold", () => {
+    const store = createPluginDraftStore();
+    const plan = store.createPlan({
+      id: "com.example.template",
+      name: "Template",
+      description: "Template",
+      blocks: [{ type: "com_example_template_star", purpose: "draw a star", inputs: ["SIZE"] }],
+    });
+    const draft = store.create({ id: "com.example.template", name: "Template", description: "Template", planId: plan.id });
+
+    expect(draft.files["index.js"]).toContain("com_example_template_star");
+    expect(draft.files["index.js"]).toContain('name: "SIZE"');
+  });
+
   it("creates a valid standard plugin scaffold", () => {
     const store = createPluginDraftStore();
     const draft = store.create({ id: "com.example.shapes", name: "Shapes", description: "Basic shapes" });
@@ -25,6 +59,31 @@ describe("plugin authoring drafts", () => {
 
     expect(updated.files["README.md"]).toBe("# Shapes\n");
     expect(updated.files["index.js"]).toBe(draft.files["index.js"]);
+    expect(updated.phase).toBe("implementing");
+  });
+
+  it("keeps a structured plugin plan attached to the draft", () => {
+    const store = createPluginDraftStore();
+    const plan = store.createPlan({
+      id: "com.example.shapes",
+      name: "Shapes",
+      description: "Basic shapes",
+      blocks: [{ type: "com_example_shapes_circle", purpose: "draw a circle", inputs: ["RADIUS"] }],
+    });
+    const draft = store.create({ id: "com.example.shapes", name: "Shapes", description: "Basic shapes", planId: plan.id });
+
+    expect(draft.plan).toMatchObject({ id: plan.plan.id, blocks: [{ type: "com_example_shapes_circle", inputs: ["RADIUS"] }] });
+    expect(draft.phase).toBe("drafted");
+  });
+
+  it("moves a draft to needs_fix after failed validation", () => {
+    const store = createPluginDraftStore();
+    const draft = store.create({ id: "com.example.invalid", name: "Invalid", description: "Invalid" });
+    const result = validatePluginDraft(draft);
+    expect(result.valid).toBe(true);
+    const broken = store.update(draft.id, { "plugin.json": "{}" });
+    expect(validatePluginDraft(broken).valid).toBe(false);
+    expect(store.markValidation(broken.id, validatePluginDraft(broken))).toMatchObject({ phase: "needs_fix" });
   });
 
   it("imports an installed plugin without replacing its files with a scaffold", () => {

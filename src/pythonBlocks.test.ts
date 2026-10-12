@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
 import { buildDefinedClassConstructorToolbox, buildDefinedFunctionCallToolbox, defaultVisualThemeId, deferHeavyStatementInputs, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateDeferredInputs, loadWorkspaceFast, markHeavyStacksCollapsed, restoreDeferredIntoState, saveWorkspaceState, starterState, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
-import { getManimVoiceoverContextWarning, getPythonCollectionTypeWarning, getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
+import { getManimVoiceoverContextWarning, getPythonCollectionTypeWarning, getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, uniqueIssueMessages, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 
 const variableFields: Record<string, string[]> = {
   variables_set: ["VAR"], variables_get: ["VAR"],
@@ -117,6 +117,19 @@ describe("bulk workspace loading", () => {
     } finally {
       workspace.dispose();
     }
+  });
+});
+
+describe("workspace issue messages", () => {
+  it("keeps identical context errors only once", () => {
+    expect(uniqueIssueMessages([
+      { blockId: "a", message: "场景中没有名为“obj”的已创建对象。" },
+      { blockId: "b", message: "场景中没有名为“obj”的已创建对象。" },
+      { blockId: "c", message: "动画效果需要连接到“播放动画”积木中。" },
+    ])).toEqual([
+      "场景中没有名为“obj”的已创建对象。",
+      "动画效果需要连接到“播放动画”积木中。",
+    ]);
   });
 });
 

@@ -931,13 +931,13 @@ export function getManimSceneContextWarning(block: Blockly.Block): string | null
 }
 
 export function getManimObjectReferenceWarning(block: Blockly.Block): string | null {
-  if (block.type !== "visual_python_manim_object_ref") return null;
-  const normalizeName = (value: unknown) => {
-    return sanitizePythonIdentifier(value, "obj");
-  };
-  const name = normalizeName(block.getFieldValue("VAR"));
+  if (block.type !== "visual_python_manim_object_ref" || block.isShadow?.()) return null;
+  const rawName = String(block.getFieldValue("VAR") || block.getField("VAR")?.getText() || "").trim();
+  if (!rawName) return "对象引用缺少名称。";
+  const normalizeName = (value: unknown) => sanitizePythonIdentifier(value, "obj");
+  const name = normalizeName(rawName);
   const assignments = block.workspace.getAllBlocks(false)
-    .filter((candidate) => candidate.type === "visual_python_manim_assign" || candidate.type === "visual_python_manim_assign_add")
+    .filter((candidate) => !candidate.isShadow?.() && (candidate.type === "visual_python_manim_assign" || candidate.type === "visual_python_manim_assign_add"))
     .map((candidate) => normalizeName(candidate.getFieldValue("VAR")));
   return assignments.includes(name) ? null : `场景中没有名为“${name}”的已创建对象。`;
 }
@@ -1288,9 +1288,21 @@ export type PythonContextIssue = { blockId: string; message: string };
 
 const pythonContextWarningCache = new WeakMap<Blockly.Block, string | null>();
 
+export function uniqueIssueMessages(issues: PythonContextIssue[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const issue of issues) {
+    if (seen.has(issue.message)) continue;
+    seen.add(issue.message);
+    unique.push(issue.message);
+  }
+  return unique;
+}
+
 export function validatePythonBlockContexts(workspace: Blockly.Workspace): PythonContextIssue[] {
   const issues: PythonContextIssue[] = [];
   for (const block of workspace.getAllBlocks(false)) {
+    if (block.isShadow?.()) continue;
     const messages = [getPythonContextWarning(block), getPythonCollectionTypeWarning(block), getManimVoiceoverContextWarning(block), getManimSceneContextWarning(block), getManimObjectReferenceWarning(block), getManimAnimationConnectionWarning(block), getPythonRequiredInputWarning(block), getPythonIdentifierWarning(block), getPythonImportWarning(block)].filter((message): message is string => Boolean(message));
     const message = messages.join(" ") || null;
     if ((pythonContextWarningCache.get(block) ?? null) !== message) {

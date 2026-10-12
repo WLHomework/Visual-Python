@@ -3,6 +3,7 @@ import type { AgentHost } from "./types";
 import type { AiChatToolDefinition } from "../aiConfig";
 import type { AgentTool } from "./types";
 import type { WorkspaceMode } from "../workspaceMode";
+import { manimPythonToWorkspace } from "../manimPythonToBlocks";
 import { hydrateAllDeferredInputs, saveWorkspaceState } from "../pythonBlocks";
 
 export type BlockInputSlot = {
@@ -19,6 +20,11 @@ export type BlockTemplate = {
   inputSlots: BlockInputSlot[];
 };
 type ContextIssue = { blockId?: string; message: string };
+
+function contextFailureMessage(issues: ContextIssue[]) {
+  if (!issues.length) return null;
+  return `积木连接检查未通过：${[...new Set(issues.map((issue) => issue.message))].join("；")}`;
+}
 
 export type BlocklyAgentServices = {
   workspace: Blockly.Workspace;
@@ -47,8 +53,11 @@ export const blocklyAgentTools: AgentTool[] = [
   { definition: tool("get_workspace", "读取当前图形化工作区摘要、选中积木和生成的 Python 代码。需要完整序列化状态时传 includeState=true。", { includeState: { type: "boolean" } }), label: "读取图形化工作区", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
   { definition: tool("search_blocks", "按中文名称或积木类型搜索当前工具箱中的可用积木。", { query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } }), label: "搜索积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
   { definition: tool("get_block_templates", "读取指定积木类型的真实 Blockly 模板，先搜索积木再调用此工具。", { types: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 } }), label: "读取积木模板", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: tool("add_workspace_block", "逐个创建一个 Blockly 积木并立即连接。通过 parentBlockId 和 inputName 连接到输入槽，或通过 afterBlockId 接入语句链。不要一次提交一批断开的积木。", { block: { type: "object", description: "单个 Blockly 序列化积木状态" }, parentBlockId: { type: "string" }, inputName: { type: "string" }, afterBlockId: { type: "string" } }), label: "逐个添加积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
-  { definition: tool("apply_workspace", "事务性修改图形化工作区。候选工作区会先检查积木连接和 Python 语法，全部通过后才提交。", { mode: { type: "string", enum: ["replace", "append", "patch"] }, blocks: { type: "array", maxItems: 200 }, fieldUpdates: { type: "array" }, deleteBlockIds: { type: "array", items: { type: "string" } } }), label: "修改图形化工作区", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
+  { definition: tool("import_python_workspace", "把用户给出的完整 Python/Manim 源码编译成积木并替换当前图形化工作区。有完整源码时用本工具。", { code: { type: "string", description: "完整 Python 源码" } }), label: "从 Python 生成积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
+  { definition: tool("append_workspace_blocks", "一次追加一批语句积木（建议 3 到 20 块，用 next 连成链或传入数组自动串联）。默认接到唯一 Manim 场景的 BODY 末尾。也可用 parentBlockId+inputName 或 afterBlockId。从零搭场景：先放空场景，再分批追加对象和播放，不要每个积木调用一次，也不必一次交整课。", { blocks: { type: "array", description: "一批语句积木，可带 inputs/next" }, parentBlockId: { type: "string" }, inputName: { type: "string" }, afterBlockId: { type: "string" } }), label: "追加一批积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
+  { definition: tool("replace_workspace", "仅在工作区为空或用户明确要求整课重写时，一次替换全部积木。普通搭建请用 append_workspace_blocks 分批追加。有完整 Python 源码时改用 import_python_workspace。", { workspaceJson: { type: "string", description: "完整 Blockly 工作区 JSON 字符串" }, workspace: { type: "object", description: "完整 Blockly 工作区对象" }, blocks: { type: "array", description: "顶层积木数组" } }), label: "一次替换全部积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
+  { definition: tool("add_workspace_block", "只修正已有工作区上的 1 个积木。生成场景内容请用 append_workspace_blocks。", { block: { type: "object", description: "单个 Blockly 序列化积木状态" }, parentBlockId: { type: "string" }, inputName: { type: "string" }, afterBlockId: { type: "string" } }), label: "逐个添加积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
+  { definition: tool("apply_workspace", "字段修改或删除积木。追加内容请用 append_workspace_blocks。", { mode: { type: "string", enum: ["replace", "append", "patch"] }, blocks: { type: "array", maxItems: 200 }, workspaceJson: { type: "string" }, workspace: { type: "object" }, fieldUpdates: { type: "array" }, deleteBlockIds: { type: "array", items: { type: "string" } } }), label: "修改图形化工作区", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
 ];
 
 const checkedArray = (value: unknown, name: string): unknown[] => {
@@ -66,6 +75,151 @@ const blockSummary = (block: Blockly.Block) => ({
 });
 
 const workspaceState = (workspace: Blockly.Workspace) => saveWorkspaceState(workspace);
+const maxLiveBlocks = 2500;
+
+export function normalizeBlocklyWorkspaceState(value: unknown): object {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) throw new Error("workspaceJson 不能为空");
+    try {
+      return normalizeBlocklyWorkspaceState(JSON.parse(trimmed));
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error("workspaceJson 不是有效 JSON");
+      throw error;
+    }
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) throw new Error("积木列表不能为空");
+    return { blocks: { languageVersion: 0, blocks: value } };
+  }
+  if (!value || typeof value !== "object") throw new Error("工作区状态无效");
+  const record = value as Record<string, unknown>;
+  if (record.blocks && typeof record.blocks === "object" && !Array.isArray(record.blocks)) {
+    const blocks = (record.blocks as { blocks?: unknown }).blocks;
+    if (!Array.isArray(blocks) || !blocks.length) throw new Error("workspace.blocks.blocks 必须是非空数组");
+    return record;
+  }
+  if (Array.isArray(record.blocks) && record.blocks.length) {
+    return { blocks: { languageVersion: 0, blocks: record.blocks } };
+  }
+  if (typeof record.type === "string") return { blocks: { languageVersion: 0, blocks: [record] } };
+  throw new Error("无法识别的 Blockly 工作区格式。请提交 get_workspace(includeState=true) 同款 JSON，或把整棵树放在一个顶层积木的 inputs/next 里。");
+}
+
+const rawCodeBlockTypes = new Set(["python_raw_expression", "python_raw_statement"]);
+const rawCodeParentAllowlist = new Set(["visual_python_manim_always_redraw"]);
+
+function isDedicatedVisualBlock(type: string) {
+  if (rawCodeBlockTypes.has(type)) return false;
+  if (type === "visual_python_manim_scene" || type === "visual_python_manim_object_ref" || type === "visual_python_manim_formula_value" || type === "visual_python_manim_direction_constant" || type === "visual_python_manim_scaled_direction" || type === "visual_python_manim_point") return false;
+  if (type.startsWith("visual_python_manim_")) return true;
+  return type.startsWith("python_") && type !== "python_list_collection" && type !== "python_sequence_collection";
+}
+
+export function visualBlockPolicyError(workspace: Blockly.Workspace) {
+  let raw = 0;
+  let dedicated = 0;
+  for (const block of workspace.getAllBlocks(false)) {
+    if (block.isShadow?.()) continue;
+    if (rawCodeBlockTypes.has(block.type)) {
+      const parentType = block.getParent()?.type || "";
+      if (block.type === "python_raw_expression" && rawCodeParentAllowlist.has(parentType)) continue;
+      raw += 1;
+      continue;
+    }
+    if (isDedicatedVisualBlock(block.type)) dedicated += 1;
+  }
+  if (raw === 0) return null;
+  if (dedicated === 0) return "工作区几乎全是表达式积木。请用 Text、书写、播放、等待等专用积木生成主要结构；没有对应积木的语句才可以用表达式。";
+  return null;
+}
+
+function lastSerializedInChain(block: Record<string, unknown>) {
+  let current = block;
+  while (current.next && typeof current.next === "object" && !Array.isArray(current.next) && (current.next as { block?: Record<string, unknown> }).block) {
+    current = (current.next as { block: Record<string, unknown> }).block;
+  }
+  return current;
+}
+
+export function chainSerializedBlocks(blocks: unknown[]) {
+  if (!blocks.length) throw new Error("blocks 不能为空");
+  const copy = structuredClone(blocks) as Record<string, unknown>[];
+  if (copy.some((block) => !block || typeof block !== "object" || Array.isArray(block) || typeof block.type !== "string")) {
+    throw new Error("blocks 必须是带 type 的积木对象数组");
+  }
+  for (let index = 0; index < copy.length - 1; index += 1) {
+    lastSerializedInChain(copy[index]).next = { block: copy[index + 1] };
+  }
+  return copy[0] as unknown as Blockly.serialization.blocks.State;
+}
+
+function lastStatementBlock(start: Blockly.Block | null) {
+  let current = start;
+  while (current?.getNextBlock()) current = current.getNextBlock();
+  return current;
+}
+
+function sceneStatementTail(workspace: Blockly.Workspace) {
+  const scene = workspace.getTopBlocks(false).find((block) => block.type === "visual_python_manim_scene")
+    || workspace.getAllBlocks(false).find((block) => block.type === "visual_python_manim_scene")
+    || null;
+  if (!scene) return null;
+  const last = lastStatementBlock(scene.getInput("BODY")?.connection?.targetBlock() ?? null);
+  return {
+    sceneId: scene.id,
+    sceneName: String(scene.getFieldValue("NAME") || ""),
+    inputName: "BODY",
+    lastBlockId: last?.id ?? null,
+  };
+}
+
+function attachStatementConnection(workspace: Blockly.Workspace, parentBlockId: string, inputName: string, afterBlockId: string) {
+  if (parentBlockId && afterBlockId) throw new Error("parentBlockId 和 afterBlockId 只能选择一个");
+  if (parentBlockId && !inputName) throw new Error("通过 parentBlockId 连接时必须提供 inputName");
+  if (!parentBlockId && inputName) throw new Error("没有 parentBlockId 时不能单独提供 inputName");
+  if (afterBlockId) {
+    const after = workspace.getBlockById(afterBlockId);
+    if (!after) throw new Error(`找不到顺序积木：${afterBlockId}`);
+    if (!after.nextConnection) throw new Error(`积木 ${after.type} 没有后续连接槽`);
+    const occupied = after.nextConnection.targetBlock();
+    if (occupied) {
+      const tail = lastStatementBlock(occupied);
+      if (!tail?.nextConnection) throw new Error(`积木 ${afterBlockId} 的后续连接槽已经被占用`);
+      return tail.nextConnection;
+    }
+    return after.nextConnection;
+  }
+  if (parentBlockId) {
+    const parent = workspace.getBlockById(parentBlockId);
+    if (!parent) throw new Error(`找不到父积木：${parentBlockId}`);
+    const input = parent.getInput(inputName);
+    if (!input?.connection) {
+      const available = describeBlocklyBlockInputs(parent.type).map((slot) => slot.name).join("、") || "无";
+      throw new Error(`积木 ${parent.type} 没有 ${inputName} 输入槽。可用输入槽：${available}`);
+    }
+    const existing = input.connection.targetBlock();
+    if (existing && input.type === Blockly.inputs.inputTypes.STATEMENT) {
+      const tail = lastStatementBlock(existing);
+      if (!tail?.nextConnection) throw new Error(`输入槽 ${inputName} 已经连接积木，不能覆盖现有内容`);
+      return tail.nextConnection;
+    }
+    if (existing && !existing.isShadow()) throw new Error(`输入槽 ${inputName} 已经连接积木，不能覆盖现有内容`);
+    return input.connection;
+  }
+  const tail = sceneStatementTail(workspace);
+  if (!tail) return null;
+  if (tail.lastBlockId) return attachStatementConnection(workspace, "", "", tail.lastBlockId);
+  return attachStatementConnection(workspace, tail.sceneId, tail.inputName, "");
+}
+
+function workspaceArgument(args: Record<string, unknown>, requireBlocksForReplace = false) {
+  if (typeof args.workspaceJson === "string" && args.workspaceJson.trim()) return normalizeBlocklyWorkspaceState(args.workspaceJson);
+  if (args.workspace && typeof args.workspace === "object") return normalizeBlocklyWorkspaceState(args.workspace);
+  if (Array.isArray(args.blocks)) return normalizeBlocklyWorkspaceState(args.blocks);
+  if (requireBlocksForReplace) throw new Error("请提供 workspaceJson、workspace 或 blocks");
+  return null;
+}
 
 export function describeBlocklyBlockInputs(type: string): BlockInputSlot[] {
   const previewWorkspace = new Blockly.Workspace();
@@ -126,6 +280,7 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
         topBlockIds: services.workspace.getTopBlocks(true).map((block) => block.id),
         selectedBlockId,
         selectedBlock: selectedBlockId ? blocks.find((block) => block.id === selectedBlockId) ? blockSummary(blocks.find((block) => block.id === selectedBlockId)!) : null : null,
+        statementTail: sceneStatementTail(services.workspace),
         blocks: blocks.slice(0, 200).map(blockSummary),
         code: services.generateCode(services.workspace),
         ...(args.includeState === true ? { workspace: workspaceState(services.workspace) } : {}),
@@ -198,9 +353,12 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
         }
 
         const blockCount = candidate.getAllBlocks(false).length;
-        if (blockCount > 1000) throw new Error("工作区积木数量不能超过 1000");
+        if (blockCount > maxLiveBlocks) throw new Error(`工作区积木数量不能超过 ${maxLiveBlocks}`);
+        const visualPolicy = visualBlockPolicyError(candidate);
+        if (visualPolicy) throw new Error(visualPolicy);
         const issues = services.validateContexts(candidate);
-        if (issues.length) throw new Error(`积木连接检查未通过：${issues.map((issue) => issue.message).join("；")}`);
+        const contextError = contextFailureMessage(issues);
+        if (contextError) throw new Error(contextError);
         const code = services.generateCode(candidate);
         await services.validateCode(code);
         if (signal.aborted) throw new Error("已停止生成");
@@ -216,18 +374,76 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
       }
     }
 
-    if (name === "apply_workspace") {
-      const mode = args.mode;
+    if (name === "append_workspace_blocks") {
+      hydrateAllDeferredInputs(services.workspace);
+      const blocks = checkedArray(args.blocks, "blocks");
+      if (!blocks.length || blocks.length > 40) throw new Error("blocks 必须包含 1 到 40 个语句积木");
+      const parentBlockId = args.parentBlockId === undefined ? "" : String(args.parentBlockId).trim();
+      const inputName = args.inputName === undefined ? "" : String(args.inputName).trim();
+      const afterBlockId = args.afterBlockId === undefined ? "" : String(args.afterBlockId).trim();
+      const before = workspaceState(services.workspace);
+      const candidate = new Blockly.Workspace();
+      try {
+        Blockly.serialization.workspaces.load(structuredClone(before), candidate);
+        const inserted = Blockly.serialization.blocks.append(chainSerializedBlocks(blocks), candidate);
+        if (!inserted) throw new Error("Blockly 没有创建出新积木");
+        const target = (!parentBlockId && !afterBlockId && inserted.type === "visual_python_manim_scene")
+          ? null
+          : attachStatementConnection(candidate, parentBlockId, inputName, afterBlockId);
+        if (target) {
+          if (!inserted.previousConnection) throw new Error(`积木 ${inserted.type} 不能接到语句链上`);
+          target.connect(inserted.previousConnection);
+        }
+        const blockCount = candidate.getAllBlocks(false).length;
+        if (blockCount > maxLiveBlocks) throw new Error(`工作区积木数量不能超过 ${maxLiveBlocks}`);
+        const visualPolicy = visualBlockPolicyError(candidate);
+        if (visualPolicy) throw new Error(visualPolicy);
+        const issues = services.validateContexts(candidate);
+        const contextError = contextFailureMessage(issues);
+        if (contextError) throw new Error(contextError);
+        const code = services.generateCode(candidate);
+        await services.validateCode(code);
+        if (signal.aborted) throw new Error("已停止生成");
+        const afterState = workspaceState(candidate);
+        const changed = JSON.stringify(before) !== JSON.stringify(afterState);
+        if (changed) services.commit(afterState, code);
+        const last = lastStatementBlock(inserted);
+        return {
+          ok: true,
+          changed,
+          firstBlock: blockSummary(inserted),
+          lastBlock: last ? blockSummary(last) : null,
+          statementTail: sceneStatementTail(candidate),
+          blockCount,
+          code,
+        };
+      } catch (error) {
+        throw new Error(formatBlocklyConnectionError(error, args.blocks));
+      } finally {
+        candidate.dispose();
+      }
+    }
+
+    if (name === "import_python_workspace") {
+      const code = typeof args.code === "string" ? args.code : "";
+      const workspace = manimPythonToWorkspace(code);
+      return await createBlocklyToolExecutor(services)("replace_workspace", { workspace }, signal);
+    }
+
+    if (name === "replace_workspace" || name === "apply_workspace") {
+      const mode = name === "replace_workspace" ? "replace" : args.mode;
       if (mode !== "replace" && mode !== "append" && mode !== "patch") throw new Error("mode 必须是 replace、append 或 patch");
       const before = workspaceState(services.workspace);
       const candidate = new Blockly.Workspace();
       try {
         if (mode !== "replace") Blockly.serialization.workspaces.load(structuredClone(before), candidate);
-        if (mode === "replace" || mode === "append") {
+        if (mode === "replace") {
+          const state = workspaceArgument(args, true);
+          Blockly.serialization.workspaces.load(structuredClone(state) as { [key: string]: any }, candidate);
+        } else if (mode === "append") {
           const blocks = checkedArray(args.blocks, "blocks");
           if (!blocks.length || blocks.length > 200) throw new Error("blocks 必须包含 1 到 200 个顶层积木");
-          if (mode === "replace") Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: structuredClone(blocks) } }, candidate);
-          else for (const block of blocks) Blockly.serialization.blocks.append(structuredClone(block) as Blockly.serialization.blocks.State, candidate);
+          for (const block of blocks) Blockly.serialization.blocks.append(structuredClone(block) as Blockly.serialization.blocks.State, candidate);
         }
         if (mode === "patch") {
           const updates = args.fieldUpdates === undefined ? [] : checkedArray(args.fieldUpdates, "fieldUpdates");
@@ -253,9 +469,12 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
           }
         }
         const blockCount = candidate.getAllBlocks(false).length;
-        if (blockCount > 1000) throw new Error("工作区积木数量不能超过 1000");
+        if (blockCount > maxLiveBlocks) throw new Error(`工作区积木数量不能超过 ${maxLiveBlocks}`);
+        const visualPolicy = visualBlockPolicyError(candidate);
+        if (visualPolicy) throw new Error(visualPolicy);
         const issues = services.validateContexts(candidate);
-        if (issues.length) throw new Error(`积木连接检查未通过：${issues.map((issue) => issue.message).join("；")}`);
+        const contextError = contextFailureMessage(issues);
+        if (contextError) throw new Error(contextError);
         const code = services.generateCode(candidate);
         await services.validateCode(code);
         if (signal.aborted) throw new Error("已停止生成");
@@ -264,7 +483,7 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
         if (changed) services.commit(after, code);
         return { ok: true, changed, blockCount, code, workspace: after };
       } catch (error) {
-        throw new Error(formatBlocklyConnectionError(error, args.blocks));
+        throw new Error(formatBlocklyConnectionError(error, args.workspace ?? args.workspaceJson ?? args.blocks));
       } finally {
         candidate.dispose();
       }

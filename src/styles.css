@@ -5072,6 +5072,12 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   user-select: none !important;
 }
 
+.ai-agent-tool-line.error,
+.ai-agent-error-content span,
+.ai-agent-event.error small {
+  cursor: help;
+}
+
 .ai-drawer {
   flex: 0 0 var(--ai-panel-width);
   width: var(--ai-panel-width);

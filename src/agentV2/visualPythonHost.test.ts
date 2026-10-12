@@ -67,13 +67,35 @@ describe("Visual Python tool applicability", () => {
     services.pluginDraftStore = createPluginDraftStore();
     const executeTool = createVisualPythonToolExecutor(services);
 
-    const created = await executeTool("create_plugin_draft", { id: "com.example.shapes", name: "Shapes", description: "Basic shapes" }, new AbortController().signal);
+    const plan = await executeTool("create_plugin_plan", { id: "com.example.shapes", name: "Shapes", description: "Basic shapes" }, new AbortController().signal);
+    const created = await executeTool("create_plugin_draft", { id: "com.example.shapes", name: "Shapes", description: "Basic shapes", planId: String(plan.id) }, new AbortController().signal);
     expect(created).toMatchObject({ created: true, validation: { valid: true, issues: [] } });
     const draftId = String(created.draftId);
 
     const updated = await executeTool("update_plugin_draft", { draftId, files: { "README.md": "# Shapes\n" } }, new AbortController().signal);
     expect(updated).toMatchObject({ updated: true, files: { "README.md": "# Shapes\n" }, validation: { valid: true, issues: [] } });
     await expect(executeTool("validate_plugin_draft", { draftId }, new AbortController().signal)).resolves.toMatchObject({ draftId, validation: { valid: true, issues: [] } });
+  });
+
+  it("requires a successful runtime check before plugin installation", async () => {
+    const services = createServices("print('hello')");
+    services.pluginDraftStore = createPluginDraftStore();
+    services.installPluginDraft = vi.fn().mockResolvedValue({ pluginId: "com.example.shapes", active: true });
+    services.runPluginDraftChecks = vi.fn().mockResolvedValue({ valid: true, checks: ["activation", "block_samples", "python_syntax"] });
+    const executeTool = createVisualPythonToolExecutor(services);
+    const plan = await executeTool("create_plugin_plan", { id: "com.example.shapes", name: "Shapes", description: "Basic shapes" }, new AbortController().signal);
+    const created = await executeTool("create_plugin_draft", { id: "com.example.shapes", name: "Shapes", description: "Basic shapes", planId: String(plan.id) }, new AbortController().signal);
+    const draftId = String(created.draftId);
+
+    await expect(executeTool("install_plugin_draft", { draftId }, new AbortController().signal)).resolves.toMatchObject({
+      installed: false,
+      validation: { valid: true },
+      phase: "validated",
+    });
+    await expect(executeTool("run_plugin_draft_checks", { draftId }, new AbortController().signal)).resolves.toMatchObject({ valid: true, phase: "ready" });
+    await expect(executeTool("install_plugin_draft", { draftId }, new AbortController().signal)).resolves.toMatchObject({ installed: true, phase: "installed" });
+    expect(services.runPluginDraftChecks).toHaveBeenCalledTimes(1);
+    expect(services.installPluginDraft).toHaveBeenCalledTimes(1);
   });
 
   it("lists installed plugins and imports one into an editable draft", async () => {
@@ -88,6 +110,7 @@ describe("Visual Python tool applicability", () => {
       "index.js": "export default { activate(context) { context.registerCommand({ id: 'com.example.installed.run', title: 'Run', run() {} }); } };\n",
     });
     services.installPluginDraft = vi.fn().mockResolvedValue({ pluginId: "com.example.installed", active: true });
+    services.runPluginDraftChecks = vi.fn().mockResolvedValue({ valid: true, checks: ["activation", "block_samples", "python_syntax"] });
     const executeTool = createVisualPythonToolExecutor(services);
 
     await expect(executeTool("list_installed_plugins", {}, new AbortController().signal)).resolves.toEqual({
@@ -112,6 +135,7 @@ describe("Visual Python tool applicability", () => {
     expect(services.readInstalledPluginFiles).toHaveBeenCalledWith("com.example.installed");
     expect(services.pluginDraftStore.get(String(imported.draftId))?.files["index.js"]).toContain("registerCommand");
     await executeTool("update_plugin_draft", { draftId: String(imported.draftId), files: { "docs/guide.txt": "updated\n" } }, new AbortController().signal);
+    await executeTool("run_plugin_draft_checks", { draftId: String(imported.draftId) }, new AbortController().signal);
     await expect(executeTool("install_plugin_draft", { draftId: String(imported.draftId) }, new AbortController().signal)).resolves.toMatchObject({
       installed: true,
       pluginId: "com.example.installed",
@@ -140,6 +164,21 @@ describe("Visual Python tool applicability", () => {
       problems: [{ kind: "runtime", line: 8, message: "name is not defined", suggestion: undefined }],
       hasErrors: true,
     });
+  });
+
+  it("edits a plugin draft at one exact file location", async () => {
+    const services = createServices("print('hello')");
+    services.pluginDraftStore = createPluginDraftStore();
+    const executeTool = createVisualPythonToolExecutor(services);
+    const plan = await executeTool("create_plugin_plan", { id: "com.example.edit", name: "Edit", description: "Edit" }, new AbortController().signal);
+    const created = await executeTool("create_plugin_draft", { id: "com.example.edit", name: "Edit", description: "Edit", planId: String(plan.id) }, new AbortController().signal);
+
+    await expect(executeTool("edit_plugin_draft_file", {
+      draftId: String(created.draftId),
+      path: "index.js",
+      oldText: "const BLOCK_TYPE",
+      newText: "const BLOCK_TYPE = \"edited\"; //",
+    }, new AbortController().signal)).resolves.toMatchObject({ edited: true, phase: "implementing" });
   });
 
   it("uses live plugin capabilities after a plugin is activated", async () => {

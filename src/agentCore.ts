@@ -16,11 +16,9 @@ export { createVisualPythonHostAdapter, type VisualPythonHostServices } from "./
 export { applyExactCodeEdits, createCodeChangePreview, restoreMissingBaseIndent } from "./agentV2/codeChanges";
 export { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 
-export const AGENT_SOFT_ROUND_LIMIT = 12;
-export const AGENT_HARD_ROUND_LIMIT = 48;
-const noProgressRoundLimitAfterSoftBudget = 4;
-// Keep each decision turn bounded independently from the selected reasoning effort.
-const maxTokensPerRequest = 8_192;
+export const AGENT_SOFT_ROUND_LIMIT = Number.POSITIVE_INFINITY;
+export const AGENT_HARD_ROUND_LIMIT = Number.POSITIVE_INFINITY;
+const maxTokensPerRequest = 16_384;
 const streamUiUpdateIntervalMs = 200;
 const maxToolResultCharacters = 6000;
 const stopError = "任务已停止";
@@ -57,12 +55,20 @@ const systemRules = `你是 Visual Python 的通用软件智能体。你通过�
 - save_project 只在用户当前请求明确包含保存要求时执行。代码修改成功不等于需要保存工程。
 - 需要确认的操作由宿主统一确认。用户拒绝后视为已取消，不要重复请求相同操作。
 - ask_user 只用于会显著改变结果的真实歧义。颜色、布局、动画节奏等普通实现细节由你专业判断，避免不必要的往返。
-- 最终回复只总结实际完成内容、验证结果和需要用户决定的事项。不要复述全部工具调用或输出未经处理的内部数据。`;
+- 最终回复只总结实际完成内容、验证结果和需要用户决定的事项。不要复述全部工具调用或输出未经处理的内部数据。
+- 图形化工作区：优先用 visual_python_manim_* 专用积木。没有对应积木的语句才用表达式，但不能整棵树都是表达式。有完整 Python 源码时用 import_python_workspace。从零搭建时不要每个积木调用一次，也不必一次交整课：先确保有场景积木，再用 append_workspace_blocks 按段追加（例如先标题和对象，再播放和等待），每批 3 到 20 个语句积木。replace_workspace 仅用于空工作区或用户明确要求整课重写。add_workspace_block 只修正单个积木。`;
 
 const pluginAuthoringRules = `
 
+Structured plugin workflow:
+- Call inspect_plugin_api before authoring. For a new plugin, call create_plugin_plan and pass its planId to create_plugin_draft.
+- Keep one draft ID through update_plugin_draft and validate_plugin_draft. After static validation succeeds, call run_plugin_draft_checks.
+- Install only when the runtime check returns phase ready. Do not repeat confirmation in the agent; install_plugin_draft is the single permission-gated step.
+- Use the returned plugin contract for block types, input names, activation, and generated Python. Never guess host input names or entry points.
+
 插件开发规则：
 - 用户要求开发新插件时使用 create_plugin_draft；修改已有插件时先用 list_installed_plugins 找到准确 ID，再用 import_installed_plugin_draft 导入原始文件，并用 read_plugin_draft_file 分页读取需要修改的真实源码。后续始终用 update_plugin_draft 更新同一草稿，不要把插件代码写入当前普通 Python 文档。
+- 修改插件文件时，先用 read_plugin_draft_file 读取目标片段，再优先使用 edit_plugin_draft_file 定点替换；oldText 必须唯一匹配。只有确实需要整体生成或重建多个文件时才使用 update_plugin_draft。
 - 创建草稿前先读取当前能力。如果需求是在扩展某个已启用插件，先调用该能力的只读检查工具，取得真实入口积木、输入名、运行对象和代码生成约定；没有可验证的能力契约时必须创建自包含插件。
 - 每个草稿必须维护 codegen.json。standalone 模式必须自行生成所需 import、初始化和结束逻辑；extension 模式必须声明 provider 和 runtimeNames，并严格使用提供方公开的入口与运行对象。
 - codegen.json 只是代码生成契约，不会被宿主自动转换成积木。所有积木定义和 Python 生成器必须在入口模块的 activate(context) 中通过 context.registerBlock() 注册，并通过 context.registerToolboxCategory() 放入工具箱。
@@ -227,7 +233,7 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
     ? `\n\n当前可用能力：\n${capabilities.map((capability) => `- ${capability.name}（${capability.id}）：${capability.description}${capability.tools?.length ? `；专用工具：${capability.tools.join(", ")}` : ""}${capability.fileTypes?.length ? `；文件类型：${capability.fileTypes.join(", ")}` : ""}${capability.detect ? `；检测方式：${capability.detect}` : ""}${capability.codegen ? `；代码生成契约：入口 ${capability.codegen.entryBlock || "未声明"}，语句输入 ${capability.codegen.statementInput || "未声明"}，运行对象 ${(capability.codegen.runtimeNames || []).join(", ") || "无"}` : ""}`).join("\n")}`
     : "\n\n当前没有插件提供额外的 Agent 能力；按通用 Python 工程处理。";
   const workspaceConstructionRules = workspaceMode === "visual" || workspaceMode === "split"
-    ? `\n\nBlockly construction protocol:\n- Build complex visual tasks incrementally: create the entry block first, then add exactly one block per add_workspace_block call.\n- Use the returned real block id for the next connection. Use parentBlockId and the exact inputName from the template for nested blocks, or afterBlockId for statement order.\n- Do not create a batch of disconnected top-level blocks and connect them later. Do not guess input names.\n- Use apply_workspace only for a small complete structure or when the user explicitly asks to replace the whole workspace.`
+    ? `\n\n图形化工作区强制规则：\n- 当前是积木工作区，禁止用 replace_code / edit_code 等改 Python 来代替搭积木。代码面板由积木生成。\n- 有完整 Python 源码时用 import_python_workspace。\n- 从零搭建：先有场景积木，再用 append_workspace_blocks 按段追加（每批 3 到 20 个语句积木），不要每个积木调用一次。\n- 没有对应积木的语句才用表达式，但不能整棵树都是表达式。`
     : "";
   const requestContext = createAgentRequestContext({
     system: `${systemRules}${pluginAuthoringRules}${capabilityRules}${workspaceConstructionRules}\n\n当前模式：${mode === "plan" ? "计划模式，只能读取和分析，不得修改工程" : "智能体模式，可以执行必要的工程操作"}`,
@@ -240,7 +246,13 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
   let requestMessages = buildAgentRequestMessages(requestContext);
   const getTaskAgentTools = () => {
     const allTools = [...coreAgentTools, ...(host.getTools?.() ?? [])];
-    const activeTools = allTools.filter((tool) => !tool.workspaceModes?.length || tool.workspaceModes.includes(workspaceMode as "visual" | "split" | "code"));
+    const blockWorkspaceCodeMutationTools = new Set(["replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "format_code"]);
+    const activeTools = allTools.filter((tool) => {
+      const name = tool.definition.function.name;
+      if (tool.workspaceModes?.length && !tool.workspaceModes.includes(workspaceMode as "visual" | "split" | "code")) return false;
+      if ((workspaceMode === "visual" || workspaceMode === "split") && blockWorkspaceCodeMutationTools.has(name)) return false;
+      return true;
+    });
     return mode === "plan" ? activeTools.filter((tool) => tool.readOnly) : activeTools;
   };
   let taskAgentTools = getTaskAgentTools();
@@ -250,11 +262,8 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
   let finalSummary = "";
   let clarification: AgentClarification | undefined;
   let stateVersion = 0;
-  let consecutiveNoProgress = 0;
-  let noProgressRoundsAfterSoftBudget = 0;
   const failedToolCalls = new Map<string, { toolName: string; message: string; blocksCompletion: boolean; stateVersion: number; attempts: number; lastAttempt: number }>();
   const repeatedStructureFailures = new Map<string, number>();
-  const successfulReadCache = new Map<string, { stateVersion: number; result: Record<string, unknown>; resultText: string }>();
   const recordFailure = (fingerprint: string, toolName: string, message: string, blocksCompletion = true) => {
     const previous = failedToolCalls.get(fingerprint);
     const attempts = previous?.stateVersion === stateVersion ? previous.attempts + 1 : 1;
@@ -278,7 +287,7 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
     recordAgentToolResult(usage, content);
   };
 
-  for (let round = 1; round <= AGENT_HARD_ROUND_LIMIT; round += 1) {
+  for (let round = 1; ; round += 1) {
     if (signal.aborted) throw new Error(stopError);
     // Plugins can be installed or activated by the previous round. Rebuild the
     // tool schema before every model decision so the next round sees it.
@@ -294,7 +303,6 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
     let lastCodePreviewAt = Number.NEGATIVE_INFINITY;
     const toolArgumentBuffers = new Map<number, { name?: string; arguments: string }>();
     const baselineCode = typeof host.getSnapshot().code === "string" ? host.getSnapshot().code as string : "";
-    let roundProgressed = false;
     recordAgentRequest(usage, requestMessages, taskTools, round);
     reportProgress({ phase: "thinking", label: round === 1 ? "分析当前请求和工程状态" : "根据执行结果决定下一步" });
     emit({ id: messageId, kind: "message", status: "running", title: "", markdown: "" });
@@ -392,10 +400,8 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
       const previousFailure = failedToolCalls.get(fingerprint);
       if (previousFailure?.stateVersion === stateVersion && (previousFailure.attempts >= 2 || previousFailure.lastAttempt === toolCallCount - 1)) {
         const message = `相同工具调用已失败：${previousFailure.message}。请先调整参数或方案后再继续。`;
-        consecutiveNoProgress += 1;
         emit({ id: toolId, kind: "tool", status: "error", title: toolLabel(call.function.name), detail: message, toolName: call.function.name, result: { ok: false, error: message, repeated: true }, resultText: message });
         pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: false, error: message, repeated: true }));
-        if (consecutiveNoProgress >= 3) throw new Error("智能体连续重复无效工具调用，任务已停止");
         continue;
       }
       if (call.function.name === "save_project" && !explicitlyRequestsProjectSave(prompt)) {
@@ -405,16 +411,6 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
         continue;
       }
       const currentTool = toolByName(taskAgentTools, call.function.name);
-      const cachedRead = currentTool?.readOnly ? successfulReadCache.get(fingerprint) : undefined;
-      if (cachedRead?.stateVersion === stateVersion) {
-        const cachedResponse = JSON.stringify({ ok: true, cached: true, stateVersion, message: "状态未变化，上一条读取结果仍然有效；不要重复读取，请继续下一步。" });
-        consecutiveNoProgress += 1;
-        emit({ id: toolId, kind: "tool", status: "done", title: toolLabel(call.function.name), detail: "状态未变化", toolName: call.function.name, result: cachedRead.result, resultText: cachedRead.resultText });
-        pushToolResponse(turnMessages, call.id, cachedResponse);
-        if (consecutiveNoProgress >= 3) throw new Error("智能体连续重复读取未变化的状态，任务已停止");
-        continue;
-      }
-      consecutiveNoProgress = 0;
       const permissionDenied = currentTool?.requiresPermission
         && (!onPermissionRequest || !(await onPermissionRequest({
           id: toolId,
@@ -441,13 +437,9 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
         const resultFailed = isFailedToolResult(result);
         if (resultFailed) recordFailure(fingerprint, call.function.name, failureDetail(result) || "工具返回失败");
         else {
-          roundProgressed = true;
           clearFailuresFor(call.function.name);
           if (currentTool?.changesState && result.changed !== false) {
             stateVersion += 1;
-            successfulReadCache.clear();
-          } else if (currentTool?.readOnly) {
-            successfulReadCache.set(fingerprint, { stateVersion, result, resultText });
           }
         }
         emit({ id: toolId, kind: "tool", status: resultFailed ? "error" : "done", title: toolLabel(call.function.name), detail: resultFailed ? "失败" : undefined, toolName: call.function.name, result, resultText, codeChange: result.__codeChange && typeof result.__codeChange === "object" ? result.__codeChange as AgentActivityEvent["codeChange"] : undefined });
@@ -507,18 +499,9 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
           ? `${message}\n同一连接错误已连续出现 ${structureAttempts} 次，已停止重复提交。请先读取积木模板中的 inputSlots，再重新构造工作区。`
           : message;
         emit({ id: toolId, kind: "tool", status: "error", title: `执行失败：${toolLabel(call.function.name)}`, detail: responseMessage, toolName: call.function.name, result: { ok: false, error: responseMessage }, resultText: responseMessage });
-        pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: false, error: responseMessage, ...(stopRepeating ? { stopped: true } : {}) }));
-        if (stopRepeating) throw new Error("智能体连续提交无效的 Blockly 连接，任务已停止");
+        pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: false, error: responseMessage }));
       }
     }
     requestMessages = appendAgentTurn(requestMessages, turnMessages);
-    if (round >= AGENT_SOFT_ROUND_LIMIT) {
-      if (roundProgressed) noProgressRoundsAfterSoftBudget = 0;
-      else noProgressRoundsAfterSoftBudget += 1;
-      if (noProgressRoundsAfterSoftBudget >= noProgressRoundLimitAfterSoftBudget) {
-        throw new Error(`任务连续 ${noProgressRoundLimitAfterSoftBudget} 个决策回合没有有效进展，已停止`);
-      }
-    }
   }
-  throw new Error(`任务在 ${AGENT_HARD_ROUND_LIMIT} 个决策回合内没有完成`);
 }

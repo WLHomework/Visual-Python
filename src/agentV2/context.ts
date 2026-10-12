@@ -95,11 +95,14 @@ function boundedResultJson(result: Record<string, unknown>, max = 6_000): string
 export function compactAgentToolResult(_toolName: string, result: Record<string, unknown>): string {
   try {
     if (_toolName === "read_plugin_draft_file") return JSON.stringify(result);
-    if (_toolName === "add_workspace_block") {
+    if (_toolName === "add_workspace_block" || _toolName === "replace_workspace" || _toolName === "apply_workspace" || _toolName === "import_python_workspace" || _toolName === "append_workspace_blocks") {
       const compact = Object.fromEntries([
         ["ok", result.ok],
         ["changed", result.changed],
         ["block", result.block],
+        ["firstBlock", result.firstBlock],
+        ["lastBlock", result.lastBlock],
+        ["statementTail", result.statementTail],
         ["blockCount", result.blockCount],
         ["error", result.error],
         ["detail", result.detail],
