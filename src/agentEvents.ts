@@ -13,3 +13,7 @@ export type AgentToolRequest = {
   name: string;
   arguments: Record<string, unknown>;
 };
+
+export function resolveAgentEventText(event: { title: string; markdown?: string }): string {
+  return event.markdown?.trim() ? event.markdown : event.title;
+}

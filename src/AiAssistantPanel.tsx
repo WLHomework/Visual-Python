@@ -955,11 +955,7 @@ export function formatAiTokenCount(total?: number): string {
 }
 
 function agentRunMeta(run: AgentRun): string {
-  const result = run.result;
-  if (!result) return "";
-  const elapsed = run.startedAt ? formatAgentElapsed(run.startedAt, run.finishedAt) : "";
-  const tokenCount = formatAiTokenCount(result.tokenUsage?.total);
-  return [elapsed, tokenCount].filter(Boolean).join(" · ");
+  return run.startedAt ? formatAgentElapsed(run.startedAt, run.finishedAt) : "";
 }
 
 export function agentTokenUsageTitle(usage?: AgentTokenUsage): string {
@@ -1753,7 +1749,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
                   ? "回复"
                   : run.result?.intent === "inspect"
                     ? "已分析"
-                    : "完成"} meta={agentRunMeta(run)} metaTitle={agentTokenUsageTitle(run.result?.tokenUsage)}>
+                    : "完成"} meta={agentRunMeta(run)}>
               {run.result?.taskChange && <span className="ai-task-change-actions">
                 <button disabled={!run.taskUndone} title={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} aria-label={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} onClick={() => { if (run.result?.taskChange && onApplyTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: false }); }}><Check size={13}/></button>
                 <button disabled={run.taskUndone} title={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} aria-label={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} onClick={() => { if (run.result?.taskChange && onUndoTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: true }); }}><Undo2 size={13}/></button>

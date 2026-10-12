@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { mapCodexServerRequest, mapCodexStreamEvent } from "./codexAgentClient";
+import { resolveAgentEventText } from "./agentEvents";
 import type { AgentModelEvent } from "./agentEvents";
 
 describe("protocol-neutral Agent model events", () => {
+  it("keeps the event title when the protocol provides empty markdown", () => {
+    expect(resolveAgentEventText({ title: "正在读取当前工程", markdown: "" })).toBe("正在读取当前工程");
+    expect(resolveAgentEventText({ title: "占位标题", markdown: "读取完成。" })).toBe("读取完成。");
+  });
+
   it.each([
     [
       { type: "assistantDelta", threadId: "thread-1", turnId: "turn-1", itemId: "message-1", delta: "完成" },

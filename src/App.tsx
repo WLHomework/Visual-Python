@@ -14,6 +14,7 @@ import { AiAssistantPanel } from "./AiAssistantPanel";
 import { AiModelSettings } from "./AiModelSettings";
 import { createVisualPythonHostAdapter } from "./agentV2/hostAdapter";
 import type { AgentActivityEvent, AgentTokenUsage, AiAgentActivity, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
+import { resolveAgentEventText } from "./agentEvents";
 import { blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockInputs } from "./agentV2/blocklyHost";
 import { createPluginDraftStore, validatePluginDraft, type PluginDraft } from "./agentV2/pluginAuthoring";
 import { restoreInstalledPluginFiles, restorePluginAfterFailure } from "./agentV2/pluginRuntime";
@@ -5156,8 +5157,8 @@ export default function App() {
         kind: event.kind === "tool" ? "tool" : "message",
         channel: event.kind,
         status: event.status,
-        title: event.markdown ?? event.title,
-        markdown: event.markdown ?? event.title,
+        title: resolveAgentEventText(event),
+        markdown: resolveAgentEventText(event),
         detail: event.detail,
         toolName: event.toolName as AiAgentToolName | undefined,
         result: event.resultText,

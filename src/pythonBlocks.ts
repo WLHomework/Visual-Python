@@ -77,6 +77,32 @@ const collectionColour = colours.collection;
 const objectColour = colours.object;
 const statementColour = colours.exception;
 
+function keepMutatorBubbleInView(icon: ThemedMutatorIcon) {
+  const bubble = icon.getBubble() as unknown as {
+    anchor: { x: number; y: number };
+    getSize: () => { width: number; height: number };
+    getRelativeToSurfaceXY: () => { x: number; y: number };
+    setPositionRelativeToAnchor: (left: number, top: number) => void;
+  } | null;
+  if (!bubble) return;
+
+  const workspace = icon.getSourceBlock().workspace as Blockly.WorkspaceSvg;
+  const view = workspace.getMetricsManager().getViewMetrics(true);
+  const size = bubble.getSize();
+  const position = bubble.getRelativeToSurfaceXY();
+  const margin = 8;
+  const minX = view.left + margin;
+  const minY = view.top + margin;
+  const maxX = Math.max(minX, view.left + view.width - size.width - margin);
+  const maxY = Math.max(minY, view.top + view.height - size.height - margin);
+  const x = Math.min(Math.max(position.x, minX), maxX);
+  const y = Math.min(Math.max(position.y, minY), maxY);
+  if (x === position.x && y === position.y) return;
+
+  const left = workspace.RTL ? bubble.anchor.x - x - size.width : x - bubble.anchor.x;
+  bubble.setPositionRelativeToAnchor(left, y - bubble.anchor.y);
+}
+
 registerPythonSyntaxBlocks({
   variable: blockStyles.variable_blocks.colourPrimary,
   text: blockStyles.text_blocks.colourPrimary,
@@ -119,6 +145,7 @@ class ThemedMutatorIcon extends Blockly.icons.MutatorIcon {
       await super.setBubbleVisible(true);
       await Blockly.renderManagement.finishQueuedRenders();
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      keepMutatorBubbleInView(this);
     } finally {
       bubbleCanvas.classList.remove("visual-python-mutator-opening");
     }
