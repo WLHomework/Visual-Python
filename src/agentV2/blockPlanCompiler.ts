@@ -274,9 +274,24 @@ function autoChainCreatedStatements(
     const previousTail = statementTail(roots[index - 1]!);
     if (previousTail && connectStatementPair(previousTail, roots[index]!)) autoChained += 1;
   }
-  if (roots.length > 0 && (plan.mode === "append" || plan.mode === "patch")) {
+  const createdEntries = workspace.getTopBlocks(false).filter((block) => {
+    return createdIds.has(block.id)
+      && !block.previousConnection
+      && !block.nextConnection
+      && Boolean(statementInput(block));
+  });
+  const firstCreatedRoot = roots.find((block) => !block.getParent()) || null;
+  if (createdEntries.length === 1 && firstCreatedRoot?.previousConnection && !firstCreatedRoot.previousConnection.isConnected()) {
+    const input = statementInput(createdEntries[0]!);
+    if (input?.connection && !input.connection.isConnected()
+      && workspace.connectionChecker.canConnect(input.connection, firstCreatedRoot.previousConnection, false)) {
+      input.connection.connect(firstCreatedRoot.previousConnection);
+      autoChained += 1;
+    }
+  }
+  if (roots.length > 0 && (plan.mode === "append" || plan.mode === "patch") && !firstCreatedRoot?.getParent()) {
     const existingConnection = existingStatementTailConnection(workspace, createdIds);
-    const first = roots[0]!;
+    const first = firstCreatedRoot || roots[0]!;
     if (existingConnection && first.previousConnection && !first.previousConnection.isConnected() && workspace.connectionChecker.canConnect(existingConnection, first.previousConnection, false)) {
       existingConnection.connect(first.previousConnection);
       autoChained += 1;

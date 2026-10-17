@@ -77,6 +77,7 @@ describe("block search", () => {
     expect(JSON.stringify(directory)).not.toContain("read_file");
     expect(directory).toMatchObject({ apiVersion: 1, schema: "visual-python.block-api" });
     expect(directory.candidates[0]).toMatchObject({ apiVersion: 1 });
+    expect(directory.candidates[0]).not.toHaveProperty("contract");
     expect(directory.candidates[0]?.keywords).toEqual(expect.arrayContaining(["图形", "绘制圆形"]));
   });
 

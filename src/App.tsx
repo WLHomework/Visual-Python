@@ -5403,9 +5403,7 @@ export default function App() {
               (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null,
               { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) },
             );
-            return JSON.stringify(createTaskBlockDirectory(index, task || "", {
-              describe: (type, state) => describeBlocklyBlockContract(type, state),
-            }));
+            return JSON.stringify(createTaskBlockDirectory(index, task || ""));
           },
           getTools: () => [
             ...blocklyAgentTools,
@@ -5433,10 +5431,7 @@ export default function App() {
                 (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null,
                 { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) },
               );
-              return createTaskBlockDirectory(index, task, {
-                limit,
-                describe: (type, state) => describeBlocklyBlockContract(type, state),
-              });
+              return createTaskBlockDirectory(index, task, { limit });
             },
             searchBlocks: (query, limit) => {
               const index = createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null, { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) });

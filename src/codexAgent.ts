@@ -35,6 +35,13 @@ export class CodexAgentLoopGuardError extends Error {
   }
 }
 
+export class CodexAgentToolFailureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexAgentToolFailureError";
+  }
+}
+
 const baseInstructions = `你是 Visual Python 内置的专业编程智能体。你必须通过宿主提供的工具读取和修改当前工程，不能只在聊天中粘贴代码并声称完成。优先定点修改已有代码；只有空文件或用户明确要求整体重写时才能整体替换。修改后必须取得真实检查结果。运行、渲染、保存、安装依赖和删除文档只在用户目标需要时调用，并接受宿主的唯一权限确认。工具失败后根据真实错误调整方案，不要重复相同调用。最终使用简洁 Markdown 总结真实结果，并附加最多三个与当前结果相关的隐藏建议：<!-- visual-python-followups: [{"label":"按钮文字","prompt":"下一步指令"}] -->。`;
 
 function graphicalInstructions(blockCatalog?: string): string {
@@ -71,7 +78,9 @@ function toDynamicTool(tool: AgentTool): CodexDynamicTool {
 function resultFailed(result: Record<string, unknown>): boolean {
   if (result.ok === false || result.valid === false || result.success === false || result.saved === false || result.installed === false) return true;
   const validation = result.validation;
-  return Boolean(validation && typeof validation === "object" && !Array.isArray(validation) && (validation as Record<string, unknown>).valid === false);
+  if (Boolean(validation && typeof validation === "object" && !Array.isArray(validation) && (validation as Record<string, unknown>).valid === false)) return true;
+  const verification = result.verification;
+  return Boolean(verification && typeof verification === "object" && !Array.isArray(verification) && resultFailed(verification as Record<string, unknown>));
 }
 
 function responseText(toolName: string, result: Record<string, unknown>): string {
@@ -137,6 +146,7 @@ export async function runCodexVisualPythonAgent(
   usage.inputCharacters = prompt.length;
   usage.toolSchemaCharacters = JSON.stringify(tools.map((tool) => tool.definition)).length;
   const messages = new Map<string, string>();
+  const messageOrder: string[] = [];
   const reasoning = new Map<string, string>();
   let toolCallCount = 0;
   let stateChanged = false;
@@ -146,6 +156,7 @@ export async function runCodexVisualPythonAgent(
   let sequence = 0;
   const readOnlyToolCache = new Map<string, { stateVersion: number; result: Record<string, unknown>; resultText: string }>();
   const repeatedFailures = new Map<string, number>();
+  const unresolvedFailures = new Map<string, { toolName: string; message: string; stateVersion: number }>();
   const maxRepeatedFailures = 3;
 
   const emit = (event: Omit<AgentActivityEvent, "id"> & { id?: string }) => args.onEvent({ ...event, id: event.id || `codex-${Date.now().toString(36)}-${sequence++}` });
@@ -162,6 +173,7 @@ export async function runCodexVisualPythonAgent(
     if (event.type === "textDelta") {
       const itemId = event.itemId || "assistant";
       const content = `${messages.get(itemId) || ""}${event.delta}`;
+      if (!messages.has(itemId)) messageOrder.push(itemId);
       messages.set(itemId, content);
       publishLiveStream(`message-${itemId}`, content);
       if (!shouldEmitUi(`message-${itemId}`)) return;
@@ -199,6 +211,7 @@ export async function runCodexVisualPythonAgent(
     const tool = toolsByName.get(toolName);
     const toolId = `tool-${callId}`;
     if (!tool) {
+      unresolvedFailures.set(`unknown:${toolName}`, { toolName, message: `Unknown tool: ${toolName}`, stateVersion });
       await transport.respondToServerRequest(request.id, { success: false, contentItems: [{ type: "inputText", text: JSON.stringify({ ok: false, error: `未知工具：${toolName}` }) }] });
       return;
     }
@@ -244,13 +257,25 @@ export async function runCodexVisualPythonAgent(
       if (tool.verificationTool && !resultFailed(result)) {
         result = { ...result, verification: await args.host.executeTool(tool.verificationTool, {}, args.signal) };
       }
+      const resultText = responseText(toolName, result);
       const failed = resultFailed(result);
+      if (failed) {
+        const failureKey = failureFingerprint(toolName, result);
+        unresolvedFailures.set(failureKey, {
+          toolName,
+          message: typeof result.error === "string" ? result.error : resultText,
+          stateVersion,
+        });
+      } else {
+        for (const [failureKey, failure] of unresolvedFailures) {
+          if (failure.toolName === toolName && failure.stateVersion === stateVersion) unresolvedFailures.delete(failureKey);
+        }
+      }
       if (tool.changesState && !failed && result.changed !== false) stateChanged = true;
       if (tool.changesState && !failed && result.changed !== false) {
         stateVersion += 1;
         readOnlyToolCache.clear();
       }
-      const resultText = responseText(toolName, result);
       usage.toolResultCharacters += resultText.length;
       const codeChange = result.__codeChange && typeof result.__codeChange === "object" ? result.__codeChange as AgentActivityEvent["codeChange"] : undefined;
       emit({ id: toolId, kind: "tool", status: failed ? "error" : "done", title: tool.label, detail: failed ? "失败" : undefined, toolName, result, resultText, codeChange });
@@ -270,6 +295,7 @@ export async function runCodexVisualPythonAgent(
       if (error instanceof CodexAgentLoopGuardError) throw error;
       const message = error instanceof Error ? error.message : String(error);
       const failureKey = `${toolName}:${message}`;
+      unresolvedFailures.set(failureKey, { toolName, message, stateVersion });
       const attempts = (repeatedFailures.get(failureKey) || 0) + 1;
       repeatedFailures.set(failureKey, attempts);
       const guardedMessage = attempts >= maxRepeatedFailures
@@ -299,13 +325,24 @@ export async function runCodexVisualPythonAgent(
       onServerRequest: handleServerRequest,
     });
     if (turn.status !== "completed") throw new Error(`Codex Agent 回合未完成：${turn.status || "unknown"}`);
+    const failures = [...unresolvedFailures.values()]
+      .filter((failure) => failure.stateVersion === stateVersion)
+      .map((failure) => `${failure.toolName}: ${failure.message}`)
+      .join("\n");
+    if (failures) throw new CodexAgentToolFailureError(`任务未完成，工具执行失败：\n${failures}`);
   } catch (error) {
     if (args.signal.aborted) throw new Error("任务已停止");
     if (error instanceof CodexAgentLoopGuardError) throw error;
+    if (error instanceof CodexAgentToolFailureError) throw error;
     if (!stateChanged && !executionStarted) throw new CodexAgentUnavailableError(error instanceof Error ? error.message : String(error), error);
     throw error;
   }
-  const finalRaw = [...messages.values()].filter(Boolean).at(-1) || clarification?.question || "任务已完成。";
+  const finalRaw = messageOrder
+    .map((id) => messages.get(id))
+    .filter((content): content is string => Boolean(content?.trim()))
+    .join("\n\n")
+    || clarification?.question
+    || "任务已完成。";
   const finalResponse = parseAgentFollowUpSuggestions(finalRaw);
   progress({ phase: "completed", label: "任务完成", tokenUsage: usage });
   return {

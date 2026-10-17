@@ -66,6 +66,54 @@ describe("runCodexVisualPythonAgent", () => {
     expect(transport.runTurn).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps assistant text from every message item in the final summary", async () => {
+    const host: AgentHost = {
+      getSnapshot: () => ({ workspaceMode: "code" }),
+      executeTool: vi.fn(),
+    };
+    const transport: CodexAgentTransport = {
+      runTurn: vi.fn(async (_prompt, options) => {
+        options.onEvent?.({ type: "textDelta", threadId: "thread-text", turnId: "turn-text", itemId: "message-before", delta: "先说明操作。" });
+        options.onEvent?.({ type: "textDelta", threadId: "thread-text", turnId: "turn-text", itemId: "message-after", delta: "操作完成。" });
+        options.onEvent?.({ type: "turnCompleted", threadId: "thread-text", turnId: "turn-text", status: "completed" });
+        return { threadId: "thread-text", turnId: "turn-text", status: "completed", resumed: false };
+      }),
+      respondToServerRequest: vi.fn(),
+      rejectServerRequest: vi.fn(),
+    };
+
+    await expect(runCodexVisualPythonAgent(args(host, vi.fn()), transport)).resolves.toMatchObject({
+      summary: "先说明操作。\n\n操作完成。",
+    });
+  });
+
+  it("does not report success when a tool fails and the turn completes", async () => {
+    const failingTool: AgentTool = {
+      definition: { type: "function", function: { name: "run_task", description: "执行任务", parameters: { type: "object", properties: {} } } },
+      label: "执行任务",
+    };
+    const host: AgentHost = {
+      getSnapshot: () => ({ workspaceMode: "code" }),
+      getTools: () => [failingTool],
+      executeTool: vi.fn().mockResolvedValue({ ok: false, error: "任务执行失败：输入无效" }),
+    };
+    const transport: CodexAgentTransport = {
+      runTurn: vi.fn(async (_prompt, options) => {
+        await options.onServerRequest?.({ id: 20, method: "item/tool/call", params: { callId: "failed-call", tool: "run_task", arguments: {} } });
+        options.onEvent?.({ type: "turnCompleted", threadId: "thread-failure", turnId: "turn-failure", status: "completed" });
+        return { threadId: "thread-failure", turnId: "turn-failure", status: "completed", resumed: false };
+      }),
+      respondToServerRequest: vi.fn(),
+      rejectServerRequest: vi.fn(),
+    };
+
+    const failure = await runCodexVisualPythonAgent(args(host, vi.fn()), transport).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("任务执行失败：输入无效");
+    expect((failure as Error).message).toContain("任务未完成");
+  });
+
   it("refreshes and resends the task block directory when resuming a graphical thread", async () => {
     const values = new Map<string, string>();
     vi.stubGlobal("localStorage", {

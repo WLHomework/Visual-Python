@@ -99,6 +99,34 @@ describe("BlockPlan compiler", () => {
     workspace.dispose();
   });
 
+  it("attaches a new statement chain to the only newly created entry block", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    const result = await compileBlockPlan(parseBlockPlan({
+      version: 1,
+      mode: "replace",
+      operations: [
+        { action: "create", ref: "scene", block: "agent_plan_scene" },
+        { action: "create", ref: "first", block: "agent_plan_statement" },
+        { action: "create", ref: "second", block: "agent_plan_statement" },
+        { action: "create", ref: "third", block: "agent_plan_statement" },
+      ],
+    }), host, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: true, autoChained: 3 });
+    const state = (host.commit as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { blocks: { blocks: unknown[] } };
+    const checkWorkspace = new Blockly.Workspace();
+    Blockly.serialization.workspaces.load(state, checkWorkspace);
+    const roots = checkWorkspace.getTopBlocks(false);
+    const body = roots[0]?.getInput("BODY")?.connection?.targetBlock();
+    expect(roots).toHaveLength(1);
+    expect(roots[0]?.type).toBe("agent_plan_scene");
+    expect(body?.type).toBe("agent_plan_statement");
+    expect(body?.getNextBlock()?.getNextBlock()?.getNextBlock()).toBeNull();
+    checkWorkspace.dispose();
+    workspace.dispose();
+  });
+
   it("builds and commits a valid plan exactly once", async () => {
     const workspace = new Blockly.Workspace();
     const host = services(workspace);
