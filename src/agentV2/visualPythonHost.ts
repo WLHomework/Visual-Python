@@ -5,7 +5,9 @@ import { parsePythonSyntaxDiagnostic, type PythonCodeDiagnostic } from "../pytho
 import { createCodeDocument, renameCodeDocument, type CodeDocument } from "../sceneDocuments";
 import { projectResourceReference, resolveProjectResourceReference, type ProjectResource } from "../projectResources";
 import { applyExactCodeEdits, createCodeChangePreview } from "./codeChanges";
-import { pluginAuthoringContract, pluginDraftSummary, validatePluginDraft, type PluginDraft, type PluginDraftFiles, type PluginDraftStore, type PluginRuntimeValidation } from "./pluginAuthoring";
+import { missingPluginDraftError, pluginAuthoringContract, pluginDraftSummary, validatePluginDraft, type PluginDraft, type PluginDraftFiles, type PluginDraftStore, type PluginPlanBlock, type PluginRuntimeValidation } from "./pluginAuthoring";
+import { readPluginGuide } from "./pluginGuide";
+import { parsePluginPlanOperations, pluginIrSummary, PluginIrError } from "./pluginIr";
 import type { AgentCapability, AgentHost, AiCodeEdit } from "./types";
 
 type Ref<T> = { current: T };
@@ -65,7 +67,7 @@ export type VisualPythonHostServices = {
   listen: typeof listenFunction;
   pluginDraftStore?: PluginDraftStore;
   listInstalledPlugins?: () => Promise<InstalledPluginSummary[]>;
-  readInstalledPluginFiles?: (pluginId: string) => Promise<PluginDraftFiles>;
+  readInstalledPluginFiles?: (pluginId: string) => Promise<{ files: PluginDraftFiles; skipped?: string[] }>;
   runPluginDraftChecks?: (draft: PluginDraft, signal: AbortSignal) => Promise<PluginRuntimeValidation>;
   installPluginDraft?: (draft: PluginDraft, signal: AbortSignal) => Promise<Record<string, unknown>>;
   assertActive: (signal: AbortSignal) => void;
@@ -165,8 +167,15 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
 
   return async (name, args, signal) => {
     if (signal.aborted) throw new Error("已停止生成");
-    if (["inspect_plugin_api", "create_plugin_plan", "list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft_file", "create_plugin_draft", "update_plugin_draft", "edit_plugin_draft_file", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"].includes(name)) {
+    if (["inspect_plugin_api", "read_plugin_guide", "create_plugin_plan", "list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft", "read_plugin_draft_file", "apply_plugin_plan", "create_plugin_draft", "update_plugin_draft", "edit_plugin_draft_file", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"].includes(name)) {
       if (name === "inspect_plugin_api") return { contract: pluginAuthoringContract };
+      if (name === "read_plugin_guide") {
+        return readPluginGuide({
+          ...(typeof args.section === "string" ? { section: args.section } : {}),
+          ...(typeof args.offset === "number" ? { offset: args.offset } : {}),
+          ...(typeof args.maxChars === "number" ? { maxChars: args.maxChars } : {}),
+        });
+      }
       const store = services.pluginDraftStore;
       if (!store) throw new Error("插件草稿服务尚未就绪");
       if (name === "create_plugin_plan") {
@@ -175,8 +184,10 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
           name: checkedString(args, "name"),
           description: checkedString(args, "description"),
           ...(args.kind === "extension" ? { kind: "extension" as const } : {}),
+          ...(typeof args.provider === "string" && args.provider.trim() ? { provider: args.provider.trim() } : {}),
+          ...(Array.isArray(args.runtimeNames) ? { runtimeNames: args.runtimeNames.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
           ...(Array.isArray(args.files) ? { files: args.files.filter((item): item is { path: string; purpose: string } => Boolean(item && typeof item === "object" && typeof (item as Record<string, unknown>).path === "string" && typeof (item as Record<string, unknown>).purpose === "string")) } : {}),
-          ...(Array.isArray(args.blocks) ? { blocks: args.blocks.filter((item): item is { type: string; purpose: string; inputs: string[]; output?: string; statementInput?: string } => Boolean(item && typeof item === "object" && typeof (item as Record<string, unknown>).type === "string" && typeof (item as Record<string, unknown>).purpose === "string" && Array.isArray((item as Record<string, unknown>).inputs))) } : {}),
+          ...(Array.isArray(args.blocks) ? { blocks: args.blocks as PluginPlanBlock[] } : {}),
           ...(Array.isArray(args.dependencies) ? { dependencies: args.dependencies.filter((item): item is string => typeof item === "string") } : {}),
         });
         return { planned: true, ...plan };
@@ -188,7 +199,8 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
       if (name === "import_installed_plugin_draft") {
         if (!services.readInstalledPluginFiles) throw new Error("已安装插件读取服务尚未就绪");
         const pluginId = checkedString(args, "pluginId");
-        const imported = store.createFromFiles(await services.readInstalledPluginFiles(pluginId));
+        const { files, skipped } = await services.readInstalledPluginFiles(pluginId);
+        const imported = store.createFromFiles(files, { skippedFiles: skipped });
         const summary = pluginDraftSummary(imported, pluginValidationContext());
         if (summary.validation.manifest?.id !== pluginId) throw new Error(`插件文件 ID 与请求不一致：${pluginId}`);
         return { imported: true, pluginId, ...summary };
@@ -206,7 +218,35 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
       }
       const draftId = checkedString(args, "draftId");
       const draft = store.get(draftId);
-      if (!draft) throw new Error(`插件草稿不存在：${draftId}`);
+      if (!draft) throw missingPluginDraftError(draftId, store.listIds());
+      if (name === "read_plugin_draft") {
+        if (!draft.ir) {
+          return { draftId, mode: draft.mode, ir: null, files: Object.keys(draft.files), message: "该草稿是文件模式（导入的插件）：请用 read_plugin_draft_file 读取文件原文，或直接编辑文件。" };
+        }
+        const blockRef = typeof args.blockRef === "string" && args.blockRef.trim() ? args.blockRef.trim() : "";
+        if (blockRef) {
+          const block = draft.ir.blocks.find((item) => item.ref === blockRef);
+          if (!block) throw new Error(`积木 ref 不存在：${blockRef}。请先用 read_plugin_draft 查看草稿摘要。`);
+          return { draftId, blockRef, block };
+        }
+        return { draftId, mode: draft.mode, ...pluginIrSummary(draft.ir), validation: validatePluginDraft(draft, pluginValidationContext()) };
+      }
+      if (name === "apply_plugin_plan") {
+        let parsedOperations;
+        try {
+          parsedOperations = parsePluginPlanOperations({ version: 1, operations: args.operations });
+        } catch (error) {
+          if (error instanceof PluginIrError) return { applied: false, changed: false, issues: [error.issue] };
+          throw error;
+        }
+        try {
+          const updated = store.applyOperations(draft.id, parsedOperations);
+          return { applied: true, changed: true, ...pluginDraftSummary(updated, pluginValidationContext()) };
+        } catch (error) {
+          if (error instanceof PluginIrError) return { applied: false, changed: false, issues: [error.issue] };
+          throw error;
+        }
+      }
       if (name === "read_plugin_draft_file") {
         const path = checkedString(args, "path");
         const content = draft.files[path];

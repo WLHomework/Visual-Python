@@ -179,18 +179,37 @@ describe("Agent context compression", () => {
     expect(complete).toContain("do not call get_task_block_directory or search_blocks");
   });
 
-  it("keeps only recent bounded conversation context", () => {
+  it("keeps at most the twenty-four most recent conversation turns", () => {
     const context = createAgentRequestContext({
       system: "system",
       prompt: "当前任务",
-      history: Array.from({ length: 8 }, (_, index) => ({ user: `user-${index}`, assistant: `assistant-${index}` })),
+      history: Array.from({ length: 40 }, (_, index) => ({ user: `user-${index}`, assistant: `assistant-${index}` })),
       snapshot: {},
       memory: "memory",
     });
 
     const messages = buildAgentRequestMessages(context);
-    expect(messages.filter((message) => message.role === "user").map((message) => message.content).join("\n")).toContain("user-7");
-    expect(messages.map((message) => message.content).join("\n")).not.toContain("user-0");
+    const joined = messages.map((message) => message.content).join("\n");
+    expect(joined).toContain("user-39");
+    expect(joined).toContain("user-16");
+    expect(joined).not.toContain("user-15");
+  });
+
+  it("keeps the newest turns when the conversation history exceeds the character budget", () => {
+    const context = createAgentRequestContext({
+      system: "system",
+      prompt: "当前任务",
+      history: Array.from({ length: 10 }, (_, index) => ({
+        user: `user-${index}:${"x".repeat(6_000)}`,
+        assistant: `assistant-${index}:${"y".repeat(6_000)}`,
+      })),
+      snapshot: {},
+      memory: "memory",
+    });
+
+    const joined = buildAgentRequestMessages(context).map((message) => message.content).join("\n");
+    expect(joined).toContain("user-9:");
+    expect(joined).not.toContain("user-7:");
   });
 
   it("appends tool-call rounds without changing the existing request prefix", () => {
@@ -330,6 +349,21 @@ describe("Agent context compression", () => {
     });
 
     expect(JSON.parse(result)).toMatchObject({ content: "x".repeat(5_000), nextOffset: 5_000 });
+  });
+
+  it("preserves a bounded plugin guide page", () => {
+    const result = compactAgentToolResult("read_plugin_guide", {
+      found: true,
+      section: "六、PluginContext API",
+      offset: 0,
+      content: "y".repeat(4_000),
+      totalChars: 6_000,
+      truncated: true,
+      nextOffset: 4_000,
+      available: [],
+    });
+
+    expect(JSON.parse(result)).toMatchObject({ content: "y".repeat(4_000), nextOffset: 4_000, section: "六、PluginContext API" });
   });
 
   it("compacts only verbose assistant narration in the model-history copy", () => {

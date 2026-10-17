@@ -16,12 +16,14 @@ import { createVisualPythonHostAdapter } from "./agentV2/hostAdapter";
 import type { AgentActivityEvent, AgentTokenUsage, AiAgentActivity, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
 import { resolveAgentEventText } from "./agentEvents";
 import { allBlocklyToolNames, blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockContract } from "./agentV2/blocklyHost";
-import { createPluginDraftStore, validatePluginDraft, type PluginDraft } from "./agentV2/pluginAuthoring";
+import { createPluginDraftStore, createPluginDraftStorePersistence, validatePluginDraft, type PluginDraft, type PluginDraftStore } from "./agentV2/pluginAuthoring";
+import { serializePluginIrFile as serializePluginIr } from "./agentV2/pluginIr";
 import { restoreInstalledPluginFiles, restorePluginAfterFailure } from "./agentV2/pluginRuntime";
 import { runAgentWithProtocolFallback } from "./codexAgentRunner";
 import type { AiAgentPermissionMode, AiReasoningEffort } from "./aiConfig";
 import { createAiConversationScope } from "./aiConversationContext";
 import { inspectVoiceovers } from "./aiVoiceover";
+import "./blocklyStyleOverrides";
 import { defaultVisualThemeId, findWorkspaceBlockCodeRange, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateAllDeferredInputs, hydrateDeferredInputs, installDeferredHydration, isHydratingWorkspace, loadWorkspaceFast, pushWorkspaceUndoSnapshot, registerUsedVariablesToolbox, saveWorkspaceState, starterState, toolbox, visualPythonThemes, type VisualThemeId } from "./pythonBlocks";
 import { validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 import { diagnosePythonError } from "./pythonDiagnostics";
@@ -37,6 +39,7 @@ import { ensureProjectPlugins, getActiveAgentCapabilities, getPluginEnabledPrefe
 import type { ExternalPluginDiscovery, ExternalPluginDiscoveryResponse, ExternalPluginEntry, PluginRecord, VisualPythonPlugin } from "./plugins/api/types";
 import { validatePluginGeneratedPython } from "./plugins/core/pluginGeneratedCodeValidation";
 import { PluginRegistry } from "./plugins/core/pluginRegistry";
+import { validatePluginToolboxReferences } from "./plugins/core/pluginToolboxValidation";
 import { getManimRenderConfig, setManimRenderConfig, subscribeManimRenderConfig, type ManimRenderConfig } from "./plugins/builtin/manim/renderConfig";
 import { createManimCapabilityExecutor } from "./plugins/builtin/manim/agentRuntime";
 import { manimPlugin } from "./plugins/builtin/manim";
@@ -62,6 +65,7 @@ import { normalizeProjectFileName, projectFileBaseName } from "./projectNaming";
 import { projectRelativePath, setFileBlockPickerHandler, setLocalAudioPreviewHandler, type FileBlockPickerMode } from "./fileBlockPicker";
 import { projectResourceReference, resolveProjectResourceReference, type ProjectResource } from "./projectResources";
 import { createProjectId, parseDraftProject, parseProjectFile, type DraftProject, type ProjectFile } from "./projectFile";
+import { clearLastProject, conversationStoreKey, persistWorkspaceDraft, pruneConversationStores, readLastProject, resolveStartupProjectPath, setRestoreLastProjectEnabled, shouldRestoreLastProject, writeLastProject, WORKSPACE_DRAFT_STORAGE_KEY } from "./sessionPersistence";
 import { ManimRenderAttempt, ManimRenderCancelledError } from "./manimRenderCancellation";
 import { diagnoseManimError, diagnoseManimStartupError, localAudioErrorSuggestion } from "./manimDiagnostics";
 import { findManagedAudioMetadataRanges } from "./managedAudioMetadata";
@@ -1035,12 +1039,17 @@ export default function App() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => JSON.parse(localStorage.getItem("visual-python:recent") || "[]"));
   const loadingWorkspace = useRef(false);
   const autosaveTimer = useRef<number | null>(null);
+  const flushWorkspaceDraftRef = useRef<() => boolean>(() => false);
+  const draftPersistFailureNotified = useRef(false);
   const suppressToolboxAutoHide = useRef(false);
   const toolboxAutoHideTimer = useRef<number | null>(null);
   const startupProjectRequest = useRef<Promise<string | null> | null>(null);
   const startupProjectOpened = useRef(false);
   const externalRestoreStarted = useRef(false);
-  const pluginDraftStoreRef = useRef(createPluginDraftStore());
+  const pluginDraftStoreRef = useRef<PluginDraftStore | null>(null);
+  if (!pluginDraftStoreRef.current) {
+    pluginDraftStoreRef.current = createPluginDraftStore(createPluginDraftStorePersistence(localStorage));
+  }
   const packageInstallStopping = useRef(false);
   const [activePanel, setActivePanel] = useState<ConsolePanel>("output");
   const [aiAssistantOpen, setAiAssistantOpen] = useState(() => localStorage.getItem("visual-python:ai-assistant-open") === "true");
@@ -1065,6 +1074,7 @@ export default function App() {
   const [projectResourceFilter, setProjectResourceFilter] = useState<ProjectResourceFilter>("all");
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [unsavedChangesPromptOpen, setUnsavedChangesPromptOpen] = useState(false);
+  const [unsavedChangesPurpose, setUnsavedChangesPurpose] = useState<"quit" | "replace">("replace");
   const [savingUnsavedChanges, setSavingUnsavedChanges] = useState(false);
   const unsavedChangesResolver = useRef<((resolution: UnsavedChangesResolution) => void) | null>(null);
   const [confirmationRequest, setConfirmationRequest] = useState<ConfirmationRequest | null>(null);
@@ -1079,6 +1089,7 @@ export default function App() {
     const saved = localStorage.getItem("visual-python:close-behavior");
     return saved === "tray" || saved === "exit" ? saved : "ask";
   });
+  const [restoreLastProject, setRestoreLastProject] = useState(() => shouldRestoreLastProject(localStorage));
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [rightPanelWidth, setRightPanelWidth] = useState(() => {
     const saved = Number(localStorage.getItem("visual-python:right-panel-width"));
@@ -1710,7 +1721,7 @@ export default function App() {
     const initialToolbox = pluginRegistry.extendToolbox(toolbox);
     blockSearchDefinition.current = initialToolbox;
     const ws = Blockly.inject(host.current, {
-      toolbox: initialToolbox, renderer: "zelos", theme: visualPythonThemes[visualThemeId], trashcan: true, sounds: false,
+      toolbox: initialToolbox, renderer: "zelos", theme: visualPythonThemes[visualThemeId], trashcan: true, sounds: true, media: "blockly-media/",
       grid: { spacing: 24, length: 2, colour: "#3a424d", snap: true },
       zoom: { controls: true, wheel: true, startScale: .88, maxScale: 1.4, minScale: .45, scaleSpeed: 1.1 },
       move: { scrollbars: true, drag: true, wheel: true },
@@ -1779,9 +1790,9 @@ export default function App() {
         pruneUnusedVariables();
       });
     };
-    const savedDraft = localStorage.getItem("visual-python:draft");
+    const savedDraft = localStorage.getItem(WORKSPACE_DRAFT_STORAGE_KEY);
     let draft: DraftProject | null = null;
-    try { draft = savedDraft ? parseDraftProject(savedDraft) : null; } catch { localStorage.removeItem("visual-python:draft"); }
+    try { draft = savedDraft ? parseDraftProject(savedDraft) : null; } catch { localStorage.removeItem(WORKSPACE_DRAFT_STORAGE_KEY); }
     loadingWorkspace.current = true;
     let restoredDraft = false;
     if (draft) {
@@ -1794,7 +1805,7 @@ export default function App() {
         draft = null;
         pluginRegistry.clearProjectData();
         setVoiceoverRoles(getVoiceoverRoles());
-        localStorage.removeItem("visual-python:draft");
+        localStorage.removeItem(WORKSPACE_DRAFT_STORAGE_KEY);
       }
     }
     if (!restoredDraft) loadWorkspaceFast(ws, starterState);
@@ -1807,6 +1818,8 @@ export default function App() {
     setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws)));
     ws.clearUndo();
     if (draft) { const restoredProjectId = draft.projectId || createProjectId(); projectIdRef.current = restoredProjectId; setProjectId(restoredProjectId); setProjectName(draft.name); projectPathRef.current = draft.path; setProjectPath(draft.path); projectResourcesRef.current = draft.resources ?? []; setProjectResources(draft.resources ?? []); setDirty(true); }
+    // 启动时清理空对话存储与长期未用的旧存储桶（保护当前会话）。
+    pruneConversationStores(localStorage, { protect: [conversationStoreKey(createAiConversationScope(projectIdRef.current, "assistant"))] });
     requestAnimationFrame(() => {
       ws.clearUndo();
       setDirty(Boolean(draft));
@@ -3377,25 +3390,42 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!dirty || !workspace.current) return;
+    if (!workspace.current) return;
+    const buildDraft = (): DraftProject => {
+      const ws = workspace.current;
+      if (!ws) throw new Error("workspace unavailable");
+      const persistedDocuments = sceneDocuments.map((document) => document.id === activeSceneId ? { ...document, code: sourceCode, name: resolveCodeDocumentName(sourceCode, document.name) } : document);
+      return { version: 1, projectId: projectIdRef.current, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: activeSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
+    };
+    const persistDraft = (notify: boolean): boolean => {
+      let draft: DraftProject;
+      try { draft = buildDraft(); } catch { return false; }
+      const saved = persistWorkspaceDraft(localStorage, draft, { protectConversationScope: createAiConversationScope(projectIdRef.current, "assistant") });
+      if (saved) draftPersistFailureNotified.current = false;
+      else if (notify && !draftPersistFailureNotified.current) {
+        draftPersistFailureNotified.current = true;
+        showAppNotice("本地存储空间不足，工作草稿未能保存。建议保存为工程文件以保留进度。");
+      }
+      return saved;
+    };
+    // 退出时由 quitApplication 调用，确保最后 800ms 内的改动也会写入草稿。
+    flushWorkspaceDraftRef.current = () => persistDraft(false);
+    if (!dirty) return;
     if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
     const saveDraft = () => {
-      const ws = workspace.current;
-      if (!ws) return;
-      if (ws.isDragging()) {
+      if (workspace.current?.isDragging()) {
         autosaveTimer.current = window.setTimeout(saveDraft, 300);
         return;
       }
-      const persistedDocuments = sceneDocuments.map((document) => document.id === activeSceneId ? { ...document, code: sourceCode, name: resolveCodeDocumentName(sourceCode, document.name) } : document);
-      const draft: DraftProject = { version: 1, projectId: projectIdRef.current, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: activeSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current };
-      localStorage.setItem("visual-python:draft", JSON.stringify(draft));
+      persistDraft(true);
       autosaveTimer.current = null;
     };
     autosaveTimer.current = window.setTimeout(saveDraft, 800);
-    return () => { if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current); };
-  }, [activeSceneId, blockInputLayout, dirty, projectName, projectPath, sceneDocuments, sourceCode, sourceCodeInitialized, voiceoverRoles, workspaceMode, workspaceRevision]);
+    return () => { if (autosaveTimer.current) { window.clearTimeout(autosaveTimer.current); autosaveTimer.current = null; } };
+  }, [activeSceneId, blockInputLayout, dirty, projectName, projectPath, sceneDocuments, showAppNotice, sourceCode, sourceCodeInitialized, voiceoverRoles, workspaceMode, workspaceRevision]);
 
   const rememberRecent = useCallback((path: string, name: string) => {
+    writeLastProject(localStorage, { path, name });
     setRecentProjects((items) => {
       const next = [{ path, name, openedAt: Date.now() }, ...items.filter((item) => item.path !== path)].slice(0, 8);
       localStorage.setItem("visual-python:recent", JSON.stringify(next));
@@ -3753,7 +3783,7 @@ export default function App() {
     }
     cancelAutosave();
     projectPathRef.current = path;
-    setProjectName(data.name); setProjectPath(path); setDirty(false); localStorage.removeItem("visual-python:draft"); rememberRecent(path, data.name);
+    setProjectName(data.name); setProjectPath(path); setDirty(false); localStorage.removeItem(WORKSPACE_DRAFT_STORAGE_KEY); rememberRecent(path, data.name);
     setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `已保存：${path}\n` }]);
     return true;
   }, [blockInputLayout, cancelAutosave, projectName, rememberRecent, sourceCodeInitialized, workspaceMode]);
@@ -3843,8 +3873,9 @@ export default function App() {
     }
   }, [autoFormatOnSave, formatCurrentPythonCode, openConsolePanel, projectPath, saveProjectAs, workspaceMode, writeProject]);
 
-  const confirmUnsavedChanges = useCallback(async (): Promise<UnsavedChangesResolution> => {
+  const confirmUnsavedChanges = useCallback(async (purpose: "quit" | "replace" = "replace"): Promise<UnsavedChangesResolution> => {
     if (!dirty) return "clean";
+    setUnsavedChangesPurpose(purpose);
     return new Promise<UnsavedChangesResolution>((resolve) => {
       unsavedChangesResolver.current?.("cancelled");
       unsavedChangesResolver.current = resolve;
@@ -3918,7 +3949,7 @@ export default function App() {
       projectPathRef.current = path;
       projectResourcesRef.current = data.resources ?? [];
       setProjectResources(data.resources ?? []);
-      setProjectName(data.name || path.split(/[\\/]/).pop() || "untitled.vpy"); setProjectPath(path); setDirty(false); localStorage.removeItem("visual-python:draft");
+      setProjectName(data.name || path.split(/[\\/]/).pop() || "untitled.vpy"); setProjectPath(path); setDirty(false); localStorage.removeItem(WORKSPACE_DRAFT_STORAGE_KEY);
       setCode(generatedCode); setSceneDocuments(loadedDocuments); setActiveSceneId(loadedActiveSceneId); setSourceCode(loadedActiveCode); setSourceCodeInitialized(typeof data.sourceCode === "string" || loadedMode === "code"); setWorkspaceMode(loadedMode); setProblems([]); setManimRenderOutput(null); rememberRecent(path, data.name);
       setOutput([{ id: outputId.current++, stream: "system", data: `已打开：${path}\n` }]);
       requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -3929,7 +3960,7 @@ export default function App() {
     } catch (error) {
       loadingWorkspace.current = false;
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `无法打开工程：${String(error)}\n` }]);
-      if (!projectFileExists) setRecentProjects((items) => { const next = items.filter((item) => item.path !== path); localStorage.setItem("visual-python:recent", JSON.stringify(next)); return next; });
+      if (!projectFileExists) { if (readLastProject(localStorage)?.path === path) clearLastProject(localStorage); setRecentProjects((items) => { const next = items.filter((item) => item.path !== path); localStorage.setItem("visual-python:recent", JSON.stringify(next)); return next; }); }
     }
   }, [applyBlockInputLayout, cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, rememberRecent]);
 
@@ -3940,9 +3971,12 @@ export default function App() {
     });
     if (!startupProjectRequest.current) startupProjectRequest.current = invoke<string | null>("get_startup_project");
     void startupProjectRequest.current.then((path) => {
-      if (disposed || startupProjectOpened.current || !path) return;
+      if (disposed || startupProjectOpened.current) return;
       startupProjectOpened.current = true;
-      void loadProject(path, { skipDirtyCheck: true });
+      // 系统传入的工程优先；否则在“没有草稿可恢复 + 开关开启”时打开上次工程。
+      const startupPath = resolveStartupProjectPath(localStorage, path ?? null);
+      // 不跳过未保存检查：存在可恢复草稿时先询问，避免静默丢弃上次会话。
+      if (startupPath) void loadProject(startupPath);
     });
     return () => {
       disposed = true;
@@ -3971,7 +4005,7 @@ export default function App() {
     projectResourcesRef.current = [];
     setProjectResources([]);
     const initialDocument = workspaceMode === "code" ? createCodeDocument([], "main") : null;
-    setProjectName("untitled.vpy"); setProjectPath(null); setDirty(false); setCode(""); setSceneDocuments(initialDocument ? [initialDocument] : []); setActiveSceneId(initialDocument?.id || ""); setSourceCode(initialDocument?.code || ""); setSourceCodeInitialized(workspaceMode === "code"); setProblems([]); setManimRenderOutput(null); localStorage.removeItem("visual-python:draft");
+    setProjectName("untitled.vpy"); setProjectPath(null); setDirty(false); setCode(""); setSceneDocuments(initialDocument ? [initialDocument] : []); setActiveSceneId(initialDocument?.id || ""); setSourceCode(initialDocument?.code || ""); setSourceCodeInitialized(workspaceMode === "code"); setProblems([]); setManimRenderOutput(null); localStorage.removeItem(WORKSPACE_DRAFT_STORAGE_KEY); clearLastProject(localStorage);
     setOutput([{ id: outputId.current++, stream: "system", data: "已创建新工程。\n" }]);
     setProjectMenuOpen(false); requestAnimationFrame(() => {
       workspace.current?.clearUndo();
@@ -4026,7 +4060,8 @@ export default function App() {
       setManimRenderOutput(null);
       setOutput([{ id: outputId.current++, stream: "system", data: `已加载示例：${example.title}\n` }]);
       setExampleMenuOpen(false);
-      localStorage.removeItem("visual-python:draft");
+      localStorage.removeItem(WORKSPACE_DRAFT_STORAGE_KEY);
+      clearLastProject(localStorage);
       requestAnimationFrame(() => {
         if (workspace.current === currentWorkspace) {
           currentWorkspace.clearUndo();
@@ -4959,12 +4994,18 @@ export default function App() {
     else localStorage.setItem("visual-python:close-behavior", behavior);
   }, []);
 
+  const updateRestoreLastProject = useCallback((enabled: boolean) => {
+    setRestoreLastProject(enabled);
+    setRestoreLastProjectEnabled(localStorage, enabled);
+  }, []);
+
   const quitApplication = useCallback(async (rememberChoice = false) => {
     setClosePromptOpen(false);
-    const unsavedResolution = await confirmUnsavedChanges();
+    const unsavedResolution = await confirmUnsavedChanges("quit");
     if (unsavedResolution === "cancelled") return false;
     cancelAutosave();
-    localStorage.removeItem("visual-python:draft");
+    // 会话延续：选择“不保存”时保留草稿（含最后 800ms 内的改动），下次启动可继续。
+    if (unsavedResolution === "discarded") flushWorkspaceDraftRef.current();
     if (rememberChoice) updateCloseBehavior("exit");
     try {
       await invoke("exit_application");
@@ -5221,7 +5262,7 @@ export default function App() {
           saveProject,
           invoke,
           listen,
-          pluginDraftStore: pluginDraftStoreRef.current,
+          pluginDraftStore: pluginDraftStoreRef.current ?? undefined,
           listInstalledPlugins: async () => {
             const discovery = await invoke<ExternalPluginDiscoveryResponse>("discover_external_plugins");
             return discovery.entries.flatMap((entry) => {
@@ -5237,7 +5278,7 @@ export default function App() {
               }];
             });
           },
-          readInstalledPluginFiles: (pluginId: string) => invoke<Record<string, string>>("read_external_plugin_files", { pluginId }),
+          readInstalledPluginFiles: (pluginId: string) => invoke<{ files: Record<string, string>; skipped: string[] }>("read_external_plugin_files", { pluginId }),
           runPluginDraftChecks: async (draft: PluginDraft, draftSignal: AbortSignal) => {
             const validation = validatePluginDraft(draft, {
               availableCapabilities: getActiveAgentCapabilities().map((capability) => ({ id: capability.id, ...capability.codegen })),
@@ -5245,27 +5286,29 @@ export default function App() {
             if (!validation.valid || !validation.manifest?.entry) {
               return { valid: false, checks: [], issues: validation.issues };
             }
-            if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
+            if (draftSignal.aborted) throw new Error("已停止生成");
             const source = draft.files[validation.manifest.entry];
-            if (typeof source !== "string") return { valid: false, checks: ["manifest"], issues: ["鎵句笉鍒版彃浠跺叆鍙ｆ枃浠?"] };
+            if (typeof source !== "string") return { valid: false, checks: ["manifest"], issues: ["找不到插件入口文件"] };
             const runtimeRegistry = new PluginRegistry();
             const pluginId = validation.manifest.id;
             const existingPlugin = pluginRegistry.getRecord(pluginId)?.state === "active" ? pluginRegistry.getRecord(pluginId)?.plugin : undefined;
-            if (pluginRegistry.getRecord(pluginId)?.state === "loading") return { valid: false, checks: ["manifest"], issues: [`鎻掍欢 ${pluginId} 姝ｅ湪鍔犺浇锛岃绋嶅悗閲嶈瘯`] };
+            if (pluginRegistry.getRecord(pluginId)?.state === "loading") return { valid: false, checks: ["manifest"], issues: [`插件 ${pluginId} 正在加载，请稍后重试`] };
             if (existingPlugin) await pluginRegistry.unregister(pluginId);
             if (pluginRegistry.getRecord(pluginId)) {
-              return { valid: false, checks: ["manifest"], issues: [`鎻掍欢 ${pluginId} 宸插湪褰撳墠浼氳瘽涓瓨鍦紝璇峰厛鍋滅敤鎴栨洿鎹㈡彃浠跺悕绉?`] };
+              return { valid: false, checks: ["manifest"], issues: [`插件 ${pluginId} 已在当前会话中存在，请先停用或更换插件名称`] };
             }
             let objectUrl: string | undefined;
-            let failedCheck = "entry_import";
+            const executedChecks: string[] = ["manifest"];
             try {
-              if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
+              executedChecks.push("entry_import");
+              if (draftSignal.aborted) throw new Error("已停止生成");
               objectUrl = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
               const module = await import(/* @vite-ignore */ objectUrl) as Record<string, unknown>;
-              if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
+              if (draftSignal.aborted) throw new Error("已停止生成");
               const exported = module.default ?? module.plugin ?? module;
+              executedChecks.push("entry_activation");
               if (!exported || typeof exported !== "object" || typeof (exported as { activate?: unknown }).activate !== "function") {
-                return { valid: false, checks: ["entry_activation"], issues: ["鎻掍欢鍏ュ彛蹇呴』瀵煎嚭 activate(context)"] };
+                return { valid: false, checks: executedChecks, issues: ["插件入口必须导出 activate(context)"] };
               }
               runtimeRegistry.register({
                 manifest: validation.manifest,
@@ -5274,24 +5317,32 @@ export default function App() {
                   ? () => (exported as { deactivate: () => void | Promise<void> }).deactivate()
                   : undefined,
               });
-              failedCheck = "activation";
+              executedChecks.push("activation");
               await runtimeRegistry.activate(pluginId);
               const record = runtimeRegistry.getRecord(pluginId);
-              if (record?.state !== "active") return { valid: false, checks: ["entry_activation"], issues: [record?.error || "plugin activation failed"] };
-              /*
-              if (record?.state !== "active") return { valid: false, checks: ["entry_activation"], issues: [record?.error || "鎻掍欢婵€娲诲け璐?] };
-              */
-              if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
-              failedCheck = "python_syntax";
+              if (record?.state !== "active") return { valid: false, checks: executedChecks, issues: [record?.error || "plugin activation failed"] };
+              executedChecks.push("toolbox_references");
+              const toolboxIssues = validatePluginToolboxReferences(runtimeRegistry.getToolboxCategories(pluginId), (type) => Boolean(Blockly.Blocks[type]));
+              if (toolboxIssues.length) {
+                return {
+                  valid: false,
+                  checks: executedChecks,
+                  issues: toolboxIssues.map((issue) => issue.message),
+                  diagnostics: toolboxIssues.map((issue) => ({ phase: "toolbox" as const, message: issue.message, suggestion: issue.suggestion })),
+                };
+              }
+              if (draftSignal.aborted) throw new Error("已停止生成");
+              executedChecks.push("block_samples");
               const samples = runtimeRegistry.generatePythonSamples(pluginId);
+              executedChecks.push("python_syntax");
               await validatePluginGeneratedPython(samples, async (candidate) => {
-                if (draftSignal.aborted) throw new Error("宸插仠姝㈢敓鎴?");
+                if (draftSignal.aborted) throw new Error("已停止生成");
                 await invoke("validate_python_code", { code: candidate, pythonPath: pythonEnvironment?.path || null });
               });
-              return { valid: true, checks: ["activation", "toolbox", "block_samples", "python_syntax"] };
+              return { valid: true, checks: executedChecks };
             } catch (error) {
               if (draftSignal.aborted) throw error;
-              return { valid: false, checks: [failedCheck], issues: [String(error)] };
+              return { valid: false, checks: executedChecks, issues: [String(error)] };
             } finally {
               if (runtimeRegistry.getRecord(pluginId)) await runtimeRegistry.unregister(pluginId);
               if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -5306,7 +5357,7 @@ export default function App() {
                     activate: (id) => pluginRegistry.activate(id),
                   });
                 } catch (error) {
-                  setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `鎭㈠鎻掍欢澶辫触锛?{String(error)}\n` }]);
+                  setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `恢复插件失败：${String(error)}\n` }]);
                 }
               }
             }
@@ -5324,11 +5375,12 @@ export default function App() {
             const previousWasActive = previousRecord?.state === "active";
             let previousFiles: Record<string, string> | undefined;
             try {
-              previousFiles = await invoke<Record<string, string>>("read_external_plugin_files", { pluginId: draftPluginId });
+              previousFiles = (await invoke<{ files: Record<string, string>; skipped: string[] }>("read_external_plugin_files", { pluginId: draftPluginId })).files;
             } catch (error) {
               if (previousRecord) throw new Error(`Cannot snapshot existing plugin files: ${String(error)}`);
             }
-            const discovery = await invoke<ExternalPluginDiscovery>("install_external_plugin_draft", { files: draft.files });
+            const draftFiles = draft.ir ? { ...draft.files, ".ai-ir.json": serializePluginIr(draft.ir) } : draft.files;
+            const discovery = await invoke<ExternalPluginDiscovery>("install_external_plugin_draft", { files: draftFiles });
             const pluginId = discovery.manifest?.id;
             const restorePreviousPlugin = async () => {
               if (!pluginId) return;
@@ -5350,7 +5402,7 @@ export default function App() {
             };
             if (draftSignal.aborted) {
               await restorePreviousPlugin();
-              throw new Error("宸插仠姝㈢敓鎴?");
+              throw new Error("已停止生成");
             }
             if (!pluginId) throw new Error("插件安装结果缺少插件 ID");
             if (pluginId && previousRecord) {
@@ -5361,7 +5413,7 @@ export default function App() {
             }
             if (draftSignal.aborted) {
               await restorePreviousPlugin();
-              throw new Error("宸插仠姝㈢敓鎴?");
+              throw new Error("已停止生成");
             }
             const activated = await loadExternalPlugin(discovery, { promptForTrust: false, trustConfirmed: true });
             if (!activated) {
@@ -5536,7 +5588,7 @@ export default function App() {
         permissionMode,
         onPermissionRequest: (request) => onPermissionRequest({ ...request, toolName: request.toolName as AiAgentToolName }),
         signal,
-        conversationTargetId: `project:${encodeURIComponent(projectIdRef.current)}:conversation:${encodeURIComponent(conversationId)}:mode:${encodeURIComponent(agentWorkspaceMode)}:document:${encodeURIComponent(agentSceneId || "workspace")}`,
+        conversationTargetId: `project:${encodeURIComponent(projectIdRef.current)}:conversation:${encodeURIComponent(conversationId)}`,
         host: agentHost,
       }, {
         onFallback: () => reportAgentV2Progress({ phase: "preparing", label: "切换兼容模式" }),
@@ -6223,12 +6275,12 @@ export default function App() {
     </section></div>}
     {unsavedChangesPromptOpen && <div className="settings-backdrop"><section className="settings-dialog decision-dialog project-replacement-dialog" role="dialog" aria-modal="true" aria-labelledby="project-replacement-title" onKeyDown={(event) => { if (event.key === "Escape" && !savingUnsavedChanges) { event.preventDefault(); finishUnsavedChangesPrompt("cancelled"); } }}>
       <header className="decision-dialog-header"><h2 id="project-replacement-title">保存对“{projectName}”的修改吗？</h2></header>
-      <div className="decision-dialog-content"><p>如果不保存，所做的修改将会丢失。</p></div>
+      <div className="decision-dialog-content"><p>{unsavedChangesPurpose === "quit" ? "如果不保存，改动会保留为草稿，下次启动时可以继续。" : "如果不保存，所做的修改将会丢失。"}</p></div>
       <footer className="decision-dialog-actions"><button type="button" onClick={() => finishUnsavedChangesPrompt("cancelled")} disabled={savingUnsavedChanges}>取消</button><button type="button" className="danger" onClick={() => finishUnsavedChangesPrompt("discarded")} disabled={savingUnsavedChanges}>不保存</button><button type="button" className="primary" onClick={() => void saveBeforeContinuing()} disabled={savingUnsavedChanges} autoFocus>{savingUnsavedChanges ? "正在保存..." : "保存"}</button></footer>
     </section></div>}
     {closePromptOpen && <div className="settings-backdrop"><section className="settings-dialog decision-dialog close-choice-dialog" role="dialog" aria-modal="true" aria-labelledby="close-choice-title" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setClosePromptOpen(false); } }}>
       <header className="decision-dialog-header"><h2 id="close-choice-title">关闭 Visual Python？</h2></header>
-      <div className="decision-dialog-content"><p>你可以让应用继续在后台运行，或者完全退出。</p>{(running || renderingManim) && <p className="decision-dialog-warning">退出应用将终止当前正在运行的任务。</p>}<label><input type="checkbox" checked={rememberCloseChoice} onChange={(event) => setRememberCloseChoice(event.target.checked)}/>记住我的选择</label></div>
+      <div className="decision-dialog-content"><p>你可以让应用继续在后台运行，或者完全退出。退出后，未保存的工作会保留，下次启动时可以继续。</p>{(running || renderingManim) && <p className="decision-dialog-warning">退出应用将终止当前正在运行的任务。</p>}<label><input type="checkbox" checked={rememberCloseChoice} onChange={(event) => setRememberCloseChoice(event.target.checked)}/>记住我的选择</label></div>
       <footer className="decision-dialog-actions"><button type="button" onClick={() => setClosePromptOpen(false)}>取消</button><button type="button" className="danger" onClick={() => void quitApplication(rememberCloseChoice)}>退出应用</button><button type="button" className="primary" onClick={() => void minimizeToTray(rememberCloseChoice)} autoFocus>最小化到托盘</button></footer>
     </section></div>}
     {confirmationRequest && <div className="settings-backdrop"><section className="settings-dialog decision-dialog confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmation-title" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); finishConfirmation(false); } }}>
@@ -6248,7 +6300,7 @@ export default function App() {
         { id: "editor", label: "代码编辑", detail: "字号与格式化", icon: <Code2 size={18}/> },
         { id: "python", label: "Python 环境", detail: "解释器选择", icon: <Braces size={18}/> },
         { id: "ai", label: "AI 模型", detail: "接口与模型", icon: <Sparkles size={18}/> },
-        { id: "behavior", label: "应用行为", detail: "关闭方式", icon: <Power size={18}/> },
+        { id: "behavior", label: "应用行为", detail: "关闭与恢复", icon: <Power size={18}/> },
       ] as Array<{ id: SettingsSection; label: string; detail: string; icon: ReactNode }>).map((item) => <button key={item.id} className={settingsSection === item.id ? "selected" : ""} aria-current={settingsSection === item.id ? "page" : undefined} onClick={() => setSettingsSection(item.id)}><span>{item.icon}</span><span><strong>{item.label}</strong><small>{item.detail}</small></span><ChevronRight size={16}/></button>)}</nav><div className="settings-pane">
       {settingsSection === "appearance" && <section className="theme-section"><div className="settings-pane-header"><h3>外观</h3><p>选择适合当前工作环境的界面主题。</p></div><div className="theme-picker">{themeOptions.map((theme) => <button key={theme.id} className={visualThemeId === theme.id ? "selected" : ""} onClick={() => setVisualThemeId(theme.id)}><span className={`theme-swatch swatch-${theme.id}`}/><span><strong>{theme.label}</strong><small>{theme.description}</small></span>{visualThemeId === theme.id && <Check size={16}/>}</button>)}</div></section>}
       {settingsSection === "editor" && <section className="code-preferences-section"><div className="settings-pane-header"><h3>代码编辑</h3><p>调整纯代码模式的阅读、缩进和保存体验。</p></div><div className="code-preferences-grid">
@@ -6258,7 +6310,7 @@ export default function App() {
         <div className="code-preference-row"><div><strong>保存时自动格式化</strong><small>使用 Ruff 整理源码后再保存工程</small></div><button className={`plugin-toggle ${autoFormatOnSave ? "enabled" : ""}`} role="switch" aria-checked={autoFormatOnSave} aria-label="保存时自动格式化 Python" onClick={() => setAutoFormatOnSave((enabled) => !enabled)}><span/></button></div>
       </div></section>}
       {settingsSection === "ai" && <AiModelSettings/>}
-      {settingsSection === "behavior" && <section className="close-behavior-section"><div className="settings-pane-header"><h3>应用行为</h3><p>设置点击窗口关闭按钮时执行的操作。</p></div><div className="close-behavior-options"><button className={closeBehavior === "ask" ? "selected" : ""} onClick={() => updateCloseBehavior("ask")}><strong>每次询问</strong><small>关闭时显示选择界面</small></button><button className={closeBehavior === "tray" ? "selected" : ""} onClick={() => updateCloseBehavior("tray")}><strong>最小化到托盘</strong><small>应用继续在后台运行</small></button><button className={closeBehavior === "exit" ? "selected" : ""} onClick={() => updateCloseBehavior("exit")}><strong>退出应用</strong><small>完全结束 Visual Python</small></button></div></section>}
+      {settingsSection === "behavior" && <section className="close-behavior-section"><div className="settings-pane-header"><h3>应用行为</h3><p>设置点击窗口关闭按钮时执行的操作，以及启动时的恢复方式。</p></div><div className="close-behavior-options"><button className={closeBehavior === "ask" ? "selected" : ""} onClick={() => updateCloseBehavior("ask")}><strong>每次询问</strong><small>关闭时显示选择界面</small></button><button className={closeBehavior === "tray" ? "selected" : ""} onClick={() => updateCloseBehavior("tray")}><strong>最小化到托盘</strong><small>应用继续在后台运行</small></button><button className={closeBehavior === "exit" ? "selected" : ""} onClick={() => updateCloseBehavior("exit")}><strong>退出应用</strong><small>完全结束 Visual Python</small></button></div><div className="behavior-restore-row"><div><strong>启动时恢复上次工程</strong><small>{restoreLastProject ? "自动打开上次使用的工程文件；未保存的改动始终以草稿恢复" : "从未命名工程开始；未保存的改动仍会以草稿恢复"}</small></div><button className={`plugin-toggle ${restoreLastProject ? "enabled" : ""}`} role="switch" aria-checked={restoreLastProject} aria-label="启动时恢复上次打开的工程" onClick={() => updateRestoreLastProject(!restoreLastProject)}><span/></button></div></section>}
       {settingsSection === "python" && <section className="python-settings-section">
         <div className="python-settings-header"><div className="settings-pane-header"><h3>Python 环境</h3><p>选择运行当前工程使用的解释器，仅显示 {supportedPythonRangeLabel}。</p></div><div className="settings-actions"><button onClick={() => void detectPythonEnvironments()} disabled={detectingPython}><RefreshCw size={15} className={detectingPython ? "spin" : ""}/>{detectingPython ? "检测中" : "重新检测"}</button><button onClick={() => void choosePythonExecutable()}><FolderOpen size={15}/>选择解释器</button></div></div>
         <div className="environment-list">{pythonEnvironments.length ? pythonEnvironments.map((environment) => {

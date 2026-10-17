@@ -116,6 +116,10 @@ export class PluginRegistry {
     return [...(this.contributions.get(pluginId)?.blockTypes ?? [])];
   }
 
+  getToolboxCategories(pluginId: string): PluginToolboxCategory[] {
+    return [...(this.contributions.get(pluginId)?.categories ?? [])];
+  }
+
   getBlockAgentMetadata(type: string) {
     for (const contribution of this.activeContributions()) {
       const metadata = contribution.blockMetadata.get(type);

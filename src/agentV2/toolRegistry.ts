@@ -74,7 +74,7 @@ const labels: Record<string, string> = {
 
 const readOnlyTools = new Set([
   "get_context", "get_diagnostics", "list_documents", "get_document", "list_resources", "get_resource", "check_resources",
-  "check_dependencies", "inspect_python_structure", "check_code", "inspect_plugin_api", "list_installed_plugins", "read_plugin_draft_file", "validate_plugin_draft", "run_plugin_draft_checks",
+  "check_dependencies", "inspect_python_structure", "check_code", "inspect_plugin_api", "list_installed_plugins", "read_plugin_draft_file", "validate_plugin_draft",
 ]);
 
 const stateChangingTools = new Set([

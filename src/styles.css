@@ -1019,6 +1019,32 @@ button { font: inherit; }
   box-shadow: 3px 0 0 #2f9e8f inset;
 }
 
+.app-settings-dialog .close-behavior-section .behavior-restore-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.app-settings-dialog .close-behavior-section .behavior-restore-row > div {
+  display: grid;
+  gap: 4px;
+}
+
+.app-settings-dialog .close-behavior-section .behavior-restore-row strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.app-settings-dialog .close-behavior-section .behavior-restore-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .app-settings-dialog .python-settings-section {
   min-height: 100%;
   grid-template-rows: auto minmax(0,1fr);
@@ -4265,6 +4291,15 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 
 .management-center .app-settings-dialog .close-behavior-options button {
   height: 76px;
+}
+
+.management-center .app-settings-dialog .close-behavior-section .behavior-restore-row strong {
+  font-size: 15px;
+}
+
+.management-center .app-settings-dialog .close-behavior-section .behavior-restore-row small {
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .management-center .app-settings-dialog .environment-info strong {

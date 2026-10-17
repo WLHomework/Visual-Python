@@ -47,9 +47,13 @@ describe("Visual Python Agent Core", () => {
 
   it("exposes permission-gated plugin authoring tools in the core set", () => {
     const names = coreAgentTools.map((tool) => tool.definition.function.name);
-    expect(names).toEqual(expect.arrayContaining(["inspect_plugin_api", "create_plugin_plan", "list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft_file", "create_plugin_draft", "update_plugin_draft", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"]));
+    expect(names).toEqual(expect.arrayContaining(["inspect_plugin_api", "read_plugin_guide", "create_plugin_plan", "list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft", "read_plugin_draft_file", "apply_plugin_plan", "create_plugin_draft", "update_plugin_draft", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"]));
     expect(requiresPermission("install_plugin_draft")).toBe(true);
     expect(coreAgentTools.find((tool) => tool.definition.function.name === "install_plugin_draft")).toMatchObject({ requiresPermission: true, changesState: true });
+    const runChecksTool = coreAgentTools.find((tool) => tool.definition.function.name === "run_plugin_draft_checks");
+    expect(runChecksTool).toMatchObject({ requiresPermission: true, longRunning: true });
+    expect(runChecksTool?.readOnly).toBeFalsy();
+    expect(toolsForAgentMode("plan").some((tool) => tool.function.name === "run_plugin_draft_checks")).toBe(false);
   });
 
   it("exposes diagnostics as a read-only tool in every workspace and plan mode", () => {
@@ -161,11 +165,14 @@ describe("Visual Python Agent Core", () => {
     expect(system).toContain("run_plugin_draft_checks");
       expect(system).toContain("install_plugin_draft");
       expect(system).toContain("不要把插件代码写入当前普通 Python 文档");
+      expect(system).toContain("插件开发规则");
+      expect(system).toContain("宿主会请求用户确认");
       expect(system).toContain("只有用户明确确认安装");
       expect(system).toContain("codegen.json");
       expect(system).toContain("先调用该能力的只读检查工具");
       expect(system).toContain("不得引用未导入、未初始化或未由扩展契约声明的运行对象");
       expect(system).toContain("get_diagnostics");
+      expect(system).toContain("read_plugin_guide");
       expect(system).toContain("4 个空格缩进");
       return completion("已了解插件开发流程。");
     });
@@ -553,11 +560,34 @@ describe("Visual Python Agent Core", () => {
     expect(mocks.streamAiChat).toHaveBeenCalledTimes(2);
   });
 
-  it("requires confirmation for high-impact tools even in automatic mode", async () => {
+  it("asks before high-impact tools in confirm mode", async () => {
     const coreHighImpactTools = ["install_dependencies", "run_project", "save_project"];
     expect(coreHighImpactTools.every((name) => requiresPermission(name))).toBe(true);
     expect(manimAgentTools.filter((tool) => ["delete_scene", "render_manim"].includes(tool.definition.function.name)).every((tool) => tool.requiresPermission)).toBe(true);
 
+    const permissionRequest = vi.fn().mockResolvedValue(true);
+    const executeTool = vi.fn().mockResolvedValue({ ok: true, started: true });
+    mocks.streamAiChat
+      .mockResolvedValueOnce(completion("", [toolCall("1", "render_manim", { outputType: "video" })]))
+      .mockImplementationOnce(async (_messages, onDelta) => {
+        onDelta("已完成");
+        return completion();
+      });
+
+    await runVisualPythonAgent({
+      prompt: "渲染当前场景",
+      permissionMode: "confirm",
+      onPermissionRequest: permissionRequest,
+      host: createHost({ executeTool }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+
+    expect(permissionRequest).toHaveBeenCalledWith(expect.objectContaining({ toolName: "render_manim" }));
+    expect(executeTool).toHaveBeenCalledWith("render_manim", { outputType: "video" }, expect.any(AbortSignal));
+  });
+
+  it("runs high-impact tools without asking in automatic mode", async () => {
     const permissionRequest = vi.fn().mockResolvedValue(true);
     const executeTool = vi.fn().mockResolvedValue({ ok: true, started: true });
     mocks.streamAiChat
@@ -576,7 +606,7 @@ describe("Visual Python Agent Core", () => {
       signal: new AbortController().signal,
     });
 
-    expect(permissionRequest).toHaveBeenCalledWith(expect.objectContaining({ toolName: "render_manim" }));
+    expect(permissionRequest).not.toHaveBeenCalled();
     expect(executeTool).toHaveBeenCalledWith("render_manim", { outputType: "video" }, expect.any(AbortSignal));
   });
 
@@ -630,7 +660,7 @@ describe("Visual Python Agent Core", () => {
 
     await runVisualPythonAgent({
       prompt: "渲染并运行当前工程",
-      permissionMode: "auto",
+      permissionMode: "confirm",
       onPermissionRequest: permissionRequest,
       host: createHost({ executeTool }),
       onEvent: () => undefined,

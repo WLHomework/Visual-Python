@@ -1,15 +1,25 @@
 import type { AiModelConfig } from "./aiConfig";
 
-type CodexThreadRecord = {
+type CodexThreadSlot = {
   threadId: string;
   updatedAt: number;
-  dynamicToolsSignature?: string;
+  signature: string;
 };
+
+type CodexThreadRecord = {
+  slots: CodexThreadSlot[];
+};
+
+type CodexThreadStore = Record<string, CodexThreadRecord>;
 
 type CodexThreadStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-const storageKey = "visual-python:codex-thread-store:v1";
-const maxStoredThreads = 48;
+const storageKey = "visual-python:codex-thread-store:v2";
+const legacyStorageKey = "visual-python:codex-thread-store:v1";
+const maxStoredThreads = 96;
+const maxSlotsPerTarget = 6;
+// Legacy entries were saved without a tool signature and must never match a real one.
+const emptySignature = "";
 
 function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -35,35 +45,59 @@ function threadKey(targetId: string, config: AiModelConfig): string {
   return `${targetId.trim()}\n${config.baseUrl.trim().replace(/\/+$/, "")}\n${config.model.trim()}`;
 }
 
-function readRecords(storage: CodexThreadStorage): Record<string, CodexThreadRecord> {
-  try {
-    const value: unknown = JSON.parse(storage.getItem(storageKey) || "{}");
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-      const record = item as Partial<CodexThreadRecord>;
-      return typeof record.threadId === "string" && record.threadId.trim() && typeof record.updatedAt === "number"
-        ? [[key, {
-          threadId: record.threadId,
-          updatedAt: record.updatedAt,
-          ...(typeof record.dynamicToolsSignature === "string" ? { dynamicToolsSignature: record.dynamicToolsSignature } : {}),
-        }]]
-        : [];
-    }));
-  } catch {
-    return {};
-  }
+function readSlots(item: unknown): CodexThreadSlot[] {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+  const slots = (item as { slots?: unknown }).slots;
+  if (!Array.isArray(slots)) return [];
+  return slots.flatMap((slot) => {
+    if (!slot || typeof slot !== "object" || Array.isArray(slot)) return [];
+    const record = slot as Partial<CodexThreadSlot>;
+    return typeof record.threadId === "string" && record.threadId.trim() && typeof record.updatedAt === "number"
+      ? [{
+        threadId: record.threadId,
+        updatedAt: record.updatedAt,
+        signature: typeof record.signature === "string" ? record.signature : emptySignature,
+      }]
+      : [];
+  });
 }
 
-function writeRecords(storage: CodexThreadStorage, records: Record<string, CodexThreadRecord>): void {
+function readRecords(storage: CodexThreadStorage): CodexThreadStore {
+  const records: CodexThreadStore = {};
+  try {
+    const value: unknown = JSON.parse(storage.getItem(storageKey) || "{}");
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+        const slots = readSlots(item);
+        if (slots.length) records[key] = { slots };
+      }
+    }
+  } catch {
+    // A corrupted store is treated as empty; threads are an optimization, not a source of truth.
+  }
+  try {
+    // v1 entries were keyed by a conversation target that embedded mode and document and can no longer be addressed.
+    if (storage.getItem(legacyStorageKey) !== null) storage.removeItem(legacyStorageKey);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+  return records;
+}
+
+function writeRecords(storage: CodexThreadStorage, records: CodexThreadStore): void {
   storage.setItem(storageKey, JSON.stringify(records));
+}
+
+function recordTimestamp(record: CodexThreadRecord): number {
+  return record.slots.reduce((latest, slot) => Math.max(latest, slot.updatedAt), 0);
 }
 
 export function getCodexThread(targetId: string | undefined, config: AiModelConfig, storage?: CodexThreadStorage): string | undefined {
   const normalizedTarget = targetId?.trim();
   const activeStorage = getStorage(storage);
   if (!normalizedTarget || !activeStorage) return undefined;
-  return readRecords(activeStorage)[threadKey(normalizedTarget, config)]?.threadId;
+  const slots = readRecords(activeStorage)[threadKey(normalizedTarget, config)]?.slots ?? [];
+  return slots.reduce<CodexThreadSlot | undefined>((latest, slot) => !latest || slot.updatedAt >= latest.updatedAt ? slot : latest, undefined)?.threadId;
 }
 
 export function getCodexThreadWithTools(
@@ -75,8 +109,8 @@ export function getCodexThreadWithTools(
   const normalizedTarget = targetId?.trim();
   const activeStorage = getStorage(storage);
   if (!normalizedTarget || !activeStorage) return undefined;
-  const record = readRecords(activeStorage)[threadKey(normalizedTarget, config)];
-  return record?.dynamicToolsSignature === dynamicToolsSignature ? record.threadId : undefined;
+  return readRecords(activeStorage)[threadKey(normalizedTarget, config)]?.slots
+    .find((slot) => slot.signature === dynamicToolsSignature)?.threadId;
 }
 
 export function saveCodexThread(
@@ -93,14 +127,21 @@ export function saveCodexThread(
   try {
     const records = readRecords(activeStorage);
     const key = threadKey(normalizedTarget, config);
+    const signature = dynamicToolsSignature ?? emptySignature;
+    const slots = [
+      ...(records[key]?.slots ?? []).filter((slot) => slot.signature !== signature),
+      { threadId: normalizedThreadId, updatedAt: Date.now(), signature },
+    ];
     records[key] = {
-      threadId: normalizedThreadId,
-      updatedAt: Date.now(),
-      ...(dynamicToolsSignature === undefined ? {} : { dynamicToolsSignature }),
+      slots: slots.length > maxSlotsPerTarget
+        ? [...slots].sort((left, right) => left.updatedAt - right.updatedAt).slice(slots.length - maxSlotsPerTarget)
+        : slots,
     };
     const keys = Object.keys(records);
     if (keys.length > maxStoredThreads) {
-      for (const staleKey of keys.sort((left, right) => records[left].updatedAt - records[right].updatedAt).slice(0, keys.length - maxStoredThreads)) {
+      for (const staleKey of keys
+        .sort((left, right) => recordTimestamp(records[left]) - recordTimestamp(records[right]))
+        .slice(0, keys.length - maxStoredThreads)) {
         delete records[staleKey];
       }
     }
@@ -110,12 +151,26 @@ export function saveCodexThread(
   }
 }
 
-export function clearCodexThread(targetId: string, config: AiModelConfig, storage?: CodexThreadStorage): void {
+export function clearCodexThread(
+  targetId: string,
+  config: AiModelConfig,
+  storage?: CodexThreadStorage,
+  dynamicToolsSignature?: string,
+): void {
   const activeStorage = getStorage(storage);
   if (!activeStorage) return;
   try {
     const records = readRecords(activeStorage);
-    delete records[threadKey(targetId.trim(), config)];
+    const key = threadKey(targetId.trim(), config);
+    const record = records[key];
+    if (!record) return;
+    if (dynamicToolsSignature === undefined) {
+      delete records[key];
+    } else {
+      const slots = record.slots.filter((slot) => slot.signature !== dynamicToolsSignature);
+      if (slots.length) records[key] = { slots };
+      else delete records[key];
+    }
     writeRecords(activeStorage, records);
   } catch {
     // A stale browser storage entry is harmless and can be retried later.

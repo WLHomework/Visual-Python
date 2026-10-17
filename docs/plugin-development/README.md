@@ -116,6 +116,22 @@ Compress-Archive -Path .\visual-python-hello\* -DestinationPath .\visual-python-
 
 选择 ZIP，启用插件并确认信任。返回图形化编辑区后，工具箱中应出现“你好插件”。
 
+### 5. 用 AI 助手创建插件（可选）
+
+Visual Python 的 AI 助手可以在应用内直接生成、校验并安装外部插件。典型流程：
+
+1. `create_plugin_plan`：用结构化计划描述插件的积木（类型、输入、字段和 Python 生成器模板）；
+2. `create_plugin_draft`：把计划编译成 `plugin.json`、`codegen.json`、`index.js` 和 `README.md`；
+3. `apply_plugin_plan`：以操作集（增删改积木、工具箱、hooks）继续迭代草稿；
+4. `validate_plugin_draft` 与 `run_plugin_draft_checks`：先静态校验，再由用户在宿主中确认实际加载和执行插件；
+5. `install_plugin_draft`：用户确认后写入本地插件目录并启用。
+
+由 AI 创建的草稿是 IR 草稿：生成文件由编译器产出，不要直接修改；模板表达不了的注册逻辑（例如 `registerCommand`、`registerSetting`）通过 `add_hook` 注入。修改已安装插件时，AI 会先用 `import_installed_plugin_draft` 导入原始文件；对由 AI 安装过的插件会恢复 IR 模式。
+
+开发过程中，AI 可以用 `read_plugin_guide` 按小节（契约 `guide.sections` 列出目录）查阅本指南的宿主 API 细节、工具箱格式、依赖与安全、打包规范和排错内容，不必把整篇文档放进对话。
+
+AI 安装会在插件目录写入 `.ai-ir.json`，保存插件的结构化来源。保留该文件，AI 再次导入时可以恢复完整的 IR 草稿；手动删除它不影响插件运行。AI 安装会与磁盘上的现有目录合并（草稿优先，磁盘上多出的文件保留），并对草稿设置 128 个文件、单文件 1 MiB、总计 8 MiB 的限制。
+
 ## 二、运行模型与重要限制
 
 ### 1. 插件生命周期
@@ -598,6 +614,12 @@ com.example.geometry/
 [ ] 在干净环境中完成安装、启用、停用和重新启用测试
 ```
 
+### 3. AI 安装与 ZIP 安装的差异
+
+- ZIP 安装（设置 → 插件 → 安装插件）会整体替换同 ID 的旧插件；
+- 通过 AI 助手安装的插件同样写入本地插件目录，但会保留旧目录中草稿未包含的文件，并额外写入 `.ai-ir.json` 来源文件；
+- 两种方式安装的插件在运行行为上没有区别，都受同一套信任与激活机制管理。
+
 ## 十、调试与排错
 
 ### 1. 插件没有出现在列表
@@ -644,6 +666,12 @@ com.example.geometry/
 - 返回结果是否包含连接规则，而不是只有自然语言介绍；
 - 工具的 `workspaceModes` 是否包含当前编辑模式；
 - 工具名称是否与其他插件冲突。
+
+### 5. AI 继续开发时提示“插件草稿不存在”
+
+- 插件草稿保存在应用本地存储中，重启应用后仍然可用；该提示表示引用的草稿 ID 已失效（例如已被清理的最旧草稿）；
+- 处理方式：让 AI 重新调用 `create_plugin_draft` 创建草稿，或对已安装插件调用 `import_installed_plugin_draft` 从磁盘恢复；
+- 导入时保留 `.ai-ir.json`，恢复的是结构化 IR 草稿，而不是生成文件。
 
 ## 十一、参考示例
 

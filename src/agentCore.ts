@@ -8,6 +8,7 @@ import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunRes
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import { publishLiveStream } from "./agentV2/liveStream";
 import { isStreamingCodeTool, previewCodeFromStreamingTool } from "./agentV2/streamingCodePreview";
+import { pluginAuthoringRules } from "./agentV2/pluginAuthoringPrompt";
 
 export type { AgentActivityEvent, AgentCapability, AgentCodeChange, AgentConversationTurn, AgentHost, AgentMode, AgentProgress, AgentRunResult, AgentTokenUsage, AgentTool, RunVisualPythonAgentArgs, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiCodeEdit, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2/types";
 export { coreAgentTools, visualPythonTools } from "./agentV2/toolRegistry";
@@ -46,21 +47,6 @@ const systemRules = `你是 Visual Python 的通用软件智能体。你通过�
 - 工程资源通过 list_resources 和 get_resource 获取可用路径，不要虚构图片、音频、字体或资源 ID；资源引用后调用 check_resources。
 - 依赖操作先用 check_dependencies：missing 为空表示已经安装；只有确实缺失且用户允许时才调用 install_dependencies。
 - save_project 只在用户当前请求明确包含保存要求时执行；代码修改成功不等于需要保存工程。`;
-
-const pluginAuthoringRules = `
-
-插件开发规则：
-- 用户要求开发新插件时：先调用 inspect_plugin_api 和 create_plugin_plan，把返回的 planId 传给 create_plugin_draft 创建草稿；修改已有插件时先用 list_installed_plugins 找到准确 ID，再用 import_installed_plugin_draft 导入原始文件，并用 read_plugin_draft_file 分页读取需要修改的真实源码。后续始终用 update_plugin_draft 更新同一草稿，不要把插件代码写入当前普通 Python 文档。
-- 扩展已启用插件前先读取当前能力：先调用该能力的只读检查工具，取得真实入口积木、输入名、运行对象和代码生成约定；没有可验证的能力契约时必须创建自包含插件。积木类型、输入名、激活方式和生成的 Python 一律以工具返回的插件契约为准，不要猜测宿主输入名或入口。
-- 修改插件文件时，先用 read_plugin_draft_file 读取目标片段，再优先使用 edit_plugin_draft_file 定点替换，oldText 必须唯一匹配；只有确实需要整体生成或重建多个文件时才使用 update_plugin_draft。
-- 每个草稿必须维护 codegen.json：standalone 模式必须自行生成所需 import、初始化和结束逻辑；extension 模式必须声明 provider 和 runtimeNames，并严格使用提供方公开的入口与运行对象。
-- codegen.json 只是代码生成契约，不会被宿主自动转换成积木。所有积木定义和 Python 生成器必须在入口模块的 activate(context) 中通过 context.registerBlock() 注册，并通过 context.registerToolboxCategory() 放入工具箱；activate() 不得只返回 codegen.json 路径或空对象，插件只有实际注册了积木、工具箱、设置、命令、文档处理器或 Agent 工具后才算激活成功。
-- 所有积木生成的 Python 必须形成完整、可解释的程序结构，不得引用未导入、未初始化或未由扩展契约声明的运行对象；不得凭空创造变量名、入口名或宿主 API。
-- Python 生成器必须使用 generator.statementToCode() 和 generator.INDENT 处理嵌套语句；生成代码统一使用 4 个空格缩进，禁止 Tab，不要手工拼接不一致的嵌套缩进。安装时宿主会逐个实例化插件积木并执行真实 Python 语法检查。
-- 先创建或更新同一个插件草稿，再调用 validate_plugin_draft 验证；验证失败时根据 issues 修改草稿后重新验证，不要重复创建相同插件。静态验证通过后调用 run_plugin_draft_checks，只有运行检查返回 phase ready 才准备安装。
-- 插件安装、加载或运行失败后，在再次修改草稿前调用 get_diagnostics，结合工具错误、输出和问题定位原因；不要在未读取诊断时猜测修改。
-- install_plugin_draft 会写入本地插件目录并执行插件 JavaScript，宿主会提供唯一的安装确认；插件草稿验证通过后，向用户说明已准备安装并等待确认，只有用户明确确认安装后才调用，不要用 ask_user 重复确认，未确认时不要安装。
-`;
 
 function createId(prefix: string, index: number): string {
   return `${prefix}-${Date.now().toString(36)}-${index}`;
@@ -225,7 +211,7 @@ function isFailedToolResult(result: Record<string, unknown>): boolean {
   return Boolean(validation && typeof validation === "object" && !Array.isArray(validation) && (validation as Record<string, unknown>).valid === false);
 }
 
-export async function runAgentCore({ prompt, history = [], mode = "agent", reasoningEffort = "high", host, onEvent, onProgress, onPermissionRequest, signal, transport = chatCompletionsTransport }: RunVisualPythonAgentArgs & { transport?: AgentModelTransport }): Promise<AgentRunResult> {
+export async function runAgentCore({ prompt, history = [], mode = "agent", reasoningEffort = "high", host, onEvent, onProgress, permissionMode, onPermissionRequest, signal, transport = chatCompletionsTransport }: RunVisualPythonAgentArgs & { transport?: AgentModelTransport }): Promise<AgentRunResult> {
   if (!prompt.trim()) throw new Error("请输入任务");
   const memory = createAgentMemory(history);
   const capabilities = host.getCapabilities?.() ?? [];
@@ -442,14 +428,17 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
         pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: true, skipped: true, reason: message }));
         continue;
       }
-      const permissionDenied = currentTool?.requiresPermission
+      const permissionDenied = permissionMode !== "auto"
+        && currentTool?.requiresPermission
         && (!onPermissionRequest || !(await onPermissionRequest({
           id: toolId,
           toolName: call.function.name,
           title: `需要确认：${toolLabel(call.function.name)}`,
           detail: call.function.name === "install_plugin_draft"
             ? "该操作会写入本地插件目录并执行插件 JavaScript。"
-            : "该操作会修改工程或启动任务。",
+            : call.function.name === "run_plugin_draft_checks"
+              ? "该操作会在宿主中运行插件草稿的 JavaScript，用于验证激活、工具箱和生成的代码。"
+              : "该操作会修改工程或启动任务。",
         })));
       if (mode === "plan" || permissionDenied) {
         const denied = { ok: false, error: mode === "plan" ? "计划模式禁止执行修改或运行操作" : "用户拒绝了这次操作" };

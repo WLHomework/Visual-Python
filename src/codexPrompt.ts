@@ -10,7 +10,9 @@ type CodexPromptInput = {
 
 const maxSnapshotCharacters = 10_000;
 const maxCodeCharacters = 8_000;
-const maxHistoryCharacters = 6_000;
+const maxHandoffTurns = 12;
+const maxHandoffTurnCharacters = 2_000;
+const maxHandoffCharacters = 24_000;
 
 function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max)}\n[内容已截断]` : value;
@@ -41,13 +43,17 @@ function compactSnapshot(snapshot: Record<string, unknown>): string {
 }
 
 function compactHistory(history: AgentConversationTurn[]): string {
-  let result = "";
-  for (const turn of history.slice(-4)) {
-    const item = `用户：${truncate(turn.user, 900)}\n助手：${truncate(turn.assistant, 900)}\n\n`;
-    if (result.length + item.length > maxHistoryCharacters) break;
-    result += item;
+  // Fill from the newest turn backwards so a tight budget never drops the most recent context.
+  const selected: string[] = [];
+  let characters = 0;
+  for (let index = history.length - 1; index >= 0 && selected.length < maxHandoffTurns; index -= 1) {
+    const turn = history[index];
+    const item = `用户：${truncate(turn.user, maxHandoffTurnCharacters)}\n助手：${truncate(turn.assistant, maxHandoffTurnCharacters)}\n\n`;
+    if (selected.length && characters + item.length > maxHandoffCharacters) break;
+    selected.unshift(item);
+    characters += item.length;
   }
-  return result.trim();
+  return selected.join("").trim();
 }
 
 export function buildCodexPrompt(input: CodexPromptInput, includeHistory: boolean): string {

@@ -14,6 +14,40 @@ describe("Codex prompt compaction", () => {
     expect(buildCodexPrompt(input, false)).toContain("继续修改代码");
   });
 
+  it("keeps every recent turn that fits the larger handoff budget", () => {
+    const history = Array.from({ length: 5 }, (_, index) => ({
+      user: `请求-${index}：${"u".repeat(800)}`,
+      assistant: `回复-${index}：${"a".repeat(800)}`,
+    }));
+    const prompt = buildCodexPrompt({ prompt: "继续", history, snapshot: {} }, true);
+
+    // The previous 6000-character cap dropped the newest turn; the handoff budget must keep it.
+    expect(prompt).toContain("请求-4");
+    expect(prompt).toContain("请求-0");
+    expect(prompt).not.toContain("[内容已截断]");
+  });
+
+  it("keeps the most recent turns when the handoff history exceeds the budget", () => {
+    const history = Array.from({ length: 20 }, (_, index) => ({
+      user: `旧请求-${index}：${"u".repeat(1_500)}`,
+      assistant: `旧回复-${index}：${"a".repeat(1_500)}`,
+    }));
+    const prompt = buildCodexPrompt({ prompt: "继续", history, snapshot: {} }, true);
+
+    expect(prompt).toContain("旧请求-19");
+    expect(prompt).not.toContain("旧请求-0：");
+    expect(prompt.length).toBeLessThan(40_000);
+  });
+
+  it("caps the handoff to the twelve most recent turns", () => {
+    const history = Array.from({ length: 20 }, (_, index) => ({ user: `短请求-${index}`, assistant: `短回复-${index}` }));
+    const prompt = buildCodexPrompt({ prompt: "继续", history, snapshot: {} }, true);
+
+    expect(prompt).toContain("短请求-19");
+    expect(prompt).toContain("短请求-8");
+    expect(prompt).not.toContain("短请求-7");
+  });
+
   it("bounds a large code snapshot while preserving task metadata", () => {
     const prompt = buildCodexPrompt({
       prompt: "检查当前代码",

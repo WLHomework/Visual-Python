@@ -4715,13 +4715,56 @@ fn install_external_plugin_zip_file(
     })
 }
 
+// 合并安装：把磁盘上已有、但不在新草稿中的文件复制进待安装目录，草稿文件优先。
+// 这样导入时因二进制而跳过的资源不会在安装时丢失；遇到符号链接则报错，避免跟随链接复制。
+fn copy_dir_into_for_merge(source: &Path, destination: &Path) -> Result<(), String> {
+    let mut pending = vec![(source.to_path_buf(), PathBuf::new())];
+    while let Some((directory, relative_dir)) = pending.pop() {
+        let mut entries = fs::read_dir(&directory)
+            .map_err(|error| format!("cannot read existing plugin directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("cannot read existing plugin directory entry: {error}"))?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let metadata = fs::symlink_metadata(entry.path())
+                .map_err(|error| format!("cannot inspect existing plugin file: {error}"))?;
+            if metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "existing plugin contains a symlink and cannot be merged: {}",
+                    entry.path().display()
+                ));
+            }
+            let relative = relative_dir.join(entry.file_name());
+            let target = destination.join(&relative);
+            if metadata.is_dir() {
+                fs::create_dir_all(&target)
+                    .map_err(|error| format!("cannot create merged plugin directory: {error}"))?;
+                pending.push((entry.path(), relative));
+                continue;
+            }
+            if !metadata.is_file() {
+                return Err(format!(
+                    "unsupported existing plugin file type: {}",
+                    entry.path().display()
+                ));
+            }
+            if target.exists() {
+                continue;
+            }
+            fs::copy(entry.path(), &target)
+                .map_err(|error| format!("cannot preserve existing plugin file: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
 fn install_external_plugin_draft_files(
     files: HashMap<String, String>,
     plugins_dir: &Path,
 ) -> Result<ExternalPluginDiscovery, String> {
-    const MAX_FILES: usize = 24;
-    const MAX_FILE_BYTES: usize = 256 * 1024;
-    const MAX_TOTAL_BYTES: usize = 2 * 1024 * 1024;
+    const MAX_FILES: usize = 128;
+    const MAX_FILE_BYTES: usize = 1024 * 1024;
+    const MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
 
     if files.is_empty() {
         return Err("plugin draft is empty".into());
@@ -4796,6 +4839,12 @@ fn install_external_plugin_draft_files(
     }
 
     let destination = plugins_dir.join(&manifest.id);
+    if destination.exists() {
+        if let Err(error) = copy_dir_into_for_merge(&destination, &temp_dir) {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(error);
+        }
+    }
     let backup = plugins_dir.join(format!(".backup-{}-{stamp}", manifest.id));
     let had_destination = destination.exists();
     if backup.exists() {
@@ -4828,13 +4877,19 @@ fn install_external_plugin_draft_files(
     })
 }
 
+#[derive(Serialize)]
+struct ExternalPluginFilesPayload {
+    files: HashMap<String, String>,
+    skipped: Vec<String>,
+}
+
 fn read_external_plugin_files_from_dir(
     plugin_id: &str,
     plugins_dir: &Path,
-) -> Result<HashMap<String, String>, String> {
-    const MAX_FILES: usize = 24;
-    const MAX_FILE_BYTES: u64 = 256 * 1024;
-    const MAX_TOTAL_BYTES: u64 = 2 * 1024 * 1024;
+) -> Result<ExternalPluginFilesPayload, String> {
+    const MAX_FILES: usize = 128;
+    const MAX_FILE_BYTES: u64 = 1024 * 1024;
+    const MAX_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
 
     if !is_valid_plugin_id(plugin_id) {
         return Err("invalid plugin id".into());
@@ -4855,6 +4910,7 @@ fn read_external_plugin_files_from_dir(
 
     let mut pending = vec![(plugin_dir.clone(), PathBuf::new())];
     let mut files = HashMap::new();
+    let mut skipped = Vec::new();
     let mut total_bytes = 0_u64;
     while let Some((directory, relative_dir)) = pending.pop() {
         let mut entries = fs::read_dir(&directory)
@@ -4872,6 +4928,11 @@ fn read_external_plugin_files_from_dir(
                 ));
             }
             let relative = relative_dir.join(entry.file_name());
+            let name = relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             if metadata.is_dir() {
                 pending.push((entry.path(), relative));
                 continue;
@@ -4882,25 +4943,29 @@ fn read_external_plugin_files_from_dir(
                     entry.path().display()
                 ));
             }
-            if files.len() >= MAX_FILES {
-                return Err(format!("plugin has more than {MAX_FILES} files"));
-            }
             if metadata.len() > MAX_FILE_BYTES {
-                return Err(format!("plugin file is too large: {}", relative.display()));
+                skipped.push(name);
+                continue;
             }
-            total_bytes = total_bytes.saturating_add(metadata.len());
-            if total_bytes > MAX_TOTAL_BYTES {
-                return Err("plugin files are too large".into());
+            if files.len() >= MAX_FILES {
+                return Err(format!(
+                    "plugin has more than {MAX_FILES} editable text files"
+                ));
             }
             let bytes = fs::read(entry.path())
                 .map_err(|error| format!("cannot read plugin file: {error}"))?;
-            let contents = String::from_utf8(bytes)
-                .map_err(|_| format!("plugin file is not UTF-8 text: {}", relative.display()))?;
-            let name = relative
-                .components()
-                .map(|component| component.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/");
+            let contents = match String::from_utf8(bytes) {
+                Ok(contents) => contents,
+                Err(_) => {
+                    // 二进制资源无法作为文本编辑；导入时跳过，安装合并时会保留磁盘上的原文件。
+                    skipped.push(name);
+                    continue;
+                }
+            };
+            total_bytes = total_bytes.saturating_add(metadata.len());
+            if total_bytes > MAX_TOTAL_BYTES {
+                return Err("plugin text files are too large".into());
+            }
             files.insert(name, contents);
         }
     }
@@ -4915,7 +4980,7 @@ fn read_external_plugin_files_from_dir(
     if manifest.id != plugin_id {
         return Err("plugin manifest id does not match requested plugin id".into());
     }
-    Ok(files)
+    Ok(ExternalPluginFilesPayload { files, skipped })
 }
 
 fn delete_external_plugin_dir(plugin_path: &Path, plugins_dir: &Path) -> Result<(), String> {
@@ -5941,7 +6006,7 @@ fn read_external_plugin_entry(
 fn read_external_plugin_files(
     app: AppHandle,
     plugin_id: String,
-) -> Result<HashMap<String, String>, String> {
+) -> Result<ExternalPluginFilesPayload, String> {
     let plugins_dir = app
         .path()
         .app_data_dir()
@@ -8416,6 +8481,11 @@ mod tests {
             .unwrap(),
             "# Updated\n"
         );
+        // 合并安装：草稿里没有的已有文件必须保留。
+        assert!(plugins_dir
+            .join("visual-python.draft-demo")
+            .join("docs/README.md")
+            .exists());
         assert!(!fs::read_dir(&plugins_dir)
             .unwrap()
             .filter_map(Result::ok)
@@ -8448,20 +8518,29 @@ mod tests {
         )
         .unwrap();
         fs::write(plugin_dir.join("docs").join("guide.txt"), "guide\n").unwrap();
+        fs::create_dir_all(plugin_dir.join("assets")).unwrap();
+        fs::write(
+            plugin_dir.join("assets").join("badge.bin"),
+            [0xff, 0xfe, 0xfd],
+        )
+        .unwrap();
 
-        let files = read_external_plugin_files_from_dir("visual-python.read-demo", &plugins_dir)
+        let payload = read_external_plugin_files_from_dir("visual-python.read-demo", &plugins_dir)
             .expect("read plugin files");
 
         assert_eq!(
-            files.get("docs/guide.txt").map(String::as_str),
+            payload.files.get("docs/guide.txt").map(String::as_str),
             Some("guide\n")
         );
+        assert!(payload.files.get("plugin.json").is_some());
+        assert!(!payload.files.contains_key("assets/badge.bin"));
+        assert_eq!(payload.skipped, vec!["assets/badge.bin".to_string()]);
         assert!(read_external_plugin_files_from_dir("../outside", &plugins_dir).is_err());
         fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
-    fn rejects_binary_installed_plugin_files() {
+    fn skips_binary_installed_plugin_files_with_a_warning() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -8473,10 +8552,12 @@ mod tests {
         fs::write(plugin_dir.join("plugin.json"), r#"{"id":"visual-python.binary-demo","name":"Binary Demo","version":"1.0.0","apiVersion":"1","entry":"index.js"}"#).unwrap();
         fs::write(plugin_dir.join("index.js"), [0xff, 0xfe, 0xfd]).unwrap();
 
-        let error = read_external_plugin_files_from_dir("visual-python.binary-demo", &plugins_dir)
-            .expect_err("binary file must be rejected");
+        let payload =
+            read_external_plugin_files_from_dir("visual-python.binary-demo", &plugins_dir)
+                .expect("binary files are skipped, not fatal");
 
-        assert!(error.contains("UTF-8"));
+        assert!(!payload.files.contains_key("index.js"));
+        assert_eq!(payload.skipped, vec!["index.js".to_string()]);
         fs::remove_dir_all(&root).unwrap();
     }
 

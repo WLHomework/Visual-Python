@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearCodexThread, createDynamicToolsSignature, getCodexThread, getCodexThreadWithTools, saveCodexThread } from "./codexThreadStore";
 
 function createStorage(): Storage {
@@ -13,10 +13,15 @@ function createStorage(): Storage {
   };
 }
 
+const config = { baseUrl: "https://example.com/v1", model: "model-a" };
+
 describe("Codex thread persistence", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("stores a thread per conversation target and model configuration", () => {
     const storage = createStorage();
-    const config = { baseUrl: "https://example.com/v1", model: "model-a" };
 
     saveCodexThread("project-1:conversation-1", config, "thread-1", storage);
 
@@ -26,7 +31,6 @@ describe("Codex thread persistence", () => {
 
   it("can clear a stale thread without affecting another target", () => {
     const storage = createStorage();
-    const config = { baseUrl: "https://example.com/v1", model: "model-a" };
     saveCodexThread("target-a", config, "thread-a", storage);
     saveCodexThread("target-b", config, "thread-b", storage);
 
@@ -36,13 +40,75 @@ describe("Codex thread persistence", () => {
     expect(getCodexThread("target-b", config, storage)).toBe("thread-b");
   });
 
-  it("does not resume a thread after its dynamic tool set changes", () => {
+  it("keeps one thread slot per dynamic tool signature", () => {
     const storage = createStorage();
-    const config = { baseUrl: "https://example.com/v1", model: "model-a" };
 
     saveCodexThread("target", config, "thread-a", storage, "tools-a");
+    saveCodexThread("target", config, "thread-b", storage, "tools-b");
 
     expect(getCodexThreadWithTools("target", config, "tools-a", storage)).toBe("thread-a");
+    expect(getCodexThreadWithTools("target", config, "tools-b", storage)).toBe("thread-b");
+    expect(getCodexThreadWithTools("target", config, "tools-c", storage)).toBeUndefined();
+  });
+
+  it("resumes the earlier thread when the tool surface returns to a previous signature", () => {
+    const storage = createStorage();
+
+    saveCodexThread("target", config, "thread-a", storage, "tools-a");
+    saveCodexThread("target", config, "thread-b", storage, "tools-b");
+
+    expect(getCodexThreadWithTools("target", config, "tools-a", storage)).toBe("thread-a");
+  });
+
+  it("touches a resumed slot so recent use survives per-target trimming", () => {
+    const storage = createStorage();
+    vi.useFakeTimers();
+    for (let index = 0; index < 6; index += 1) {
+      vi.setSystemTime(1_000 + index);
+      saveCodexThread("target", config, `thread-${index}`, storage, `tools-${index}`);
+    }
+    vi.setSystemTime(2_000);
+    // A successful resume re-saves the slot, which must count as recent use.
+    saveCodexThread("target", config, "thread-0", storage, "tools-0");
+    vi.setSystemTime(3_000);
+    saveCodexThread("target", config, "thread-6", storage, "tools-6");
+
+    expect(getCodexThreadWithTools("target", config, "tools-1", storage)).toBeUndefined();
+    expect(getCodexThreadWithTools("target", config, "tools-0", storage)).toBe("thread-0");
+    expect(getCodexThreadWithTools("target", config, "tools-6", storage)).toBe("thread-6");
+  });
+
+  it("evicts the least recently updated conversation target", () => {
+    const storage = createStorage();
+    vi.useFakeTimers();
+    for (let index = 0; index < 97; index += 1) {
+      vi.setSystemTime(1_000 + index);
+      saveCodexThread(`target-${index}`, config, `thread-${index}`, storage, "tools");
+    }
+
+    expect(getCodexThreadWithTools("target-0", config, "tools", storage)).toBeUndefined();
+    expect(getCodexThreadWithTools("target-96", config, "tools", storage)).toBe("thread-96");
+  });
+
+  it("clears only the failed signature slot", () => {
+    const storage = createStorage();
+    saveCodexThread("target", config, "thread-a", storage, "tools-a");
+    saveCodexThread("target", config, "thread-b", storage, "tools-b");
+
+    clearCodexThread("target", config, storage, "tools-a");
+
+    expect(getCodexThreadWithTools("target", config, "tools-a", storage)).toBeUndefined();
+    expect(getCodexThreadWithTools("target", config, "tools-b", storage)).toBe("thread-b");
+  });
+
+  it("removes the whole target when cleared without a signature", () => {
+    const storage = createStorage();
+    saveCodexThread("target", config, "thread-a", storage, "tools-a");
+    saveCodexThread("target", config, "thread-b", storage, "tools-b");
+
+    clearCodexThread("target", config, storage);
+
+    expect(getCodexThreadWithTools("target", config, "tools-a", storage)).toBeUndefined();
     expect(getCodexThreadWithTools("target", config, "tools-b", storage)).toBeUndefined();
   });
 
@@ -57,5 +123,16 @@ describe("Codex thread persistence", () => {
     ]);
 
     expect(second).toBe(first);
+  });
+
+  it("drops the legacy store whose conversation targets are no longer addressable", () => {
+    const storage = createStorage();
+    storage.setItem(
+      "visual-python:codex-thread-store:v1",
+      JSON.stringify({ "old-target\nhttps://example.com/v1\nmodel-a": { threadId: "thread-old", updatedAt: 1 } }),
+    );
+
+    expect(getCodexThreadWithTools("old-target", config, "tools-a", storage)).toBeUndefined();
+    expect(storage.getItem("visual-python:codex-thread-store:v1")).toBeNull();
   });
 });

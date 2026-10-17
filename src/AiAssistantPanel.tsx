@@ -19,6 +19,7 @@ import { createCodeChangePreview } from "./agentV2/codeChanges";
 import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2/types";
 import { getAiAgentPermissionMode, getAiReasoningEffort, saveAiReasoningEffort, type AiAgentPermissionMode, type AiReasoningEffort } from "./aiConfig";
 import { buildAiConversationHistory } from "./aiConversationContext";
+import { CONVERSATION_STORES_PREFIX, conversationStoreKey, conversationStoreTimestamp, isStorageQuotaError } from "./sessionPersistence";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
 import { stripAgentFollowUpMarkup } from "./agentV2/followUps";
 import { subscribeLiveStream } from "./agentV2/liveStream";
@@ -113,7 +114,6 @@ const maxContextCharacters = 64_000;
 let conversationSequence = 1;
 
 const aiHistoryStorageKey = (scope: string) => `${legacyAiHistoryStorageKey}:${encodeURIComponent(scope)}`;
-const aiConversationsStorageKey = (scope: string) => `visual-python:ai-conversations:${encodeURIComponent(scope)}`;
 const reasoningEffortLabels: Record<AiReasoningEffort, string> = {
   low: "低",
   medium: "中",
@@ -141,7 +141,7 @@ function createConversation(runs: AgentRun[] = []): AiConversation {
   };
 }
 
-function parseStoredRuns(value: unknown): AgentRun[] {
+export function parseStoredRuns(value: unknown): AgentRun[] {
   if (!Array.isArray(value)) return [];
   return value.slice(-maxStoredRuns).flatMap((candidate): AgentRun[] => {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
@@ -160,7 +160,11 @@ function parseStoredRuns(value: unknown): AgentRun[] {
       if (typeof step.step !== "string" || (step.status !== "pending" && step.status !== "in_progress" && step.status !== "completed")) return [];
       return [{ step: step.step.slice(0, 120), status: step.status }];
     }).slice(0, 10) : [];
-    return [{ ...run, id: run.id, prompt: run.prompt, mode: run.mode === "plan" ? "plan" : "agent", ...(initialPlan.length ? { initialPlan } : { initialPlan: undefined }), activities: run.activities, status, finishedAt } as AgentRun];
+    // 历史数据里可能保留着与最终响应重复的流式回复（例如带 follow-up 元数据），读取时就地自愈。
+    const activities = run.result && typeof run.result.summary === "string"
+      ? removeFinalMessageActivity(run.activities, run.result.summary)
+      : run.activities;
+    return [{ ...run, id: run.id, prompt: run.prompt, mode: run.mode === "plan" ? "plan" : "agent", ...(initialPlan.length ? { initialPlan } : { initialPlan: undefined }), activities, status, finishedAt } as AgentRun];
   });
 }
 
@@ -175,7 +179,7 @@ function loadStoredRuns(scope: string): AgentRun[] {
 
 function readConversationState(scope: string): AiConversationState {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(aiConversationsStorageKey(scope)) || "null");
+    const value: unknown = JSON.parse(localStorage.getItem(conversationStoreKey(scope)) || "null");
     if (value && typeof value === "object" && !Array.isArray(value)) {
       const candidate = value as Partial<AiConversationState>;
       const conversations = Array.isArray(candidate.conversations)
@@ -228,13 +232,6 @@ function loadConversationState(scope: string, migrationScopes: string[] = []): A
   const primary = readConversationState(scope);
   const imported = [...new Set(migrationScopes.filter((migrationScope) => migrationScope && migrationScope !== scope))].map(readConversationState);
   return imported.length ? mergeAiConversationStates(primary, imported) : primary;
-}
-
-function isStorageQuotaError(error: unknown) {
-  if (!(error instanceof Error)) return false;
-  return error.name === "QuotaExceededError"
-    || error.name === "NS_ERROR_DOM_QUOTA_REACHED"
-    || ("code" in error && (error.code === 22 || error.code === 1014));
 }
 
 function serializeConversationState(state: AiConversationState) {
@@ -336,18 +333,8 @@ function serializeConversationState(state: AiConversationState) {
   return serialized;
 }
 
-function storedConversationTimestamp(storage: AiConversationStorage, key: string) {
-  try {
-    const value = JSON.parse(storage.getItem(key) || "null") as Partial<AiConversationState> | null;
-    if (!Array.isArray(value?.conversations)) return 0;
-    return Math.max(0, ...value.conversations.map((conversation) => typeof conversation?.updatedAt === "number" ? conversation.updatedAt : 0));
-  } catch {
-    return 0;
-  }
-}
-
 export function storeConversationState(scope: string, state: AiConversationState, storage: AiConversationStorage = localStorage) {
-  const key = aiConversationsStorageKey(scope);
+  const key = conversationStoreKey(scope);
   const serialized = serializeConversationState(state);
   const persist = () => {
     storage.setItem(key, serialized);
@@ -361,8 +348,8 @@ export function storeConversationState(scope: string, state: AiConversationState
   }
 
   const staleKeys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
-    .filter((candidate): candidate is string => Boolean(candidate?.startsWith("visual-python:ai-conversations:") && candidate !== key))
-    .sort((left, right) => storedConversationTimestamp(storage, left) - storedConversationTimestamp(storage, right));
+    .filter((candidate): candidate is string => Boolean(candidate?.startsWith(CONVERSATION_STORES_PREFIX) && candidate !== key))
+    .sort((left, right) => conversationStoreTimestamp(storage, left) - conversationStoreTimestamp(storage, right));
   for (const staleKey of staleKeys) {
     try {
       storage.removeItem(staleKey);
@@ -807,22 +794,27 @@ export function finalizeAgentRunActivities(activities: AiAgentActivity[], status
 }
 
 export function removeFinalMessageActivity(activities: AiAgentActivity[], summary: string): AiAgentActivity[] {
-  const normalizedSummary = summary.replace(/\r\n/g, "\n").trim();
+  // 收尾消息活动保留的是模型原始文本（可能带隐藏的 follow-up 元数据），而 result.summary
+  // 已按渲染规则剥离元数据；按规范化后的渲染文本比较，并把拼成 summary 的连续收尾回复一并移除，
+  // 避免同一段文字既作为流式回复块、又作为最终响应块渲染两次。
+  const normalizedSummary = normalizeAssistantMarkdown(summary);
   if (!normalizedSummary) return activities;
-  let finalMessageIndex = -1;
-  for (let index = activities.length - 1; index >= 0; index -= 1) {
-    const activity = activities[index];
-    const isAssistantMessage = activity.kind === "message" && (!activity.channel || activity.channel === "message");
-    if (!isAssistantMessage) continue;
-    const title = activity.title.replace(/\r\n/g, "\n").trim();
-    const markdown = activity.markdown?.replace(/\r\n/g, "\n").trim();
-    if (title === normalizedSummary || markdown === normalizedSummary) {
-      finalMessageIndex = index;
-      break;
-    }
+  const replyText = (activity: AiAgentActivity): string => {
+    const markdown = typeof activity.markdown === "string" ? activity.markdown : "";
+    if (markdown.trim()) return markdown;
+    return typeof activity.title === "string" ? activity.title : "";
+  };
+  const replyIndexes = activities.flatMap((activity, index) => (
+    activity && typeof activity === "object" && isAssistantReplyActivity(activity) ? [index] : []
+  ));
+  for (let start = replyIndexes.length - 1; start >= 0; start -= 1) {
+    const indexes = replyIndexes.slice(start);
+    const combined = normalizeAssistantMarkdown(indexes.map((index) => replyText(activities[index])).join("\n\n"));
+    if (combined !== normalizedSummary) continue;
+    const removed = new Set(indexes);
+    return activities.filter((_, index) => !removed.has(index));
   }
-  if (finalMessageIndex < 0) return activities;
-  return activities.filter((_, index) => index !== finalMessageIndex);
+  return activities;
 }
 
 function agentToolCategory(toolName?: AiAgentToolName | "inspect_rendered_video"): AgentToolCategory {

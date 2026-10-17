@@ -5,6 +5,7 @@ import type { AgentModelEvent } from "./agentEvents";
 import { compactAgentToolResult, compactBlockCatalogForPrompt, graphicalCatalogInstructions } from "./agentV2/context";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import { publishLiveStream } from "./agentV2/liveStream";
+import { pluginAuthoringRules } from "./agentV2/pluginAuthoringPrompt";
 import { coreAgentTools } from "./agentV2/toolRegistry";
 import { buildCodexPrompt } from "./codexPrompt";
 import { createDynamicToolsSignature, getCodexThreadWithTools } from "./codexThreadStore";
@@ -228,11 +229,15 @@ export async function runCodexVisualPythonAgent(
       return;
     }
     emit({ id: toolId, kind: "tool", status: "running", title: tool.label, toolName });
-    const permissionAllowed = !tool.requiresPermission || Boolean(args.onPermissionRequest && await args.onPermissionRequest({
+    const permissionAllowed = !tool.requiresPermission || args.permissionMode === "auto" || Boolean(args.onPermissionRequest && await args.onPermissionRequest({
       id: toolId,
       toolName,
       title: `需要确认：${tool.label}`,
-      detail: "该操作会修改工程或启动任务。",
+      detail: toolName === "install_plugin_draft"
+        ? "该操作会写入本地插件目录并执行插件 JavaScript。"
+        : toolName === "run_plugin_draft_checks"
+          ? "该操作会在宿主中运行插件草稿的 JavaScript，用于验证激活、工具箱和生成的代码。"
+          : "该操作会修改工程或启动任务。",
     }));
     if (!permissionAllowed) {
       const denied = { ok: false, error: "用户拒绝了这次操作" };
@@ -310,8 +315,11 @@ export async function runCodexVisualPythonAgent(
   progress({ phase: "preparing", label: "准备当前工程上下文", tokenUsage: usage });
   try {
     const developerInstructions = args.mode === "plan"
-      ? "当前是计划模式，只能读取和分析，不得修改、运行或保存工程。"
-      : `当前是智能体模式。所有工程操作必须使用 Visual Python 动态工具。${graphicalWorkspace ? `\n${graphicalInstructions(promptBlockCatalog)}` : ""}`;
+      ? `当前是计划模式，只能读取和分析，不得修改、运行或保存工程。${pluginAuthoringRules}`
+      : `当前是智能体模式。所有工程操作必须使用 Visual Python 动态工具。${pluginAuthoringRules}${graphicalWorkspace ? `\n${graphicalInstructions(promptBlockCatalog)}` : ""}`;
+    if (!existingThread && (args.history?.length ?? 0) > 0) {
+      emit({ id: "context-handoff", kind: "observation", status: "done", title: "已开启新的服务端线程，本次任务附带最近对话摘要" });
+    }
     const turn = await transport.runTurn(prompt, {
       config,
       effort: args.reasoningEffort,

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { CodexAgentClient, mapCodexNotification, type CodexAgentInvoke } from "./codexAgentClient";
+import { CodexAgentClient, mapCodexNotification, type CodexAgentInvoke, type CodexDynamicTool } from "./codexAgentClient";
+import { createDynamicToolsSignature, getCodexThreadWithTools, saveCodexThread } from "./codexThreadStore";
 
 describe("CodexAgentClient", () => {
   it("extracts the real provider error and HTTP status from App Server notifications", () => {
@@ -106,7 +107,7 @@ describe("CodexAgentClient", () => {
     vi.unstubAllGlobals();
   });
 
-  it("starts a fresh thread when the dynamic tool set changes", async () => {
+  it("keeps a thread per tool signature and resumes the matching one after the tool set returns", async () => {
     const storage = new Map<string, string>();
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -114,18 +115,23 @@ describe("CodexAgentClient", () => {
       removeItem: (key: string) => storage.delete(key),
     });
     const calls: string[] = [];
+    const resumedIds: string[] = [];
     let currentThreadId = "";
     let currentTurnId = "";
     const invokeMock = vi.fn(async <T>(command: string, args?: Record<string, unknown>) => {
       if (command === "codex_agent_start") return undefined as T;
       if (command === "codex_agent_request") {
-        const request = args?.request as { method: string };
+        const request = args?.request as { method: string; params?: { threadId?: string } };
         calls.push(request.method);
         if (request.method === "thread/start") {
           currentThreadId = `thread-${calls.filter((method) => method === "thread/start").length}`;
           return { ok: true, result: { thread: { id: currentThreadId } } } as T;
         }
-        if (request.method === "thread/resume") return { ok: true, result: { thread: { id: "thread-1" } } } as T;
+        if (request.method === "thread/resume") {
+          resumedIds.push(request.params?.threadId || "");
+          currentThreadId = request.params?.threadId || "";
+          return { ok: true, result: { thread: { id: currentThreadId } } } as T;
+        }
         if (request.method === "turn/start") {
           currentTurnId = `turn-${calls.filter((method) => method === "turn/start").length}`;
           return { ok: true, result: { turn: { id: currentTurnId, status: "inProgress" } } } as T;
@@ -139,12 +145,59 @@ describe("CodexAgentClient", () => {
       config: { baseUrl: "https://example.com/v1", model: "example-model" },
       conversationTargetId: "project-1:conversation-1",
     };
+    const toolsA: CodexDynamicTool[] = [{ type: "function", name: "old_tool", description: "old", inputSchema: { type: "object" } }];
+    const toolsB: CodexDynamicTool[] = [{ type: "function", name: "new_tool", description: "new", inputSchema: { type: "object" } }];
 
-    await client.runTurn("first", { ...options, dynamicTools: [{ type: "function", name: "old_tool", description: "old", inputSchema: { type: "object" } }] });
-    await client.runTurn("second", { ...options, dynamicTools: [{ type: "function", name: "new_tool", description: "new", inputSchema: { type: "object" } }] });
+    await client.runTurn("first", { ...options, dynamicTools: toolsA });
+    await client.runTurn("second", { ...options, dynamicTools: toolsB });
+    await client.runTurn("third", { ...options, dynamicTools: toolsA });
 
     expect(calls.filter((method) => method === "thread/start")).toHaveLength(2);
-    expect(calls.filter((method) => method === "thread/resume")).toHaveLength(0);
+    expect(calls.filter((method) => method === "thread/resume")).toHaveLength(1);
+    expect(resumedIds).toEqual(["thread-1"]);
+    vi.unstubAllGlobals();
+  });
+
+  it("starts a fresh thread with the fallback prompt when resume fails, without touching the other tool slot", async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
+    const config = { baseUrl: "https://example.com/v1", model: "example-model" };
+    const tools: CodexDynamicTool[] = [{ type: "function", name: "current_tool", description: "current", inputSchema: { type: "object" } }];
+    const signature = createDynamicToolsSignature(tools);
+    saveCodexThread("project-1:conversation-1", config, "thread-broken", undefined, signature);
+    saveCodexThread("project-1:conversation-1", config, "thread-other", undefined, "other-signature");
+    const turnInputs: string[] = [];
+    const invokeMock = vi.fn(async <T>(command: string, args?: Record<string, unknown>) => {
+      if (command === "codex_agent_start") return undefined as T;
+      if (command === "codex_agent_request") {
+        const request = args?.request as { method: string; params?: Record<string, unknown> };
+        if (request.method === "thread/resume") throw new Error("thread not found");
+        if (request.method === "thread/start") return { ok: true, result: { thread: { id: "thread-new" } } } as T;
+        if (request.method === "turn/start") {
+          const input = request.params?.input as Array<{ text?: string }> | undefined;
+          turnInputs.push(input?.[0]?.text || "");
+          return { ok: true, result: { turn: { id: "turn-1", status: "inProgress" } } } as T;
+        }
+      }
+      if (command === "codex_agent_next_event") return { kind: "notification", notification: { method: "turn/completed", params: { threadId: "thread-new", turn: { id: "turn-1", status: "completed" } } } } as T;
+      throw new Error(`unexpected command ${command}`);
+    });
+
+    await new CodexAgentClient(invokeMock as CodexAgentInvoke).runTurn("prompt", {
+      config,
+      conversationTargetId: "project-1:conversation-1",
+      dynamicTools: tools,
+      fallbackPrompt: "FALLBACK-PROMPT",
+    });
+
+    expect(turnInputs).toEqual(["FALLBACK-PROMPT"]);
+    const stored = { baseUrl: config.baseUrl, model: config.model };
+    expect(getCodexThreadWithTools("project-1:conversation-1", stored, signature)).toBe("thread-new");
+    expect(getCodexThreadWithTools("project-1:conversation-1", stored, "other-signature")).toBe("thread-other");
     vi.unstubAllGlobals();
   });
 

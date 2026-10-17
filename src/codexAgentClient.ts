@@ -210,8 +210,10 @@ export class CodexAgentClient {
         });
         threadId = threadResponse.thread.id;
         resumed = true;
+        // A successful resume counts as recent use so LRU trimming keeps live threads.
+        if (targetId) saveCodexThread(targetId, options.config, threadId, undefined, toolsSignature);
       } catch {
-        if (targetId) clearCodexThread(targetId, options.config);
+        if (targetId) clearCodexThread(targetId, options.config, undefined, toolsSignature);
       }
     }
     if (!threadId) {

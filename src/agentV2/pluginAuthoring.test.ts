@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createPluginDraftStore, validatePluginDraft } from "./pluginAuthoring";
+import { createPluginDraftStore, createPluginDraftStorePersistence, pluginAuthoringContract, validatePluginDraft } from "./pluginAuthoring";
+import { serializePluginIrFile } from "./pluginIr";
+
+const filesDraftFixture = (id: string) => ({
+  "plugin.json": JSON.stringify({ id, name: "Fixture", version: "1.0.0", apiVersion: "1", entry: "index.js" }),
+  "codegen.json": JSON.stringify({ version: 1, mode: "standalone" }),
+  "index.js": `const MARKER = "original";\nexport default { activate(context) { context.registerCommand({ id: "${id}.run", title: "Run", run() {} }); } };\n`,
+});
 
 describe("plugin authoring drafts", () => {
   it("rejects runtime validation and installation before the required phases", () => {
@@ -12,14 +19,33 @@ describe("plugin authoring drafts", () => {
 
   it("applies a draft file edit only when the old text matches exactly", () => {
     const store = createPluginDraftStore();
-    const draft = store.create({ id: "com.example.edit", name: "Edit", description: "Edit" });
+    const draft = store.createFromFiles(filesDraftFixture("com.example.edit"));
     const before = draft.files["index.js"];
 
     expect(() => store.editFile(draft.id, "index.js", "missing", "replacement")).toThrow(/oldText/);
-    const updated = store.editFile(draft.id, "index.js", "const BLOCK_TYPE", "const BLOCK_TYPE = \"changed\"; //");
+    const updated = store.editFile(draft.id, "index.js", 'const MARKER = "original";', 'const MARKER = "changed";');
 
     expect(updated.files["index.js"]).not.toBe(before);
+    expect(updated.files["index.js"]).toContain('const MARKER = "changed";');
     expect(updated.phase).toBe("implementing");
+  });
+
+  it("keeps IR drafts closed to file tools and applies structural operations instead", () => {
+    const store = createPluginDraftStore();
+    const draft = store.create({ id: "com.example.ir", name: "IR", description: "IR plugin" });
+
+    expect(draft.mode).toBe("ir");
+    expect(draft.ir?.blocks).toHaveLength(1);
+    expect(() => store.update(draft.id, { "README.md": "# x\n" })).toThrow(/apply_plugin_plan/);
+    expect(() => store.editFile(draft.id, "index.js", "a", "b")).toThrow(/apply_plugin_plan/);
+
+    const before = store.get(draft.id);
+    expect(() => store.applyOperations(draft.id, [{ action: "update_block", ref: "missing", set: { colour: "#000000" } }])).toThrow(/missing/);
+    expect(store.get(draft.id)).toEqual(before);
+
+    const updated = store.applyOperations(draft.id, [{ action: "update_block", ref: "block_1", set: { colour: "#112233" } }]);
+    expect(updated.phase).toBe("implementing");
+    expect(updated.files["index.js"]).toContain('colour: "#112233"');
   });
 
   it("builds planned block types into the generated plugin scaffold", () => {
@@ -58,9 +84,9 @@ describe("plugin authoring drafts", () => {
     expect(validatePluginDraft(draft)).toMatchObject({ valid: true, issues: [] });
   });
 
-  it("updates only the requested draft files", () => {
+  it("updates only the requested files of a file-mode draft", () => {
     const store = createPluginDraftStore();
-    const draft = store.create({ id: "com.example.shapes", name: "Shapes", description: "Basic shapes" });
+    const draft = store.createFromFiles({ ...filesDraftFixture("com.example.shapes"), "README.md": "# Original\n" });
     const updated = store.update(draft.id, { "README.md": "# Shapes\n" });
 
     expect(updated.files["README.md"]).toBe("# Shapes\n");
@@ -84,12 +110,49 @@ describe("plugin authoring drafts", () => {
 
   it("moves a draft to needs_fix after failed validation", () => {
     const store = createPluginDraftStore();
-    const draft = store.create({ id: "com.example.invalid", name: "Invalid", description: "Invalid" });
-    const result = validatePluginDraft(draft);
-    expect(result.valid).toBe(true);
+    const draft = store.createFromFiles(filesDraftFixture("com.example.invalid"));
+    expect(validatePluginDraft(draft).valid).toBe(true);
     const broken = store.update(draft.id, { "plugin.json": "{}" });
     expect(validatePluginDraft(broken).valid).toBe(false);
     expect(store.markValidation(broken.id, validatePluginDraft(broken))).toMatchObject({ phase: "needs_fix" });
+  });
+
+  it("restores IR mode from .ai-ir.json and keeps extra files across import", () => {
+    const store = createPluginDraftStore();
+    const created = store.create({ id: "com.example.round", name: "Round", description: "Round trip" });
+    expect(created.ir).toBeTruthy();
+
+    const imported = store.createFromFiles({
+      ...created.files,
+      ".ai-ir.json": serializePluginIrFile(created.ir!),
+      "docs/guide.txt": "guide\n",
+    });
+
+    expect(imported.mode).toBe("ir");
+    expect(imported.files["index.js"]).toBe(created.files["index.js"]);
+    expect(imported.files["docs/guide.txt"]).toBe("guide\n");
+    expect(imported.importWarnings).toBeUndefined();
+  });
+
+  it("falls back to file mode with a warning when the IR marker cannot be restored", () => {
+    const store = createPluginDraftStore();
+    const created = store.create({ id: "com.example.drift", name: "Drift", description: "Drift" });
+
+    const drifted = store.createFromFiles({
+      ...created.files,
+      ".ai-ir.json": serializePluginIrFile(created.ir!),
+      "index.js": `${created.files["index.js"]}\n// hand edit\n`,
+    });
+    expect(drifted.mode).toBe("ir");
+    expect(drifted.files["index.js"]).toBe(created.files["index.js"]);
+    expect(drifted.importWarnings?.some((warning) => warning.includes("index.js"))).toBe(true);
+
+    const broken = store.createFromFiles({
+      ...created.files,
+      ".ai-ir.json": "{ not json",
+    });
+    expect(broken.mode).toBe("files");
+    expect(broken.importWarnings?.some((warning) => warning.includes(".ai-ir.json"))).toBe(true);
   });
 
   it("imports an installed plugin without replacing its files with a scaffold", () => {
@@ -217,5 +280,78 @@ describe("plugin authoring drafts", () => {
     expect(validatePluginDraft(draft).issues).toContain("代码生成契约依赖的插件当前不可用：visual-python.robot");
     expect(validatePluginDraft(draft, { availableCapabilities: [] }).issues).toContain("代码生成契约依赖的插件当前不可用：visual-python.robot");
     expect(validatePluginDraft(draft, { availableCapabilities: [{ id: "visual-python.robot", runtimeNames: ["screen"] }] }).issues).toContain("提供方 visual-python.robot 未声明运行对象：robot");
+  });
+
+  it("keeps the plugin authoring contract within the compact tool-result budget", () => {
+    expect(JSON.stringify(pluginAuthoringContract).length).toBeLessThan(6_000);
+  });
+
+  it("persists drafts and plans across store instances", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+    };
+    const store = createPluginDraftStore(createPluginDraftStorePersistence(storage));
+    const { id: planId } = store.createPlan({
+      id: "com.example.persist",
+      name: "Persist",
+      description: "Persist",
+      blocks: [{ type: "com_example_persist_print", purpose: "输出", inputs: ["TEXT"] }],
+    });
+    const draft = store.create({ id: "com.example.persist", name: "Persist", description: "Persist", planId });
+    store.applyOperations(draft.id, [{ action: "set_manifest", set: { description: "Updated" } }]);
+
+    const reloaded = createPluginDraftStore(createPluginDraftStorePersistence(storage));
+    const restored = reloaded.get(draft.id);
+    expect(restored).toMatchObject({ mode: "ir", phase: "implementing" });
+    expect(restored?.ir?.manifest.description).toBe("Updated");
+    expect(restored?.files["plugin.json"]).toContain("Updated");
+    expect(reloaded.getPlan(planId)).toBeTruthy();
+
+    const continued = reloaded.applyOperations(draft.id, [{ action: "set_manifest", set: { name: "Persist 2" } }]);
+    expect(continued.files["plugin.json"]).toContain("Persist 2");
+  });
+
+  it("points the model at available drafts when a draft id is unknown", () => {
+    const store = createPluginDraftStore();
+    const draft = store.create({ id: "com.example.ids", name: "Ids", description: "Ids" });
+
+    let message = "";
+    try {
+      store.update("draft-missing", { "README.md": "x" });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain("draft-missing");
+    expect(message).toContain(draft.id);
+    expect(message).toContain("create_plugin_draft");
+  });
+
+  it("rejects stale plan ids instead of silently compiling a different plan", () => {
+    const store = createPluginDraftStore();
+    expect(() => store.create({ id: "com.example.plan", name: "Plan", description: "Plan", planId: "plan-missing" })).toThrow(/plan-missing/);
+  });
+
+  it("ignores corrupted or malformed persistence snapshots", () => {
+    const corrupted = createPluginDraftStore(createPluginDraftStorePersistence({ getItem: () => "{ not json", setItem: () => {} }));
+    expect(corrupted.listIds()).toEqual([]);
+    expect(corrupted.create({ id: "com.example.fresh", name: "Fresh", description: "Fresh" }).mode).toBe("ir");
+
+    const malformed = createPluginDraftStore(createPluginDraftStorePersistence({
+      getItem: () => JSON.stringify({ version: 1, drafts: [{ id: 1 }, null], plans: "x" }),
+      setItem: () => {},
+    }));
+    expect(malformed.listIds()).toEqual([]);
+  });
+
+  it("keeps working when the persistence target rejects writes", () => {
+    const storage = {
+      getItem: () => null,
+      setItem: () => { throw new Error("quota exceeded"); },
+    };
+    const store = createPluginDraftStore(createPluginDraftStorePersistence(storage));
+    const draft = store.create({ id: "com.example.quota", name: "Quota", description: "Quota" });
+    expect(store.get(draft.id)).toBeTruthy();
   });
 });

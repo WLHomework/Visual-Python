@@ -17,6 +17,9 @@ const maxAgentToolHistoryCharacters = 32_000;
 const maxCompactedToolHistoryCharacters = 12_000;
 const maxBlockCatalogCharacters = 44_000;
 const maxInitialRequestCharacters = 150_000;
+const maxContextHistoryTurns = 24;
+const maxContextHistoryCharacters = 24_000;
+const maxContextHistoryMessageCharacters = 4_000;
 const compactedToolHistoryPrefix = "历史工具回合已压缩。已完成的工具结果摘要（除非需要新信息，不要重复读取）：\n";
 
 type CatalogCategory = {
@@ -178,9 +181,20 @@ function snapshotText(snapshot: Record<string, unknown>): string {
 }
 
 function historyMessages(history: AgentConversationTurn[]): AiChatMessage[] {
-  return history.slice(-4).flatMap((turn) => [
-    { role: "user" as const, content: truncate(turn.user, 1_500) },
-    { role: "assistant" as const, content: truncate(turn.assistant, 1_500) },
+  // Fill from the newest turn backwards so the budget never drops the most recent context.
+  const selected: Array<{ user: string; assistant: string }> = [];
+  let characters = 0;
+  for (let index = history.length - 1; index >= 0 && selected.length < maxContextHistoryTurns; index -= 1) {
+    const user = truncate(history[index].user, maxContextHistoryMessageCharacters);
+    const assistant = truncate(history[index].assistant, maxContextHistoryMessageCharacters);
+    const turnCharacters = user.length + assistant.length;
+    if (selected.length && characters + turnCharacters > maxContextHistoryCharacters) break;
+    selected.unshift({ user, assistant });
+    characters += turnCharacters;
+  }
+  return selected.flatMap((turn) => [
+    { role: "user" as const, content: turn.user },
+    { role: "assistant" as const, content: turn.assistant },
   ]);
 }
 
@@ -308,7 +322,7 @@ function boundedResultJson(result: Record<string, unknown>, max = 6_000): string
 
 export function compactAgentToolResult(_toolName: string, result: Record<string, unknown>): string {
   try {
-    if (_toolName === "read_plugin_draft_file") return JSON.stringify(result);
+    if (_toolName === "read_plugin_draft_file" || _toolName === "read_plugin_guide") return JSON.stringify(result);
     if (_toolName === "get_task_block_directory") {
       const compact = compactTaskBlockDirectory(JSON.stringify(result), 6_000);
       if (compact) return compact.text;

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { CodexAgentLoopGuardError, CodexAgentUnavailableError, runCodexVisualPythonAgent, type CodexAgentTransport } from "./codexAgent";
 import type { CodexDynamicTool } from "./codexAgentClient";
-import { saveCodexThread } from "./codexThreadStore";
+import { saveCodexThread, createDynamicToolsSignature } from "./codexThreadStore";
 import type { AgentActivityEvent, AgentHost, AgentTool } from "./agentV2/types";
 
 vi.mock("./aiConfig", async () => {
@@ -64,6 +64,87 @@ describe("runCodexVisualPythonAgent", () => {
 
     await expect(runCodexVisualPythonAgent(args(host, vi.fn()), transport)).resolves.toMatchObject({ summary: "Done" });
     expect(transport.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("notifies once when a new thread takes over an existing conversation and stays quiet on resume", async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const events: AgentActivityEvent[] = [];
+    const prompts: string[] = [];
+    const host: AgentHost = {
+      getSnapshot: () => ({ workspaceMode: "code" }),
+      getTools: () => [],
+      executeTool: vi.fn(),
+    };
+    const transport: CodexAgentTransport = {
+      runTurn: vi.fn(async (prompt, options) => {
+        prompts.push(prompt);
+        // Mirror the real client, which persists the started thread together with its tool signature.
+        saveCodexThread(
+          "handoff-target",
+          { baseUrl: "https://api.openai.com/v1", model: "test-model" },
+          "thread-handoff",
+          undefined,
+          createDynamicToolsSignature(options.dynamicTools || []),
+        );
+        options.onEvent?.({ type: "textDelta", threadId: "thread-handoff", turnId: "turn-h", itemId: "message-h", delta: "Done" });
+        options.onEvent?.({ type: "turnCompleted", threadId: "thread-handoff", turnId: "turn-h", status: "completed" });
+        return { threadId: "thread-handoff", turnId: "turn-h", status: "completed", resumed: false };
+      }),
+      respondToServerRequest: vi.fn(),
+      rejectServerRequest: vi.fn(),
+    };
+    const runArgs = {
+      ...args(host, (event) => events.push(event)),
+      history: [{ user: "旧任务", assistant: "旧结果" }],
+      conversationTargetId: "handoff-target",
+    };
+
+    await runCodexVisualPythonAgent(runArgs, transport);
+
+    const handoffs = () => events.filter((event) => event.id === "context-handoff");
+    expect(handoffs()).toHaveLength(1);
+    expect(handoffs()[0].title).toContain("最近对话摘要");
+    expect(prompts[0]).toContain("旧任务");
+
+    events.length = 0;
+    await runCodexVisualPythonAgent(runArgs, transport);
+
+    expect(handoffs()).toHaveLength(0);
+    expect(prompts[1]).not.toContain("旧任务");
+    vi.unstubAllGlobals();
+  });
+
+  it("injects the shared plugin authoring rules into the Codex instructions in both modes", async () => {
+    const instructions: string[] = [];
+    const host: AgentHost = {
+      getSnapshot: () => ({ workspaceMode: "code" }),
+      getTools: () => [],
+      executeTool: vi.fn(),
+    };
+    const transport: CodexAgentTransport = {
+      runTurn: vi.fn(async (_prompt, options) => {
+        instructions.push(options.developerInstructions);
+        options.onEvent?.({ type: "turnCompleted", threadId: "thread-rules", turnId: "turn-rules", status: "completed" });
+        return { threadId: "thread-rules", turnId: "thread-rules", status: "completed", resumed: false };
+      }),
+      respondToServerRequest: vi.fn(),
+      rejectServerRequest: vi.fn(),
+    };
+
+    await runCodexVisualPythonAgent(args(host, vi.fn()), transport);
+    await runCodexVisualPythonAgent({ ...args(host, vi.fn()), mode: "plan" as const }, transport);
+
+    expect(instructions).toHaveLength(2);
+    expect(instructions[0]).toContain("插件开发规则");
+    expect(instructions[0]).toContain("inspect_plugin_api");
+    expect(instructions[0]).toContain("宿主会请求用户确认");
+    expect(instructions[1]).toContain("计划模式");
+    expect(instructions[1]).toContain("插件开发规则");
   });
 
   it("keeps assistant text from every message item in the final summary", async () => {
@@ -349,6 +430,32 @@ describe("runCodexVisualPythonAgent", () => {
 
     expect(host.executeTool).not.toHaveBeenCalled();
     expect(transport.respondToServerRequest).toHaveBeenCalledWith(9, expect.objectContaining({ success: false }));
+  });
+
+  it("runs a protected tool without confirmation in automatic mode", async () => {
+    const protectedTool = { ...editTool, requiresPermission: true };
+    const host: AgentHost = {
+      getSnapshot: () => ({ workspaceMode: "code" }),
+      getTools: () => [protectedTool],
+      executeTool: vi.fn().mockResolvedValue({ ok: true }),
+    };
+    const transport: CodexAgentTransport = {
+      runTurn: vi.fn(async (_prompt, options) => {
+        await options.onServerRequest?.({ id: 10, method: "item/tool/call", params: { callId: "call-4", tool: "edit_code", arguments: {} } });
+        options.onEvent?.({ type: "turnCompleted", threadId: "thread-1", turnId: "turn-1", status: "completed" });
+        return { threadId: "thread-1", turnId: "turn-1", status: "completed", resumed: false };
+      }),
+      respondToServerRequest: vi.fn(),
+      rejectServerRequest: vi.fn(),
+    };
+    const runArgs = { ...args(host, vi.fn()), permissionMode: "auto" as const };
+    runArgs.onPermissionRequest = vi.fn();
+
+    await runCodexVisualPythonAgent(runArgs, transport);
+
+    expect(runArgs.onPermissionRequest).not.toHaveBeenCalled();
+    expect(host.executeTool).toHaveBeenCalledWith("edit_code", {}, expect.any(AbortSignal));
+    expect(transport.respondToServerRequest).toHaveBeenCalledWith(10, expect.objectContaining({ success: true }));
   });
 
   it("forwards file mutations through the host adapter and verifies the result", async () => {

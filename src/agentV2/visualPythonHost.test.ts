@@ -69,12 +69,32 @@ describe("Visual Python tool applicability", () => {
 
     const plan = await executeTool("create_plugin_plan", { id: "com.example.shapes", name: "Shapes", description: "Basic shapes" }, new AbortController().signal);
     const created = await executeTool("create_plugin_draft", { id: "com.example.shapes", name: "Shapes", description: "Basic shapes", planId: String(plan.id) }, new AbortController().signal);
-    expect(created).toMatchObject({ created: true, validation: { valid: true, issues: [] } });
+    expect(created).toMatchObject({ created: true, mode: "ir", validation: { valid: true, issues: [] } });
     const draftId = String(created.draftId);
 
-    const updated = await executeTool("update_plugin_draft", { draftId, files: { "README.md": "# Shapes\n" } }, new AbortController().signal);
-    expect(updated).toMatchObject({ updated: true, files: { "README.md": "# Shapes\n" }, validation: { valid: true, issues: [] } });
+    const updated = await executeTool("apply_plugin_plan", {
+      draftId,
+      operations: [
+        { action: "set_manifest", set: { description: "Updated shapes" } },
+        { action: "add_hook", hook: { ref: "hook-1", slot: "activate", code: "context.registerCommand({ id: \"com.example.shapes.run\", title: \"Run\", run() {} });" } },
+      ],
+    }, new AbortController().signal);
+    expect(updated).toMatchObject({ applied: true, changed: true, validation: { valid: true, issues: [] } });
+    await expect(executeTool("read_plugin_draft", { draftId }, new AbortController().signal)).resolves.toMatchObject({
+      draftId,
+      manifest: { description: "Updated shapes" },
+      hooks: [{ ref: "hook-1", slot: "activate" }],
+    });
+    const failed = await executeTool("apply_plugin_plan", { draftId, operations: [{ action: "delete_block", ref: "missing" }] }, new AbortController().signal);
+    expect(failed).toMatchObject({ applied: false, changed: false });
+    expect((failed as { issues?: unknown[] }).issues?.[0]).toMatchObject({ code: "UNKNOWN_REF", ref: "missing", operationIndex: 0 });
     await expect(executeTool("validate_plugin_draft", { draftId }, new AbortController().signal)).resolves.toMatchObject({ draftId, validation: { valid: true, issues: [] } });
+    await expect(executeTool("read_plugin_draft", { draftId: "draft-missing" }, new AbortController().signal)).rejects.toThrow(/当前可用草稿/);
+    await expect(executeTool("read_plugin_guide", {}, new AbortController().signal)).resolves.toMatchObject({ found: true, section: null });
+    const guide = await executeTool("read_plugin_guide", { section: "PluginContext" }, new AbortController().signal) as { found?: boolean; section?: string; content?: string };
+    expect(guide.found).toBe(true);
+    expect(guide.section).toBe("六、PluginContext API");
+    expect(guide.content).toContain("registerBlock");
   });
 
   it("requires a successful runtime check before plugin installation", async () => {
@@ -105,9 +125,12 @@ describe("Visual Python tool applicability", () => {
       { id: "com.example.installed", name: "Installed", version: "1.2.3", active: true },
     ]);
     services.readInstalledPluginFiles = vi.fn().mockResolvedValue({
-      "plugin.json": JSON.stringify({ id: "com.example.installed", name: "Installed", version: "1.2.3", apiVersion: "1", entry: "index.js" }),
-      "codegen.json": JSON.stringify({ version: 1, mode: "standalone" }),
-      "index.js": "export default { activate(context) { context.registerCommand({ id: 'com.example.installed.run', title: 'Run', run() {} }); } };\n",
+      files: {
+        "plugin.json": JSON.stringify({ id: "com.example.installed", name: "Installed", version: "1.2.3", apiVersion: "1", entry: "index.js" }),
+        "codegen.json": JSON.stringify({ version: 1, mode: "standalone" }),
+        "index.js": "export default { activate(context) { context.registerCommand({ id: 'com.example.installed.run', title: 'Run', run() {} }); } };\n",
+      },
+      skipped: [],
     });
     services.installPluginDraft = vi.fn().mockResolvedValue({ pluginId: "com.example.installed", active: true });
     services.runPluginDraftChecks = vi.fn().mockResolvedValue({ valid: true, checks: ["activation", "block_samples", "python_syntax"] });
@@ -168,13 +191,17 @@ describe("Visual Python tool applicability", () => {
 
   it("edits a plugin draft at one exact file location", async () => {
     const services = createServices("print('hello')");
-    services.pluginDraftStore = createPluginDraftStore();
+    const store = createPluginDraftStore();
+    services.pluginDraftStore = store;
     const executeTool = createVisualPythonToolExecutor(services);
-    const plan = await executeTool("create_plugin_plan", { id: "com.example.edit", name: "Edit", description: "Edit" }, new AbortController().signal);
-    const created = await executeTool("create_plugin_draft", { id: "com.example.edit", name: "Edit", description: "Edit", planId: String(plan.id) }, new AbortController().signal);
+    const draft = store.createFromFiles({
+      "plugin.json": JSON.stringify({ id: "com.example.edit", name: "Edit", version: "1.0.0", apiVersion: "1", entry: "index.js" }),
+      "codegen.json": JSON.stringify({ version: 1, mode: "standalone" }),
+      "index.js": "const BLOCK_TYPE = \"original\";\nexport default { activate(context) { context.registerCommand({ id: \"com.example.edit.run\", title: \"Run\", run() {} }); } };\n",
+    });
 
     await expect(executeTool("edit_plugin_draft_file", {
-      draftId: String(created.draftId),
+      draftId: draft.id,
       path: "index.js",
       oldText: "const BLOCK_TYPE",
       newText: "const BLOCK_TYPE = \"edited\"; //",
@@ -209,8 +236,8 @@ describe("Visual Python tool applicability", () => {
     const store = createPluginDraftStore();
     services.pluginDraftStore = store;
     services.agentCapabilities = [{ id: "visual-python.robot", name: "Robot", description: "Robot runtime", codegen: { entryBlock: "visual_python_robot_program", statementInput: "BODY", runtimeNames: ["robot"] } }] as any;
-    const draft = store.create({ id: "com.example.robot-extension", name: "Robot Extension", description: "Robot tools" });
-    store.update(draft.id, {
+    const draft = store.createFromFiles({
+      "plugin.json": JSON.stringify({ id: "com.example.robot-extension", name: "Robot Extension", version: "1.0.0", apiVersion: "1", entry: "index.js" }),
       "codegen.json": JSON.stringify({ version: 1, mode: "extension", provider: "visual-python.robot", runtimeNames: ["robot"] }),
       "index.js": `export default { activate(context) {
         context.registerBlock({ type: "com_example_robot_extension_move", message0: "移动" }, () => "robot.move()\\n");

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
 
@@ -637,6 +637,36 @@ describe("AI assistant failed-run cleanup", () => {
     const final: AiAgentActivity = { id: "message-3", kind: "message", channel: "message", status: "done", title: "占位标题", markdown: "最终结果" };
     expect(removeFinalMessageActivity([first, intermediate, final], "最终结果")).toEqual([first, intermediate]);
   });
+
+  it("dedupes the streamed reply even when it keeps the hidden follow-up metadata", () => {
+    const reply = "你好！我是 Visual Python 内置的编程智能体。";
+    const raw = `${reply}\n\n<!-- visual-python-followups: [{"label":"示例","prompt":"做个示例"}] -->`;
+    const activities: AiAgentActivity[] = [
+      { id: "message-1", kind: "message", channel: "message", status: "done", title: raw, markdown: raw },
+      { id: "thinking-1", kind: "message", channel: "thinking", status: "done", title: "思考过程" },
+    ];
+    expect(removeFinalMessageActivity(activities, reply)).toEqual([activities[1]]);
+  });
+
+  it("ignores collapsed blank lines when matching the final response", () => {
+    const activities: AiAgentActivity[] = [
+      { id: "message-1", kind: "message", channel: "message", status: "done", title: "第一段。\n\n\n第二段。", markdown: "第一段。\n\n\n第二段。" },
+    ];
+    expect(removeFinalMessageActivity(activities, "第一段。\n\n第二段。")).toEqual([]);
+  });
+
+  it("removes the trailing replies that together compose the summary", () => {
+    const first: AiAgentActivity = { id: "message-1", kind: "message", channel: "message", status: "done", title: "先说明操作。", markdown: "先说明操作。" };
+    const tool: AiAgentActivity = { id: "tool-1", kind: "tool", status: "done", title: "读取场景", toolName: "get_scene" };
+    const second: AiAgentActivity = { id: "message-2", kind: "message", channel: "message", status: "done", title: "操作完成。", markdown: "操作完成。" };
+    expect(removeFinalMessageActivity([first, tool, second], "先说明操作。\n\n操作完成。")).toEqual([tool]);
+  });
+
+  it("keeps earlier narration when only the final reply matches the summary", () => {
+    const first: AiAgentActivity = { id: "message-1", kind: "message", channel: "message", status: "done", title: "先看看当前代码。", markdown: "先看看当前代码。" };
+    const second: AiAgentActivity = { id: "message-2", kind: "message", channel: "message", status: "done", title: "修改完成。", markdown: "修改完成。" };
+    expect(removeFinalMessageActivity([first, second], "修改完成。")).toEqual([first]);
+  });
 });
 
 describe("AI assistant activity grouping", () => {
@@ -947,6 +977,35 @@ describe("AI assistant conversation persistence", () => {
     expect(storeConversationState("scene-current", state, storage)).toBe(true);
     expect(storage.getItem(oldKey)).toBeNull();
     expect(storage.getItem("visual-python:ai-conversations:scene-current")).not.toBeNull();
+  });
+
+  it("heals stored runs whose streamed reply duplicates the final response", () => {
+    const reply = "你好！我是 Visual Python 内置的编程智能体。";
+    const raw = `${reply}\n\n<!-- visual-python-followups: [{"label":"示例","prompt":"做个示例"}] -->`;
+    const runs = parseStoredRuns([{
+      id: 1,
+      prompt: "你好",
+      mode: "agent",
+      status: "done",
+      activities: [{ id: "message-1", kind: "message", channel: "message", status: "done", title: raw, markdown: raw }],
+      result: { summary: reply },
+    }]);
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0].activities).toEqual([]);
+  });
+
+  it("tolerates malformed stored activities while healing duplicates", () => {
+    const runs = parseStoredRuns([{
+      id: 1,
+      prompt: "你好",
+      status: "done",
+      activities: [null, "损坏数据"],
+      result: { summary: "你好" },
+    }]);
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0].activities).toHaveLength(2);
   });
 });
 
