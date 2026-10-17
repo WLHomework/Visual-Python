@@ -10,7 +10,7 @@ rust-version = "1.95.0"
 
 [lib]
 name = "visual_python_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
@@ -52,3 +52,10 @@ keyring = { version = "3.6.3", default-features = false, features = ["windows-na
 [patch.crates-io]
 tokio-tungstenite = { git = "https://github.com/openai-oss-forks/tokio-tungstenite", rev = "0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186" }
 tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
+
+# The vendored codex workspace drags in hundreds of crates whose full debug
+# info makes target/debug tens of GB. Keep line tables for readable backtraces
+# while dropping variable-level DWARF/PDB data from dependencies only; the
+# application crate itself keeps the default full debug info.
+[profile.dev.package."*"]
+debug = "line-tables-only"
