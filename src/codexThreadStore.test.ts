@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearCodexThread, getCodexThread, saveCodexThread } from "./codexThreadStore";
+import { clearCodexThread, createDynamicToolsSignature, getCodexThread, getCodexThreadWithTools, saveCodexThread } from "./codexThreadStore";
 
 function createStorage(): Storage {
   const values = new Map<string, string>();
@@ -34,5 +34,28 @@ describe("Codex thread persistence", () => {
 
     expect(getCodexThread("target-a", config, storage)).toBeUndefined();
     expect(getCodexThread("target-b", config, storage)).toBe("thread-b");
+  });
+
+  it("does not resume a thread after its dynamic tool set changes", () => {
+    const storage = createStorage();
+    const config = { baseUrl: "https://example.com/v1", model: "model-a" };
+
+    saveCodexThread("target", config, "thread-a", storage, "tools-a");
+
+    expect(getCodexThreadWithTools("target", config, "tools-a", storage)).toBe("thread-a");
+    expect(getCodexThreadWithTools("target", config, "tools-b", storage)).toBeUndefined();
+  });
+
+  it("keeps the same signature when tool order and object key order change", () => {
+    const first = createDynamicToolsSignature([
+      { name: "write_code", inputSchema: { type: "object", properties: { code: { type: "string" } } } },
+      { name: "read_code", description: "read", inputSchema: { type: "object" } },
+    ]);
+    const second = createDynamicToolsSignature([
+      { inputSchema: { properties: { code: { type: "string" } }, type: "object" }, name: "write_code" },
+      { inputSchema: { type: "object" }, name: "read_code", description: "read" },
+    ]);
+
+    expect(second).toBe(first);
   });
 });

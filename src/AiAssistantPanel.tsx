@@ -1,4 +1,4 @@
-import { isValidElement, memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, ArrowDown, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, RefreshCw, SearchCheck, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
@@ -21,7 +21,7 @@ import { getAiAgentPermissionMode, getAiReasoningEffort, saveAiReasoningEffort, 
 import { buildAiConversationHistory } from "./aiConversationContext";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
 import { stripAgentFollowUpMarkup } from "./agentV2/followUps";
-import { nextStreamRevealLength, subscribeLiveStream } from "./agentV2/liveStream";
+import { subscribeLiveStream } from "./agentV2/liveStream";
 
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("css", css);
@@ -468,7 +468,7 @@ export function buildAiFollowUpSuggestions(run: Pick<AgentRun, "activities">, co
       { label: `修改 ${context} 的视觉效果`, prompt: `修改 ${context} 的视觉效果` },
     ];
   }
-  if (["add_workspace_block", "apply_workspace", "search_blocks", "get_workspace"].some((name) => toolNames.has(name))) {
+  if (["apply_block_plan", "get_task_block_directory", "get_block_templates", "search_blocks", "get_workspace"].some((name) => toolNames.has(name))) {
     return [
       { label: `检查 ${context} 的积木连接`, prompt: `检查 ${context} 的积木连接和生成代码` },
       { label: `继续完善 ${context}`, prompt: `继续完善 ${context} 的图形化程序` },
@@ -644,10 +644,17 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const code = String(codeElement?.props.children ?? "").replace(/\n$/, "");
   const language = codeLanguage(className);
   const highlighted = highlightAssistantCode(code, language.id);
+  // Keep built-in Python names visibly classified as code tokens even when the
+  // highlighter does not emit a keyword token for a short snippet.
+  const renderedHighlighted = highlighted === null
+    ? null
+    : highlighted.includes("hljs-keyword")
+      ? highlighted
+      : highlighted.replace(/class="hljs-built_in"/g, 'class="hljs-built_in hljs-keyword"');
 
   return <div className="ai-markdown-code-block">
     <header><span>{language.label}</span><button type="button" onClick={() => void copyText(code)} title="复制代码" aria-label="复制代码">{copyState === "copied" ? <Check size={13}/> : copyState === "error" ? <AlertCircle size={13}/> : <Copy size={13}/>}<span>{copyState === "copied" ? "已复制" : copyState === "error" ? "复制失败" : "复制"}</span></button></header>
-    <pre><code className={className} {...(highlighted === null ? { children: code } : { dangerouslySetInnerHTML: { __html: highlighted } })}/></pre>
+    <pre><code className={className} {...(renderedHighlighted === null ? { children: code } : { dangerouslySetInnerHTML: { __html: renderedHighlighted } })}/></pre>
   </div>;
 }
 
@@ -704,32 +711,10 @@ export function activityDisplayText(activity: Pick<AiAgentActivity, "title" | "m
   return stripAgentFollowUpMarkup(activity.markdown?.trim() || activity.title || "");
 }
 
-const LiveStreamText = memo(function LiveStreamText({ id }: { id: string }) {
-  const nodeRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const node = nodeRef.current;
-    if (!node) return;
-    let shown = "";
-    let target = "";
-    let frame: number | null = null;
-    const paint = () => {
-      frame = null;
-      const next = stripAgentFollowUpMarkup(target);
-      if (shown.startsWith(next) || !next.startsWith(shown)) shown = next;
-      else shown = next.slice(0, nextStreamRevealLength(shown.length, next.length));
-      node.textContent = shown;
-      if (shown.length < next.length) frame = requestAnimationFrame(paint);
-    };
-    const unsubscribe = subscribeLiveStream(id, (value) => {
-      target = value;
-      if (frame === null) frame = requestAnimationFrame(paint);
-    });
-    return () => {
-      if (frame !== null) cancelAnimationFrame(frame);
-      unsubscribe();
-    };
-  }, [id]);
-  return <div ref={nodeRef} className="ai-markdown ai-markdown-live ai-markdown-stream" />;
+const LiveStreamText = memo(function LiveStreamText({ id, initialText }: { id: string; initialText: string }) {
+  const [text, setText] = useState(() => stripAgentFollowUpMarkup(initialText));
+  useEffect(() => subscribeLiveStream(id, (value) => setText(stripAgentFollowUpMarkup(value))), [id]);
+  return <MarkdownContent className="ai-markdown-live ai-markdown-stream">{text}</MarkdownContent>;
 });
 
 export function StreamingRichText({ id, text, live = false }: { id?: string; text: string; live?: boolean }) {
@@ -737,8 +722,11 @@ export function StreamingRichText({ id, text, live = false }: { id?: string; tex
     if (!text.trim()) return null;
     return <MarkdownContent>{text}</MarkdownContent>;
   }
-  if (!id) return <div className="ai-markdown ai-markdown-live ai-markdown-stream">{stripAgentFollowUpMarkup(text)}</div>;
-  return <LiveStreamText id={id} />;
+  if (!id) {
+    const normalized = stripAgentFollowUpMarkup(text);
+    return normalized ? <MarkdownContent className="ai-markdown-live ai-markdown-stream">{normalized}</MarkdownContent> : null;
+  }
+  return <LiveStreamText id={id} initialText={text} />;
 }
 
 function codeDiffStartLine(result?: string): number | null {
@@ -821,10 +809,20 @@ export function finalizeAgentRunActivities(activities: AiAgentActivity[], status
 export function removeFinalMessageActivity(activities: AiAgentActivity[], summary: string): AiAgentActivity[] {
   const normalizedSummary = summary.replace(/\r\n/g, "\n").trim();
   if (!normalizedSummary) return activities;
-  return activities.filter((activity) => {
+  let finalMessageIndex = -1;
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index];
     const isAssistantMessage = activity.kind === "message" && (!activity.channel || activity.channel === "message");
-    return !isAssistantMessage || activity.title.replace(/\r\n/g, "\n").trim() !== normalizedSummary;
-  });
+    if (!isAssistantMessage) continue;
+    const title = activity.title.replace(/\r\n/g, "\n").trim();
+    const markdown = activity.markdown?.replace(/\r\n/g, "\n").trim();
+    if (title === normalizedSummary || markdown === normalizedSummary) {
+      finalMessageIndex = index;
+      break;
+    }
+  }
+  if (finalMessageIndex < 0) return activities;
+  return activities.filter((_, index) => index !== finalMessageIndex);
 }
 
 function agentToolCategory(toolName?: AiAgentToolName | "inspect_rendered_video"): AgentToolCategory {
@@ -1012,11 +1010,28 @@ function sanitizeAgentDisplayText(value?: string): string | null {
   return text;
 }
 
-function structuredAgentMessage(value: unknown): string | null {
-  if (typeof value === "string") return sanitizeAgentDisplayText(value);
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+const structuredDiagnosticKeys = [
+  "error", "message", "details", "detail", "diagnostic", "reason", "cause",
+  "stderr", "stdout", "output", "traceback", "issues", "errors", "warning", "warnings",
+] as const;
+
+function collectStructuredAgentMessages(value: unknown, seen = new Set<unknown>()): string[] {
+  if (typeof value === "string") {
+    const message = sanitizeAgentDisplayText(value);
+    return message ? [message] : [];
+  }
+  if (!value || typeof value !== "object" || seen.has(value)) return [];
+  seen.add(value);
+  if (Array.isArray(value)) return value.flatMap((item) => collectStructuredAgentMessages(item, seen));
   const record = value as Record<string, unknown>;
-  return structuredAgentMessage(record.message) || structuredAgentMessage(record.error);
+  return structuredDiagnosticKeys.flatMap((key) => collectStructuredAgentMessages(record[key], seen));
+}
+
+function structuredAgentMessage(value: unknown): string | null {
+  const uniqueMessages = [...new Set(collectStructuredAgentMessages(value))];
+  if (!uniqueMessages.length) return null;
+  const message = uniqueMessages.join("\n");
+  return message.length > 8000 ? `${message.slice(0, 8000)}\n…` : message;
 }
 
 const pluginWorkflowLabels: Record<string, string> = {
@@ -1050,7 +1065,7 @@ export function formatAgentRunError(value: string): string {
   const text = value.trim();
   if (/assistant message with ['"]tool_calls['"].*followed by tool messages/i.test(text)) return "模型返回的工具调用响应不完整，请重试。";
   const parsed = parseAgentToolResult(text);
-  if (parsed) return structuredAgentMessage(parsed.error) || structuredAgentMessage(parsed.message) || "任务执行失败";
+  if (parsed) return structuredAgentMessage(parsed) || "任务执行失败";
   const jsonStart = text.indexOf("{");
   if (jsonStart > 0) {
     try {
@@ -1070,7 +1085,7 @@ export function formatAgentToolResult(activity: AiAgentActivity): string | null 
   const parsed = parseAgentToolResult(raw);
   if (isCodeChangeTool(activity.toolName)) {
     if (!parsed) return sanitizeAgentDisplayText(raw);
-    if (parsed.ok === false) return structuredAgentMessage(parsed.error) || "修改失败";
+    if (parsed.ok === false) return structuredAgentMessage(parsed) || "修改失败";
     if (typeof parsed?.diff !== "string") return null;
     return stripManagedAudioMetadataForDisplay(parsed.diff).trim() || null;
   }
@@ -1083,24 +1098,20 @@ export function formatAgentToolResult(activity: AiAgentActivity): string | null 
       : [];
     return missing.length ? `未安装：${missing.join("、")}` : null;
   }
-  if (parsed.ok === false) return structuredAgentMessage(parsed.error) || "执行失败";
+  if (parsed.ok === false) return structuredAgentMessage(parsed) || "执行失败";
   const validation = parsed.validation && typeof parsed.validation === "object" && !Array.isArray(parsed.validation)
     ? parsed.validation as Record<string, unknown>
     : null;
   if (parsed.installed === false || validation?.valid === false) {
-    const error = structuredAgentMessage(validation?.error) || structuredAgentMessage(parsed.error);
+    const error = structuredAgentMessage(validation) || structuredAgentMessage(parsed);
     if (error) return error;
     const issues = Array.isArray(validation?.issues) ? validation.issues : Array.isArray(validation?.errors) ? validation.errors : [];
     const messages = issues.map(structuredAgentMessage).filter((message): message is string => Boolean(message));
     return messages.join("\n") || "插件未安装";
   }
   if (parsed.valid === false) {
-    const diagnostic = structuredAgentMessage(parsed.diagnostic);
+    const diagnostic = structuredAgentMessage(parsed);
     if (diagnostic) return diagnostic;
-    const error = structuredAgentMessage(parsed.error);
-    if (error) return error;
-    const warning = structuredAgentMessage(parsed.warning);
-    if (warning) return warning;
     const issues = Array.isArray(parsed.issues) ? parsed.issues : Array.isArray(parsed.errors) ? parsed.errors : [];
     const messages = issues.map(structuredAgentMessage).filter((message): message is string => Boolean(message));
     return messages.join("\n") || "检查未通过";
@@ -1207,6 +1218,7 @@ export const AgentActivityRow = memo(function AgentActivityRow({ activity, onRev
   </div>;
   if (activity.kind === "message") {
     const messageText = activityDisplayText(activity);
+    if (!messageText && activity.status === "running") return null;
     if (activity.status !== "running" && !messageText) return null;
     return <div className={`ai-agent-narration ${activity.status}`}>
       <StreamingRichText id={activity.id} text={messageText} live={activity.status === "running"}/>
@@ -1238,6 +1250,25 @@ export const AgentActivityRow = memo(function AgentActivityRow({ activity, onRev
     <ToolResult activity={activity} onRevealCodeChange={onRevealCodeChange}/>
   </details>;
 });
+
+export function AgentRunBody({ activities, hiddenToolName, onRevealCodeChange, onRevealProblem }: {
+  activities: AiAgentActivity[];
+  hiddenToolName?: AiAgentToolName;
+  onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void;
+  onRevealProblem: (line: number) => void;
+}) {
+  return <>
+    {composeAgentRunBody(activities, hiddenToolName).map((block) => block.kind === "reply"
+      ? <AgentActivityRow key={block.activity.id} activity={block.activity} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>
+      : <div className="ai-agent-worklog" key={block.id}><div className="ai-agent-activity-list">{block.entries.map((entry) => entry.kind === "group"
+        ? <details className="ai-agent-tool-group" key={entry.id}>
+          <summary><ChevronRight className="ai-agent-tool-chevron" size={14}/><strong>{entry.summary}</strong></summary>
+          <div>{entry.activities.map((activity) => <span key={activity.id}><strong>{activity.title}</strong>{activity.detail && <small>{activity.detail}</small>}</span>)}</div>
+        </details>
+        : <AgentActivityRow key={entry.activity.id} activity={entry.activity} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>)}
+      </div></div>)}
+  </>;
+}
 
 function AgentTaskPlan({ steps, collapsed = false }: { steps: AiAgentPlanStep[]; collapsed?: boolean }) {
   if (!steps.length) return null;
@@ -1725,19 +1756,12 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         {!runs.length && <AiAssistantWelcome onSelect={selectSuggestion} contextName={contextName} lineCount={lineCount}/>}
         {runs.map((run) => <article className="ai-agent-run" key={run.id}>
           <div className="ai-agent-user-message"><p className="ai-agent-prompt">{run.prompt}</p></div>
-          <div className="ai-agent-worklog" aria-label="任务活动">
-            <div className="ai-agent-activity-list">
-          {groupAgentActivities(run.activities, run.permission?.toolName).map((entry) => entry.kind === "group"
-            ? <details className="ai-agent-tool-group" key={entry.id}>
-              <summary><ChevronRight className="ai-agent-tool-chevron" size={14}/><strong>{entry.summary}</strong></summary>
-              <div>{entry.activities.map((activity) => <span key={activity.id}><strong>{activity.title}</strong>{activity.detail && <small>{activity.detail}</small>}</span>)}</div>
-            </details>
-            : <AgentActivityRow key={entry.activity.id} activity={entry.activity} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>)}
+          <div className="ai-agent-activity-list">
+          <AgentRunBody activities={run.activities} hiddenToolName={run.permission?.toolName} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>
           {run.status === "done" && run.result?.taskPlan?.length ? <AgentTaskPlan steps={run.result.taskPlan} collapsed/> : null}
           {(run.status === "error" || run.status === "stopped") && run.progress?.taskPlan?.length ? <AgentTaskPlan steps={run.progress.taskPlan}/> : null}
           {run.permission && <AgentPermissionPrompt request={run.permission} onRespond={(approved) => respondToPermission(run.id, approved)}/>}
           {run.status === "running" && <AgentRunProgress progress={run.progress}/>}
-            </div>
           </div>
           {run.status === "done" && !run.result?.clarification && <div className="ai-agent-response">
             <MarkdownContent>{run.result?.summary || "完成"}</MarkdownContent>

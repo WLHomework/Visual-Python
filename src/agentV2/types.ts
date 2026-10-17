@@ -132,6 +132,7 @@ export type AgentExecutionObservation = Record<string, unknown>;
 
 export type AgentHost = {
   getSnapshot: () => Record<string, unknown>;
+  getBlockCatalog?: (task?: string) => string;
   getCapabilities?: () => AgentCapability[];
   getTools?: () => AgentTool[];
   executeTool: (name: string, args: Record<string, unknown>, signal: AbortSignal) => Promise<Record<string, unknown>>;

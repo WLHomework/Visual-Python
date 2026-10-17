@@ -25,4 +25,19 @@ describe("Codex prompt compaction", () => {
     expect(prompt).toContain("Demo");
     expect(prompt.length).toBeLessThan(13_000);
   });
+
+  it("adds a compact graphical block catalog to every graphical task turn", () => {
+    const input = {
+      prompt: "创建一个输出积木",
+      history: [],
+      snapshot: { workspaceMode: "visual", blockWorkspace: { blockCount: 0 } },
+      blockCatalog: JSON.stringify({
+        categories: [{ name: "Python", blockCount: 1 }],
+        candidates: [{ type: "python_print", label: "输出", inputSlots: [{ name: "TEXT", kind: "value" }] }],
+      }),
+    };
+
+    expect(buildCodexPrompt(input, true)).toContain("python_print");
+    expect(buildCodexPrompt(input, false)).toContain("python_print");
+  });
 });

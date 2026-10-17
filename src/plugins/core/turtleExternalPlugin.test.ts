@@ -282,6 +282,6 @@ describe("Turtle external plugin package", () => {
     });
     const result = await tool.execute({}, {}, new AbortController().signal);
     expect(result).toMatchObject({ library: "turtle", entryBlock: "visual_python_turtle_program", variables: { screen: "turtle.Screen", pen: "turtle.Turtle" } });
-    expect(result.workspaceTools).toEqual(["search_blocks", "get_block_templates", "add_workspace_block", "apply_workspace"]);
+    expect(result.workspaceTools).toEqual(["get_workspace", "get_task_block_directory", "search_blocks", "get_block_templates", "apply_block_plan"]);
   });
 });

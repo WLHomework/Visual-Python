@@ -6,6 +6,7 @@ import {
   type PluginAgentRuntime,
   type PluginAgentTool,
   type PluginBlockDefinition,
+  type PluginBlockAgentMetadata,
   type PluginCommand,
   type PluginCodeDocumentHandler,
   type PluginContext,
@@ -16,22 +17,26 @@ import {
   type PluginRecord,
   type PluginSettingContribution,
   type PluginToolboxCategory,
+  type PluginWorkspaceIssue,
+  type PluginWorkspaceValidator,
   type PythonBlockGenerator,
   type VisualPythonPlugin,
 } from "../api/types";
 
 type Contributions = {
   blockTypes: Set<string>;
+  blockMetadata: Map<string, PluginBlockAgentMetadata>;
   categories: PluginToolboxCategory[];
   settings: PluginSettingContribution[];
   serializers: PluginProjectSerializer[];
   documentHandlers: PluginCodeDocumentHandler[];
   commands: PluginCommand[];
   agentTools: PluginAgentTool[];
+  workspaceValidators: Map<string, PluginWorkspaceValidator>;
 };
 
 const emptyContributions = (): Contributions => ({
-  blockTypes: new Set(), categories: [], settings: [], serializers: [], documentHandlers: [], commands: [], agentTools: [],
+  blockTypes: new Set(), blockMetadata: new Map(), categories: [], settings: [], serializers: [], documentHandlers: [], commands: [], agentTools: [], workspaceValidators: new Map(),
 });
 
 const pluginPrefix = (pluginId: string) => `${pluginId.replace(/[^A-Za-z0-9_]/g, "_")}_`;
@@ -109,6 +114,43 @@ export class PluginRegistry {
 
   getBlockTypes(pluginId: string) {
     return [...(this.contributions.get(pluginId)?.blockTypes ?? [])];
+  }
+
+  getBlockAgentMetadata(type: string) {
+    for (const contribution of this.activeContributions()) {
+      const metadata = contribution.blockMetadata.get(type);
+      if (metadata) return metadata;
+    }
+    return undefined;
+  }
+
+  getBlockKnowledgeMetadata(type: string): PluginBlockAgentMetadata | undefined {
+    for (const [, record, contribution] of this.activeEntries()) {
+      if (!contribution.blockTypes.has(type)) continue;
+      const metadata = contribution.blockMetadata.get(type) || {};
+      const manifest = record.plugin.manifest;
+      const pluginKeywords = [manifest.name, manifest.id, ...(manifest.agent?.description ? [manifest.agent.description] : [])];
+      const dependencies = manifest.python?.packages || [];
+      return {
+        ...metadata,
+        description: metadata.description || manifest.agent?.description || manifest.description || manifest.name,
+        purpose: metadata.purpose || manifest.agent?.purpose,
+        aliases: [...new Set([...(metadata.aliases || []), ...(manifest.agent?.aliases || [])])],
+        keywords: [...new Set([...(metadata.keywords || []), ...pluginKeywords, ...(manifest.agent?.keywords || [])])],
+        dependencies: [...new Set([...(metadata.dependencies || []), ...dependencies, ...(manifest.agent?.dependencies || [])])],
+        capabilities: [...new Set([...(metadata.capabilities || []), ...(manifest.agent?.capabilities || [])])],
+        recommendedFor: [...new Set([...(metadata.recommendedFor || []), ...(manifest.agent?.recommendedFor || [])])],
+        avoidFor: [...new Set([...(metadata.avoidFor || []), ...(manifest.agent?.avoidFor || [])])],
+        intentTags: [...new Set([...(metadata.intentTags || []), ...(manifest.agent?.intentTags || [])])],
+      };
+    }
+    return undefined;
+  }
+
+  validateWorkspace(workspace: Blockly.Workspace): PluginWorkspaceIssue[] {
+    return this.activeEntries().flatMap(([, , contribution]) =>
+      [...contribution.workspaceValidators.values()].flatMap((validate) => validate(workspace)),
+    );
   }
 
   generatePythonSamples(pluginId: string) {
@@ -221,7 +263,8 @@ export class PluginRegistry {
         const prefix = pluginPrefix(manifest.id);
         if (!definition.type.startsWith(prefix)) throw new Error(`积木类型必须以 ${prefix} 开头：${definition.type}`);
         if (Blockly.Blocks[definition.type] || contribution.blockTypes.has(definition.type)) throw new Error(`积木类型重复：${definition.type}`);
-        Blockly.common.defineBlocksWithJsonArray([localizeBlockDefinition(definition)]);
+        const { agent: metadata, ...blockDefinition } = definition;
+        Blockly.common.defineBlocksWithJsonArray([localizeBlockDefinition(blockDefinition)]);
         pythonGenerator.forBlock[definition.type] = manifest.builtin
           ? generator as (block: Blockly.Block, generator: typeof pythonGenerator) => any
           : ((block: Blockly.Block, activeGenerator: typeof pythonGenerator) => {
@@ -231,6 +274,7 @@ export class PluginRegistry {
               finally { activeGenerator.INDENT = previousIndent; }
             });
         contribution.blockTypes.add(definition.type);
+        if (metadata) contribution.blockMetadata.set(definition.type, metadata);
       },
       registerToolboxCategory: (category) => {
         ensureContributionId(category.id);
@@ -246,6 +290,11 @@ export class PluginRegistry {
         ensureContributionId(tool.id);
         if (this.getAgentTools().some((entry) => entry.tool.definition.function.name === name) || contribution.agentTools.some((entry) => entry.definition.function.name === name)) throw new Error(`Agent 工具重复：${name}`);
         contribution.agentTools.push(tool);
+      },
+      registerWorkspaceValidator: (id, validator) => {
+        ensureContributionId(id);
+        if (contribution.workspaceValidators.has(id)) throw new Error(`工作区校验器 ID 重复：${id}`);
+        contribution.workspaceValidators.set(id, validator);
       },
       reportProblem: (message, detail) => { this.problems.push({ pluginId: manifest.id, message, detail }); this.emitChange(); },
     };
@@ -271,7 +320,8 @@ export class PluginRegistry {
       || contribution.serializers.length > 0
       || contribution.documentHandlers.length > 0
       || contribution.commands.length > 0
-      || contribution.agentTools.length > 0;
+      || contribution.agentTools.length > 0
+      || contribution.workspaceValidators.size > 0;
   }
 
   private clearContributions(pluginId: string) {

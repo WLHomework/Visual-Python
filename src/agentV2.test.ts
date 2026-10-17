@@ -8,6 +8,7 @@ import { normalizeAiToolCalls, runAgentCore as runVisualPythonAgent } from "./ag
 import type { AgentActivityEvent, AgentHost, AgentTool } from "./agentV2/types";
 import type { AiChatMessage } from "./aiConfig";
 import { coreAgentTools, requiresPermission, toolsForAgentMode } from "./agentV2/toolRegistry";
+import { blocklyAgentTools } from "./agentV2/blocklyHost";
 import { manimAgentTools } from "./plugins/builtin/manim/agentTools";
 
 const toolCall = (id: string, name: string, args: Record<string, unknown> = {}) => ({
@@ -56,6 +57,59 @@ describe("Visual Python Agent Core", () => {
     expect(diagnostics).toMatchObject({ readOnly: true });
     expect(diagnostics?.workspaceModes).toBeUndefined();
     expect(toolsForAgentMode("plan").some((tool) => tool.function.name === "get_diagnostics")).toBe(true);
+  });
+
+  it("injects the task block directory and batch-template instructions only for visual workspace requests", async () => {
+    const getBlockCatalog = vi.fn((task?: string) => JSON.stringify({ task, categories: [{ name: "Manim", blocks: [{ type: "fixture_block" }] }] }));
+    mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
+    await runVisualPythonAgent({
+      prompt: "创建一个圆",
+      host: createHost({ getSnapshot: () => ({ workspaceMode: "visual" }), getBlockCatalog }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    const visualMessages = mocks.streamAiChat.mock.calls[0][0] as Array<{ content: string; role?: string }>;
+    expect(visualMessages.at(-1)?.content).toContain('"fixture_block"');
+    expect(getBlockCatalog).toHaveBeenCalledWith("创建一个圆");
+    expect(visualMessages.find((message) => message.role === "system")?.content).toContain("apply_block_plan");
+    const visualSystem = visualMessages.find((message) => message.role === "system")?.content || "";
+    expect(visualSystem).not.toContain("先根据任务从目录选出所有需要的积木类型");
+    expect(visualSystem).not.toContain("需要超过 50 种时按合理功能组分批读取");
+    expect(visualSystem).not.toContain("visual_python_manim_*");
+    expect(visualSystem).not.toContain("Manim 动画结构");
+    const graphicalRules = visualSystem.slice(visualSystem.indexOf("图形化工作区规则"));
+    expect(graphicalRules.match(/get_block_templates/g)).toHaveLength(1);
+    expect(graphicalRules).toContain("唯一的图形化写入工具是 apply_block_plan");
+    expect(graphicalRules).not.toMatch(/compose_workspace|append_workspace_blocks|add_workspace_block|apply_workspace|replace_workspace/);
+    expect(getBlockCatalog).toHaveBeenCalledOnce();
+
+    mocks.streamAiChat.mockReset();
+    mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
+    await runVisualPythonAgent({
+      prompt: "解释代码",
+      host: createHost({ getSnapshot: () => ({ workspaceMode: "code" }), getBlockCatalog }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    const codeMessages = mocks.streamAiChat.mock.calls[0][0] as Array<{ content: string }>;
+    expect(codeMessages.at(-1)?.content).not.toContain('"fixture_block"');
+    expect(getBlockCatalog).toHaveBeenCalledOnce();
+  });
+
+  it("exposes only apply_block_plan as a graphical workspace mutation tool", async () => {
+    mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
+    await runVisualPythonAgent({
+      prompt: "创建一个积木程序",
+      host: createHost({ getSnapshot: () => ({ workspaceMode: "visual" }), getTools: () => blocklyAgentTools }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+
+    const tools = mocks.streamAiChat.mock.calls[0][2]?.tools as Array<{ function: { name: string } }>;
+    const names = tools.map((tool) => tool.function.name);
+    expect(names).toContain("apply_block_plan");
+    expect(names).not.toEqual(expect.arrayContaining(["compose_workspace", "add_workspace_block", "replace_workspace", "append_workspace_blocks", "apply_workspace"]));
+    expect(blocklyAgentTools.filter((tool) => tool.changesState).map((tool) => tool.definition.function.name)).toEqual(["apply_block_plan"]);
   });
 
   it("refreshes plugin tools between Agent rounds", async () => {
@@ -247,7 +301,7 @@ describe("Visual Python Agent Core", () => {
     });
 
     expect(mocks.streamAiChat).toHaveBeenCalledTimes(2);
-    expect(mocks.streamAiChat.mock.calls[0][2]).toEqual(expect.objectContaining({ maxTokens: 8_192 }));
+    expect(mocks.streamAiChat.mock.calls[0][2]).toEqual(expect.objectContaining({ maxTokens: 16_384 }));
     expect(mocks.streamAiChat.mock.calls.every((call) => call[2]?.reasoningEffort === "medium")).toBe(true);
     expect((mocks.streamAiChat.mock.calls[0][2].tools as Array<{ function: { name: string } }>).some((tool) => tool.function.name === "save_project")).toBe(true);
     expect(events.some((event) => event.kind === "thinking" && event.status === "done")).toBe(true);
@@ -682,19 +736,69 @@ describe("Visual Python Agent Core", () => {
     expect(cachedToolMessage?.content).not.toContain("x".repeat(200));
   });
 
-  it("stops early when the model repeatedly reads the same unchanged state", async () => {
-    const executeTool = vi.fn().mockResolvedValue({ ok: true, scene: "Demo" });
-    mocks.streamAiChat.mockResolvedValue(completion("", [toolCall("context", "get_context")]));
+  it("caches repeated Blockly template reads without emitting duplicate activities", async () => {
+    const executeTool = vi.fn().mockResolvedValue({
+      templates: [{ type: "visual_python_manim_circle", inputSlots: [] }],
+    });
+    const blockTool: AgentTool = {
+      definition: {
+        type: "function",
+        function: {
+          name: "get_block_templates",
+          description: "读取积木模板",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+      label: "批量读取积木模板",
+      workspaceModes: ["visual"],
+      readOnly: true,
+    };
+    const events: AgentActivityEvent[] = [];
+    mocks.streamAiChat
+      .mockResolvedValueOnce(completion("读取模板", [toolCall("templates-1", "get_block_templates", { types: ["visual_python_manim_circle"] })]))
+      .mockResolvedValueOnce(completion("再次读取模板", [toolCall("templates-2", "get_block_templates", { types: ["visual_python_manim_circle"] })]))
+      .mockResolvedValueOnce(completion("模板已准备好"));
 
-    await expect(runVisualPythonAgent({
+    await runVisualPythonAgent({
+      prompt: "读取圆形积木模板",
+      host: createHost({
+        getSnapshot: () => ({ workspaceMode: "visual" }),
+        getTools: () => [blockTool],
+        executeTool,
+      }),
+      onEvent: (event) => events.push(event),
+      signal: new AbortController().signal,
+    });
+
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(events.filter((event) => event.kind === "tool" && event.toolName === "get_block_templates" && event.status === "running")).toHaveLength(1);
+    const thirdRequest = mocks.streamAiChat.mock.calls[2][0] as Array<{ role: string; content?: string }>;
+    expect(thirdRequest.at(-1)?.content).toContain("状态未变化");
+  });
+
+  it("reuses the complete cached state when the model repeats a read", async () => {
+    const executeTool = vi.fn().mockResolvedValue({ ok: true, scene: "Demo" });
+    let rounds = 0;
+    mocks.streamAiChat.mockImplementation(async () => {
+      rounds += 1;
+      return rounds <= 5
+        ? completion("", [toolCall(`context-${rounds}`, "get_context")])
+        : completion("已根据当前状态继续处理");
+    });
+
+    const result = await runVisualPythonAgent({
       prompt: "读取当前工程",
       host: createHost({ executeTool }),
       onEvent: () => undefined,
       signal: new AbortController().signal,
-    })).rejects.toThrow("连续重复读取未变化的状态");
+    });
 
     expect(executeTool).toHaveBeenCalledTimes(1);
-    expect(mocks.streamAiChat.mock.calls.length).toBeLessThan(12);
+    expect(result.summary).toBe("任务已完成。");
+    expect(mocks.streamAiChat.mock.calls.length).toBe(6);
+    const cachedRound = mocks.streamAiChat.mock.calls[2][0] as Array<{ role: string; content?: string }>;
+    expect(cachedRound.at(-1)?.content).toContain("scene");
+    expect(cachedRound.at(-1)?.content).toContain("状态未变化");
   });
 
   it("continues beyond the soft round budget while the task keeps making progress", async () => {
@@ -1010,7 +1114,7 @@ describe("Visual Python Agent Core", () => {
 
   it("does not run the code-only validator after a transactional Blockly mutation", async () => {
     mocks.streamAiChat
-      .mockResolvedValueOnce(completion("", [toolCall("1", "apply_workspace", { mode: "replace", blocks: [] })]))
+      .mockResolvedValueOnce(completion("", [toolCall("1", "apply_block_plan", { version: 1, mode: "replace", operations: [{ action: "create", ref: "scene", block: "fixture_scene" }] })]))
       .mockResolvedValueOnce(completion("图形化工作区已修改。"));
     const executeTool = vi.fn().mockResolvedValue({ ok: true, changed: true, validated: true });
 
@@ -1022,7 +1126,7 @@ describe("Visual Python Agent Core", () => {
           definition: {
             type: "function",
             function: {
-              name: "apply_workspace",
+              name: "apply_block_plan",
               description: "事务性修改图形化工作区",
               parameters: { type: "object", properties: {} },
             },
@@ -1039,7 +1143,7 @@ describe("Visual Python Agent Core", () => {
     });
 
     expect(executeTool).toHaveBeenCalledTimes(1);
-    expect(executeTool).toHaveBeenCalledWith("apply_workspace", { mode: "replace", blocks: [] }, expect.any(AbortSignal));
+    expect(executeTool).toHaveBeenCalledWith("apply_block_plan", { version: 1, mode: "replace", operations: [{ action: "create", ref: "scene", block: "fixture_scene" }] }, expect.any(AbortSignal));
     expect(executeTool).not.toHaveBeenCalledWith("check_code", {}, expect.any(AbortSignal));
   });
 

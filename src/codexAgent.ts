@@ -2,12 +2,12 @@ import { getAiModelConfig } from "./aiConfig";
 import { selectAiProviderProtocol } from "./aiProtocol";
 import { CodexAgentClient, mapCodexServerRequest, type CodexDynamicTool, type CodexRunTurnOptions, type CodexServerRequest, type CodexTurnResult } from "./codexAgentClient";
 import type { AgentModelEvent } from "./agentEvents";
-import { compactAgentToolResult } from "./agentV2/context";
+import { compactAgentToolResult, compactBlockCatalogForPrompt, graphicalCatalogInstructions } from "./agentV2/context";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import { publishLiveStream } from "./agentV2/liveStream";
 import { coreAgentTools } from "./agentV2/toolRegistry";
 import { buildCodexPrompt } from "./codexPrompt";
-import { getCodexThread } from "./codexThreadStore";
+import { createDynamicToolsSignature, getCodexThreadWithTools } from "./codexThreadStore";
 import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTokenUsage, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
 
 export type CodexAgentTransport = {
@@ -28,7 +28,18 @@ export class CodexAgentUnavailableError extends Error {
   }
 }
 
+export class CodexAgentLoopGuardError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexAgentLoopGuardError";
+  }
+}
+
 const baseInstructions = `你是 Visual Python 内置的专业编程智能体。你必须通过宿主提供的工具读取和修改当前工程，不能只在聊天中粘贴代码并声称完成。优先定点修改已有代码；只有空文件或用户明确要求整体重写时才能整体替换。修改后必须取得真实检查结果。运行、渲染、保存、安装依赖和删除文档只在用户目标需要时调用，并接受宿主的唯一权限确认。工具失败后根据真实错误调整方案，不要重复相同调用。最终使用简洁 Markdown 总结真实结果，并附加最多三个与当前结果相关的隐藏建议：<!-- visual-python-followups: [{"label":"按钮文字","prompt":"下一步指令"}] -->。`;
+
+function graphicalInstructions(blockCatalog?: string): string {
+  return `This is a graphical workspace. First classify the user's intent as animation, static drawing, turtle tracing, data processing, mathematical computation, file/CSV work, or general Python. Choose blocks from purpose, capabilities, intentTags, input/output types, and the live Blockly contract; never choose Matplotlib merely because the request says draw or graphical. Treat registered Blockly definitions and connection contracts as the source of truth. The task catalog is a compact candidate summary, not the full block tree. ${graphicalCatalogInstructions(blockCatalog)} Use apply_block_plan as the only graphical write operation; do not submit native Blockly serialization, ids, next/shadow state, or coordinates. Compatible same-level statement blocks created in one plan are automatically chained in create order, so do not emit redundant connect operations for that chain. Use {refs:[...]} only for nested statement inputs; independent roots are not merged automatically. Validate the plan before committing and repair only the reported operation, field, or input when validation fails. Do not repeat a successful directory or template read.`;
+}
 
 function createUsage(): AgentTokenUsage {
   return { prompt: 0, completion: 0, total: 0, requests: 1, rounds: 1, inputCharacters: 0, toolSchemaCharacters: 0, toolResultCharacters: 0, cached: 0, uncachedPrompt: 0, cacheCreation: 0, cacheReportedRequests: 0 };
@@ -71,12 +82,31 @@ function responseText(toolName: string, result: Record<string, unknown>): string
   }
 }
 
+function stableToolArguments(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableToolArguments).join(",")}]`;
+  return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${stableToolArguments((value as Record<string, unknown>)[key])}`).join(",")}}`;
+}
+
+function toolCallFingerprint(toolName: string, args: Record<string, unknown>): string {
+  return `${toolName}:${stableToolArguments(args)}`;
+}
+
+function failureFingerprint(toolName: string, result: Record<string, unknown>): string {
+  const relevant = {
+    error: result.error,
+    message: result.message,
+    issues: result.issues,
+    validation: result.validation,
+  };
+  return `${toolName}:${stableToolArguments(relevant)}`;
+}
+
 export async function runCodexVisualPythonAgent(
   args: RunVisualPythonAgentArgs,
   transport: CodexAgentTransport = new CodexAgentClient(),
 ): Promise<AgentRunResult> {
   if (!args.prompt.trim()) throw new Error("请输入任务");
-  if (args.host.getSnapshot().workspaceMode !== "code") throw new CodexAgentUnavailableError("Codex App Server 当前仅接入纯代码模式", undefined, true);
   const config = getAiModelConfig();
   const protocol = selectAiProviderProtocol(config);
   if (protocol.protocol === "chat-completions") {
@@ -84,20 +114,39 @@ export async function runCodexVisualPythonAgent(
   }
   const tools = toolsForRun(args);
   const toolsByName = new Map(tools.map((tool) => [tool.definition.function.name, tool]));
+  const dynamicTools = tools.map(toDynamicTool);
+  const dynamicToolsSignature = createDynamicToolsSignature(dynamicTools);
   const usage = createUsage();
   const snapshot = args.host.getSnapshot();
-  const existingThread = args.conversationTargetId ? getCodexThread(args.conversationTargetId, config) : undefined;
-  const prompt = buildCodexPrompt({ prompt: args.prompt, history: args.history || [], snapshot }, !existingThread);
-  const fallbackPrompt = buildCodexPrompt({ prompt: args.prompt, history: args.history || [], snapshot }, true);
+  const workspaceMode = snapshot.workspaceMode === "visual" || snapshot.workspaceMode === "split" ? snapshot.workspaceMode : "code";
+  const graphicalWorkspace = workspaceMode === "visual" || workspaceMode === "split";
+  const existingThread = args.conversationTargetId
+    ? getCodexThreadWithTools(args.conversationTargetId, config, dynamicToolsSignature)
+    : undefined;
+  // A resumed Thread retains conversation context, not the current Blockly
+  // toolbox state. Recompute the task-scoped catalog for every graphical turn.
+  const blockCatalog = graphicalWorkspace ? args.host.getBlockCatalog?.(args.prompt) : undefined;
+  // Keep the catalog state used by the developer instructions identical to the
+  // catalog that is actually injected into the prompt. Otherwise truncation can
+  // hide the omitted-count marker from the model's discovery policy.
+  const promptBlockCatalog = blockCatalog?.trim()
+    ? compactBlockCatalogForPrompt(blockCatalog.trim()) || undefined
+    : undefined;
+  const prompt = buildCodexPrompt({ prompt: args.prompt, history: args.history || [], snapshot, blockCatalog: promptBlockCatalog }, !existingThread);
+  const fallbackPrompt = buildCodexPrompt({ prompt: args.prompt, history: args.history || [], snapshot, blockCatalog: promptBlockCatalog }, true);
   usage.inputCharacters = prompt.length;
   usage.toolSchemaCharacters = JSON.stringify(tools.map((tool) => tool.definition)).length;
   const messages = new Map<string, string>();
   const reasoning = new Map<string, string>();
   let toolCallCount = 0;
   let stateChanged = false;
+  let stateVersion = 0;
   let executionStarted = false;
   let clarification: AgentClarification | undefined;
   let sequence = 0;
+  const readOnlyToolCache = new Map<string, { stateVersion: number; result: Record<string, unknown>; resultText: string }>();
+  const repeatedFailures = new Map<string, number>();
+  const maxRepeatedFailures = 3;
 
   const emit = (event: Omit<AgentActivityEvent, "id"> & { id?: string }) => args.onEvent({ ...event, id: event.id || `codex-${Date.now().toString(36)}-${sequence++}` });
   const progress = (value: AgentProgress) => args.onProgress?.({ ...value, tokenUsage: usage });
@@ -154,6 +203,17 @@ export async function runCodexVisualPythonAgent(
       return;
     }
     toolCallCount += 1;
+    const toolArgs = toolRequest.arguments;
+    const callFingerprint = toolCallFingerprint(toolName, toolArgs);
+    const cachedRead = tool.readOnly ? readOnlyToolCache.get(callFingerprint) : undefined;
+    if (cachedRead?.stateVersion === stateVersion) {
+      const cachedResult = { ...cachedRead.result, cached: true, stateUnchanged: true };
+      const cachedText = responseText(toolName, cachedResult);
+      usage.toolResultCharacters += cachedText.length;
+      emit({ id: toolId, kind: "tool", status: "done", title: tool.label, detail: "复用未变化的读取结果", toolName, result: cachedResult, resultText: cachedText });
+      await transport.respondToServerRequest(request.id, { success: true, contentItems: [{ type: "inputText", text: cachedText }] });
+      return;
+    }
     emit({ id: toolId, kind: "tool", status: "running", title: tool.label, toolName });
     const permissionAllowed = !tool.requiresPermission || Boolean(args.onPermissionRequest && await args.onPermissionRequest({
       id: toolId,
@@ -167,7 +227,6 @@ export async function runCodexVisualPythonAgent(
       await transport.respondToServerRequest(request.id, { success: false, contentItems: [{ type: "inputText", text: JSON.stringify(denied) }] });
       return;
     }
-    const toolArgs = toolRequest.arguments;
     try {
       let result: Record<string, unknown>;
       if (toolName === "ask_user") {
@@ -187,26 +246,52 @@ export async function runCodexVisualPythonAgent(
       }
       const failed = resultFailed(result);
       if (tool.changesState && !failed && result.changed !== false) stateChanged = true;
+      if (tool.changesState && !failed && result.changed !== false) {
+        stateVersion += 1;
+        readOnlyToolCache.clear();
+      }
       const resultText = responseText(toolName, result);
       usage.toolResultCharacters += resultText.length;
       const codeChange = result.__codeChange && typeof result.__codeChange === "object" ? result.__codeChange as AgentActivityEvent["codeChange"] : undefined;
       emit({ id: toolId, kind: "tool", status: failed ? "error" : "done", title: tool.label, detail: failed ? "失败" : undefined, toolName, result, resultText, codeChange });
+      if (!failed && tool.readOnly) readOnlyToolCache.set(callFingerprint, { stateVersion, result, resultText });
+      if (failed) {
+        const failureKey = failureFingerprint(toolName, result);
+        const attempts = (repeatedFailures.get(failureKey) || 0) + 1;
+        repeatedFailures.set(failureKey, attempts);
+        if (attempts >= maxRepeatedFailures) {
+          const guardedMessage = `${typeof result.error === "string" ? result.error : resultText}\n同一工具以相同原因连续失败 ${attempts} 次，已停止继续重复调用。请根据上述具体错误修改方案后再继续。`;
+          await transport.respondToServerRequest(request.id, { success: false, contentItems: [{ type: "inputText", text: JSON.stringify({ ok: false, error: guardedMessage, terminal: true }) }] });
+          throw new CodexAgentLoopGuardError(guardedMessage);
+        }
+      }
       await transport.respondToServerRequest(request.id, { success: !failed, contentItems: [{ type: "inputText", text: resultText }] });
     } catch (error) {
+      if (error instanceof CodexAgentLoopGuardError) throw error;
       const message = error instanceof Error ? error.message : String(error);
-      emit({ id: toolId, kind: "tool", status: "error", title: tool.label, detail: message, toolName, resultText: message });
-      await transport.respondToServerRequest(request.id, { success: false, contentItems: [{ type: "inputText", text: JSON.stringify({ ok: false, error: message }) }] });
+      const failureKey = `${toolName}:${message}`;
+      const attempts = (repeatedFailures.get(failureKey) || 0) + 1;
+      repeatedFailures.set(failureKey, attempts);
+      const guardedMessage = attempts >= maxRepeatedFailures
+        ? `${message}\n同一工具以相同原因连续失败 ${attempts} 次，已停止继续重复调用。请根据上述具体错误修改方案后再继续。`
+        : message;
+      emit({ id: toolId, kind: "tool", status: "error", title: tool.label, detail: guardedMessage, toolName, resultText: guardedMessage });
+      await transport.respondToServerRequest(request.id, { success: false, contentItems: [{ type: "inputText", text: JSON.stringify({ ok: false, error: guardedMessage, ...(attempts >= maxRepeatedFailures ? { terminal: true } : {}) }) }] });
+      if (attempts >= maxRepeatedFailures) throw new CodexAgentLoopGuardError(guardedMessage);
     }
   };
 
   progress({ phase: "preparing", label: "准备当前工程上下文", tokenUsage: usage });
   try {
+    const developerInstructions = args.mode === "plan"
+      ? "当前是计划模式，只能读取和分析，不得修改、运行或保存工程。"
+      : `当前是智能体模式。所有工程操作必须使用 Visual Python 动态工具。${graphicalWorkspace ? `\n${graphicalInstructions(promptBlockCatalog)}` : ""}`;
     const turn = await transport.runTurn(prompt, {
       config,
       effort: args.reasoningEffort,
-      dynamicTools: tools.map(toDynamicTool),
+      dynamicTools,
       baseInstructions,
-      developerInstructions: args.mode === "plan" ? "当前是计划模式，只能读取和分析，不得修改、运行或保存工程。" : "当前是智能体模式。所有工程操作必须使用 Visual Python 动态工具。",
+      developerInstructions,
       signal: args.signal,
       conversationTargetId: args.conversationTargetId,
       fallbackPrompt,
@@ -216,6 +301,7 @@ export async function runCodexVisualPythonAgent(
     if (turn.status !== "completed") throw new Error(`Codex Agent 回合未完成：${turn.status || "unknown"}`);
   } catch (error) {
     if (args.signal.aborted) throw new Error("任务已停止");
+    if (error instanceof CodexAgentLoopGuardError) throw error;
     if (!stateChanged && !executionStarted) throw new CodexAgentUnavailableError(error instanceof Error ? error.message : String(error), error);
     throw error;
   }

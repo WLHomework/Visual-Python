@@ -1,9 +1,11 @@
 import type { AgentConversationTurn } from "./agentV2/types";
+import { compactBlockCatalogForPrompt } from "./agentV2/context";
 
 type CodexPromptInput = {
   prompt: string;
   history: AgentConversationTurn[];
   snapshot: Record<string, unknown>;
+  blockCatalog?: string;
 };
 
 const maxSnapshotCharacters = 10_000;
@@ -50,9 +52,18 @@ function compactHistory(history: AgentConversationTurn[]): string {
 
 export function buildCodexPrompt(input: CodexPromptInput, includeHistory: boolean): string {
   const history = includeHistory ? compactHistory(input.history) : "";
-  return [
+  const sections = [
     history ? `最近对话：\n${history}` : "",
     `当前工程状态：\n${compactSnapshot(input.snapshot)}`,
     `用户任务：\n${input.prompt.trim()}`,
-  ].filter(Boolean).join("\n\n");
+  ];
+  // The server Thread owns the conversation history, but the host-owned
+  // graphical catalog is task-scoped and must be refreshed for every turn.
+  // Keeping these concerns separate prevents resumed threads from losing the
+  // current workspace's block contracts without duplicating the full history.
+  if (input.blockCatalog?.trim()) {
+    const catalog = compactBlockCatalogForPrompt(input.blockCatalog.trim());
+    if (catalog) sections.push(`[Graphical workspace block catalog]\n${catalog}\nUse get_block_templates only for the specific block types needed by this task.`);
+  }
+  return sections.filter(Boolean).join("\n\n");
 }

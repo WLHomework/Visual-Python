@@ -3,12 +3,28 @@ import type { AiModelConfig } from "./aiConfig";
 type CodexThreadRecord = {
   threadId: string;
   updatedAt: number;
+  dynamicToolsSignature?: string;
 };
 
 type CodexThreadStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const storageKey = "visual-python:codex-thread-store:v1";
 const maxStoredThreads = 48;
+
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
+  return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize((value as Record<string, unknown>)[key])}`).join(",")}}`;
+}
+
+export function createDynamicToolsSignature(tools: unknown[] | undefined): string {
+  const normalized = [...(tools || [])].sort((left, right) => {
+    const leftName = left && typeof left === "object" && typeof (left as Record<string, unknown>).name === "string" ? (left as Record<string, unknown>).name as string : "";
+    const rightName = right && typeof right === "object" && typeof (right as Record<string, unknown>).name === "string" ? (right as Record<string, unknown>).name as string : "";
+    return leftName.localeCompare(rightName);
+  });
+  return stableSerialize(normalized);
+}
 
 function getStorage(storage?: CodexThreadStorage): CodexThreadStorage | undefined {
   if (storage) return storage;
@@ -27,7 +43,11 @@ function readRecords(storage: CodexThreadStorage): Record<string, CodexThreadRec
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const record = item as Partial<CodexThreadRecord>;
       return typeof record.threadId === "string" && record.threadId.trim() && typeof record.updatedAt === "number"
-        ? [[key, { threadId: record.threadId, updatedAt: record.updatedAt }]]
+        ? [[key, {
+          threadId: record.threadId,
+          updatedAt: record.updatedAt,
+          ...(typeof record.dynamicToolsSignature === "string" ? { dynamicToolsSignature: record.dynamicToolsSignature } : {}),
+        }]]
         : [];
     }));
   } catch {
@@ -46,7 +66,26 @@ export function getCodexThread(targetId: string | undefined, config: AiModelConf
   return readRecords(activeStorage)[threadKey(normalizedTarget, config)]?.threadId;
 }
 
-export function saveCodexThread(targetId: string, config: AiModelConfig, threadId: string, storage?: CodexThreadStorage): void {
+export function getCodexThreadWithTools(
+  targetId: string | undefined,
+  config: AiModelConfig,
+  dynamicToolsSignature: string,
+  storage?: CodexThreadStorage,
+): string | undefined {
+  const normalizedTarget = targetId?.trim();
+  const activeStorage = getStorage(storage);
+  if (!normalizedTarget || !activeStorage) return undefined;
+  const record = readRecords(activeStorage)[threadKey(normalizedTarget, config)];
+  return record?.dynamicToolsSignature === dynamicToolsSignature ? record.threadId : undefined;
+}
+
+export function saveCodexThread(
+  targetId: string,
+  config: AiModelConfig,
+  threadId: string,
+  storage?: CodexThreadStorage,
+  dynamicToolsSignature?: string,
+): void {
   const normalizedTarget = targetId.trim();
   const normalizedThreadId = threadId.trim();
   const activeStorage = getStorage(storage);
@@ -54,7 +93,11 @@ export function saveCodexThread(targetId: string, config: AiModelConfig, threadI
   try {
     const records = readRecords(activeStorage);
     const key = threadKey(normalizedTarget, config);
-    records[key] = { threadId: normalizedThreadId, updatedAt: Date.now() };
+    records[key] = {
+      threadId: normalizedThreadId,
+      updatedAt: Date.now(),
+      ...(dynamicToolsSignature === undefined ? {} : { dynamicToolsSignature }),
+    };
     const keys = Object.keys(records);
     if (keys.length > maxStoredThreads) {
       for (const staleKey of keys.sort((left, right) => records[left].updatedAt - records[right].updatedAt).slice(0, keys.length - maxStoredThreads)) {

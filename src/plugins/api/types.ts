@@ -18,6 +18,14 @@ export interface PluginManifest {
   python?: { packages?: string[]; minimumVersion?: string };
   agent?: {
     description: string;
+    purpose?: string;
+    aliases?: string[];
+    keywords?: string[];
+    capabilities?: string[];
+    dependencies?: string[];
+    recommendedFor?: string[];
+    avoidFor?: string[];
+    intentTags?: string[];
     tools?: string[];
     fileTypes?: string[];
     detect?: "imports" | "content" | "project";
@@ -34,8 +42,35 @@ export type PythonBlockGenerator = (
   generator: typeof pythonGenerator,
 ) => string | [string, number];
 
+export interface PluginBlockAgentMetadata {
+  description?: string;
+  purpose?: string;
+  aliases?: string[];
+  keywords?: string[];
+  examples?: string[];
+  capabilities?: string[];
+  dependencies?: string[];
+  inputDescriptions?: Record<string, string>;
+  inputTypes?: Record<string, string>;
+  outputType?: string;
+  statement?: boolean;
+  requires?: string[];
+  relatedBlocks?: string[];
+  recommendedFor?: string[];
+  avoidFor?: string[];
+  intentTags?: string[];
+}
+
+export interface PluginWorkspaceIssue {
+  blockId?: string;
+  message: string;
+}
+
+export type PluginWorkspaceValidator = (workspace: Blockly.Workspace) => PluginWorkspaceIssue[];
+
 export interface PluginBlockDefinition extends Record<string, unknown> {
   type: string;
+  agent?: PluginBlockAgentMetadata;
 }
 
 export interface PluginToolboxCategory {
@@ -114,6 +149,7 @@ export interface PluginContext {
   registerCodeDocumentHandler(handler: PluginCodeDocumentHandler): void;
   registerCommand(command: PluginCommand): void;
   registerAgentTool(tool: PluginAgentTool): void;
+  registerWorkspaceValidator(id: string, validator: PluginWorkspaceValidator): void;
   reportProblem(message: string, detail?: string): void;
 }
 

@@ -94,6 +94,7 @@ describe("Manim render configuration", () => {
       registerCodeDocumentHandler: () => undefined,
       registerCommand: () => undefined,
       registerAgentTool: () => undefined,
+      registerWorkspaceValidator: () => undefined,
       reportProblem: () => undefined,
     });
     setManimRenderConfig({ outputType: "image", transparentBackground: true, imageSizeMode: "custom", imageWidth: 1600, imageHeight: 1200, lockImageAspectRatio: false, imageCaptureMode: "animation", imageAnimationStep: 3, quality: "four_k", fps: 60, renderer: "opengl", disableCaching: true, selectedScene: "SecondScene", outputFileName: "lesson-one" });

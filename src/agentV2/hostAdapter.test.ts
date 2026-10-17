@@ -32,6 +32,17 @@ describe("Visual Python host adapter", () => {
     expect(Object.keys(adapter)).toEqual(["getSnapshot", "executeTool", "observeExecution"]);
   });
 
+  it("exposes the generated block catalog through the host contract", () => {
+    const getBlockCatalog = vi.fn((task?: string) => JSON.stringify({ task, categories: [{ name: "Manim" }] }));
+    const adapter = createVisualPythonHostAdapter({
+      getSnapshot: () => ({}),
+      getBlockCatalog,
+    } as unknown as VisualPythonHostServices);
+
+    expect(adapter.getBlockCatalog?.("create a circle")).toContain('"Manim"');
+    expect(getBlockCatalog).toHaveBeenCalledWith("create a circle");
+  });
+
   it("routes dynamically registered plugin tools through the plugin executor", async () => {
     const executePluginTool = vi.fn().mockResolvedValue({ ok: true });
     const adapter = createVisualPythonHostAdapter({

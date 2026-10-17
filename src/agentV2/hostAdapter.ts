@@ -3,6 +3,7 @@ import { createVisualPythonToolExecutor, previewStreamingEditorCode, type Visual
 
 export type VisualPythonHostServices = VisualPythonToolServices & {
   getSnapshot: AgentHost["getSnapshot"];
+  getBlockCatalog?: AgentHost["getBlockCatalog"];
   getCapabilities?: AgentHost["getCapabilities"];
   getTools?: AgentHost["getTools"];
   blocklyTools?: AgentHost["executeTool"];
@@ -26,7 +27,6 @@ export function createVisualPythonHostAdapter(services: VisualPythonHostServices
   const adapter: AgentHost = {
     getSnapshot: services.getSnapshot,
     executeTool,
-    previewStreamingCode: (code) => previewStreamingEditorCode(services, code),
     observeExecution: services.observeExecution || (async (toolName, signal) => {
       const tool = services.getTools?.().find((item) => item.definition.function.name === toolName);
       const stateField = tool?.execution?.stateField || "running";
@@ -45,6 +45,8 @@ export function createVisualPythonHostAdapter(services: VisualPythonHostServices
       return state;
     }),
   };
+  if (services.sourceCodeRef) adapter.previewStreamingCode = (code) => previewStreamingEditorCode(services, code);
+  if (services.getBlockCatalog) adapter.getBlockCatalog = services.getBlockCatalog;
   if (services.getCapabilities) adapter.getCapabilities = services.getCapabilities;
   if (services.getTools) adapter.getTools = services.getTools;
   return adapter;

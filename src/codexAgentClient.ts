@@ -1,7 +1,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type { AiModelConfig, AiReasoningEffort } from "./aiConfig";
 import type { AgentModelEvent, AgentToolRequest } from "./agentEvents";
-import { clearCodexThread, getCodexThread, saveCodexThread } from "./codexThreadStore";
+import { clearCodexThread, createDynamicToolsSignature, getCodexThreadWithTools, saveCodexThread } from "./codexThreadStore";
 
 export type CodexAgentInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -191,7 +191,8 @@ export class CodexAgentClient {
   async runTurn(prompt: string, options: CodexRunTurnOptions): Promise<CodexTurnResult> {
     await this.start(options.config);
     const targetId = options.conversationTargetId?.trim();
-    const storedThreadId = targetId ? getCodexThread(targetId, options.config) : undefined;
+    const toolsSignature = createDynamicToolsSignature(options.dynamicTools);
+    const storedThreadId = targetId ? getCodexThreadWithTools(targetId, options.config, toolsSignature) : undefined;
     let threadId = "";
     let resumed = false;
     if (storedThreadId) {
@@ -226,7 +227,7 @@ export class CodexAgentClient {
         dynamicTools: options.dynamicTools || [],
       });
       threadId = threadResponse.thread.id;
-      if (targetId) saveCodexThread(targetId, options.config, threadId);
+      if (targetId) saveCodexThread(targetId, options.config, threadId, undefined, toolsSignature);
     }
     const turnResponse = await this.request<{ turn: { id: string; status?: string } }>("turn/start", {
       threadId,

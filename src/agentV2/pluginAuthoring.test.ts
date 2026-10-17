@@ -28,12 +28,17 @@ describe("plugin authoring drafts", () => {
       id: "com.example.template",
       name: "Template",
       description: "Template",
-      blocks: [{ type: "com_example_template_star", purpose: "draw a star", inputs: ["SIZE"] }],
+      blocks: [{ type: "com_example_template_star", purpose: "draw a star", inputs: ["SIZE"], inputDescriptions: { SIZE: "Side length in Python units" } }],
     });
     const draft = store.create({ id: "com.example.template", name: "Template", description: "Template", planId: plan.id });
 
     expect(draft.files["index.js"]).toContain("com_example_template_star");
     expect(draft.files["index.js"]).toContain('name: "SIZE"');
+    expect(draft.files["index.js"]).toContain("agent:");
+    expect(draft.files["index.js"]).toContain("inputDescriptions");
+    expect(draft.files["codegen.json"]).toContain("capabilities");
+    expect(draft.files["codegen.json"]).toContain("keywords");
+    expect(draft.files["codegen.json"]).toContain("inputDescriptions");
   });
 
   it("creates a valid standard plugin scaffold", () => {
@@ -49,6 +54,7 @@ describe("plugin authoring drafts", () => {
     expect(JSON.parse(draft.files["plugin.json"])).toMatchObject({
       agent: { description: "Basic shapes", detect: "project" },
     });
+    expect(draft.files["index.js"]).toContain("agent:");
     expect(validatePluginDraft(draft)).toMatchObject({ valid: true, issues: [] });
   });
 

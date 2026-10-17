@@ -68,9 +68,10 @@ manifest 声明：
 
 插件注册只读工具 `inspect_turtle_capabilities`，返回入口规则、可用能力、变量约定和事件限制。AI 的实际画布修改继续使用宿主通用工具：
 
-- `search_blocks`
 - `get_block_templates`
-- `apply_workspace`
+- `compose_workspace`
+- `search_blocks`
+- `append_workspace_blocks` / `apply_workspace`
 
 纯代码模式继续使用通用文档与定点代码编辑工具。插件不增加宿主专属执行器；Turtle 程序通过现有 Python 运行工具启动，运行前沿用宿主统一确认。
 

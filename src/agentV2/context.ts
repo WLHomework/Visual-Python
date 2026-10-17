@@ -7,12 +7,152 @@ type AgentRequestContextInput = {
   history: AgentConversationTurn[];
   snapshot: Record<string, unknown>;
   memory: string;
+  blockCatalog?: string;
 };
 
 export type AgentRequestContext = AgentRequestContextInput;
 
 const truncate = (value: string, max: number) => value.length > max ? `${value.slice(0, max)}\n[内容已截断]` : value;
 const maxAgentToolHistoryCharacters = 32_000;
+const maxCompactedToolHistoryCharacters = 12_000;
+const maxBlockCatalogCharacters = 44_000;
+const maxInitialRequestCharacters = 150_000;
+const compactedToolHistoryPrefix = "历史工具回合已压缩。已完成的工具结果摘要（除非需要新信息，不要重复读取）：\n";
+
+type CatalogCategory = {
+  name: string;
+  categories?: CatalogCategory[];
+  blocks?: Record<string, unknown>[];
+};
+
+export function compactBlockCatalogForPrompt(value: string, maxCharacters = 8_000): string | null {
+  return compactTaskBlockDirectory(value, maxCharacters)?.text || compactBlockCatalog(value, maxCharacters)?.text || null;
+}
+
+export function hasTruncatedBlockCatalog(value?: string): boolean {
+  if (!value?.trim()) return false;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    return record.truncated === true
+      || (typeof record.omittedCandidateCount === "number" && record.omittedCandidateCount > 0)
+      || (typeof record.omittedBlockCount === "number" && record.omittedBlockCount > 0);
+  } catch {
+    return false;
+  }
+}
+
+export function graphicalCatalogInstructions(blockCatalog?: string): string {
+  const catalog = blockCatalog?.trim();
+  const discoveryRules = !catalog
+    ? "No task block catalog is attached. Call get_task_block_directory once for task discovery, then use the returned candidates; do not search for blocks one by one."
+    : hasTruncatedBlockCatalog(catalog)
+      ? "The attached task block catalog is truncated and reports omittedCandidateCount or omittedBlockCount. You may make at most one broad search_blocks call only if the required block is absent; do not repeat discovery or search individual blocks."
+      : "The prompt contains a complete catalog. do not call get_task_block_directory or search_blocks. Use the catalog directly and call get_block_templates at most once in a batch for required block types."
+  return `Catalog strategy for this graphical task: ${discoveryRules}`;
+}
+
+function compactTaskBlockDirectory(value: string, maxCharacters: number): { text: string; omittedBlocks: number } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { candidates?: unknown }).candidates)) return null;
+  const record = parsed as { categories?: unknown; candidates: unknown[]; hint?: unknown; omittedCandidateCount?: unknown };
+  const candidates = record.candidates.filter((candidate): candidate is Record<string, unknown> => Boolean(candidate && typeof candidate === "object" && !Array.isArray(candidate)));
+  const categories = Array.isArray(record.categories) ? record.categories : [];
+  const previouslyOmitted = typeof record.omittedCandidateCount === "number" && record.omittedCandidateCount > 0
+    ? record.omittedCandidateCount
+    : 0;
+  const build = (limit: number) => {
+    const kept = candidates.slice(0, limit).map((candidate) => Object.fromEntries(Object.entries(candidate).map(([key, item]) => {
+      if (typeof item === "string") return [key, truncate(item, 800)];
+      if (Array.isArray(item)) return [key, item.slice(0, 8).map((entry) => typeof entry === "string" ? truncate(entry, 300) : entry)];
+      return [key, item];
+    })));
+    const omittedBlocks = previouslyOmitted + candidates.length - limit;
+    return {
+      text: JSON.stringify({ categories, candidates: kept, ...(record.hint ? { hint: record.hint } : {}), ...(omittedBlocks ? { omittedCandidateCount: omittedBlocks } : {}) }),
+      omittedBlocks,
+    };
+  };
+  let low = 0;
+  let high = candidates.length;
+  let best = build(0);
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = build(middle);
+    if (candidate.text.length <= maxCharacters) {
+      best = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return best;
+}
+
+function compactBlockCatalog(value: string, maxCharacters: number): { text: string; omittedBlocks: number } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return { text: JSON.stringify({ content: truncate(value, Math.max(0, maxCharacters - 64)), truncated: value.length > maxCharacters }), omittedBlocks: value.length > maxCharacters ? 1 : 0 };
+  }
+  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { categories?: unknown }).categories)) {
+    return value.length <= maxCharacters
+      ? { text: value, omittedBlocks: 0 }
+      : { text: JSON.stringify({ content: truncate(value, Math.max(0, maxCharacters - 64)), truncated: true }), omittedBlocks: 1 };
+  }
+
+  const source = parsed as { categories: CatalogCategory[]; omittedBlockCount?: unknown };
+  const categories = source.categories;
+  const compactCategory = (category: CatalogCategory): CatalogCategory => ({
+    name: category.name,
+    categories: (category.categories ?? []).map(compactCategory),
+    blocks: (category.blocks ?? []).map(({ state: _state, ...block }) => block),
+  });
+  const compactCategories = categories.map(compactCategory);
+  const countBlocks = (items: CatalogCategory[]): number => items.reduce((total, category) =>
+    total + (category.blocks?.length ?? 0) + countBlocks(category.categories ?? []), 0);
+  const totalBlocks = countBlocks(compactCategories);
+  const buildPrefix = (limit: number) => {
+    let remaining = limit;
+    const take = (items: CatalogCategory[]): CatalogCategory[] => items.map((category) => {
+      const blocks = category.blocks ?? [];
+      const keptBlocks = blocks.slice(0, remaining);
+      remaining -= keptBlocks.length;
+      return { name: category.name, blocks: keptBlocks, categories: take(category.categories ?? []) };
+    });
+    const keptCategories = take(compactCategories);
+    const previouslyOmitted = typeof source.omittedBlockCount === "number" && source.omittedBlockCount > 0
+      ? source.omittedBlockCount
+      : 0;
+    const omittedBlocks = previouslyOmitted + totalBlocks - limit;
+    return {
+      text: JSON.stringify(omittedBlocks ? { categories: keptCategories, omittedBlockCount: omittedBlocks } : { categories: keptCategories }),
+      omittedBlocks,
+    };
+  };
+
+  let low = 0;
+  let high = totalBlocks;
+  let best = buildPrefix(0);
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = buildPrefix(middle);
+    if (candidate.text.length <= maxCharacters) {
+      best = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return best;
+}
 
 function snapshotText(snapshot: Record<string, unknown>): string {
   const compact = { ...snapshot };
@@ -31,7 +171,7 @@ export function createAgentRequestContext(input: AgentRequestContextInput): Agen
 }
 
 export function buildAgentRequestMessages(context: AgentRequestContext): AiChatMessage[] {
-  return [
+  const messages: AiChatMessage[] = [
     { role: "system", content: context.system },
     ...historyMessages(context.history),
     {
@@ -39,6 +179,18 @@ export function buildAgentRequestMessages(context: AgentRequestContext): AiChatM
       content: `用户任务：\n${context.prompt.trim()}\n\n当前工程快照：\n${snapshotText(context.snapshot)}\n\n${context.memory}`,
     },
   ];
+  if (context.blockCatalog?.trim()) {
+    const baseCharacters = messages.reduce((total, message) => total + message.content.length, 0);
+    const catalogBudget = Math.min(maxBlockCatalogCharacters, Math.max(0, maxInitialRequestCharacters - baseCharacters - 512));
+    if (catalogBudget < 256) return messages;
+    const catalog = compactTaskBlockDirectory(context.blockCatalog.trim(), catalogBudget) ?? compactBlockCatalog(context.blockCatalog.trim(), catalogBudget);
+    if (!catalog?.text) return messages;
+    const notice = catalog.omittedBlocks
+      ? `积木目录受本轮请求长度限制，仅附带部分积木摘要；还有 ${catalog.omittedBlocks} 个积木未展开，可用 search_blocks 搜索并用 get_block_templates 获取真实模板。`
+      : "以下是积木目录摘要；需要精确 Blockly 模板状态时再调用 get_block_templates。";
+    messages.push({ role: "user", content: `[Block catalog]\n${catalog.text}\n\n${notice}` });
+  }
+  return messages;
 }
 
 export function appendAgentTurn(messages: AiChatMessage[], turn: AiChatMessage[]): AiChatMessage[] {
@@ -46,6 +198,10 @@ export function appendAgentTurn(messages: AiChatMessage[], turn: AiChatMessage[]
   if (JSON.stringify(next).length <= maxAgentToolHistoryCharacters) return next;
 
   let removedRounds = 0;
+  const previousSummaryIndex = next.findIndex((message) => message.role === "user" && message.content.startsWith(compactedToolHistoryPrefix));
+  let compactedEvidence = previousSummaryIndex >= 0
+    ? next.splice(previousSummaryIndex, 1)[0].content.slice(compactedToolHistoryPrefix.length)
+    : "";
   while (JSON.stringify(next).length > maxAgentToolHistoryCharacters) {
     let start = -1;
     let end = -1;
@@ -61,13 +217,53 @@ export function appendAgentTurn(messages: AiChatMessage[], turn: AiChatMessage[]
       }
     }
     if (start < 0 || end < 0) break;
+    compactedEvidence = mergeCompactedToolEvidence(compactedEvidence, summarizeToolRound(next.slice(start, end)));
     next.splice(start, end - start);
     removedRounds += 1;
   }
 
-  if (!removedRounds) return next;
-  next.push({ role: "user", content: `历史工具回合已压缩（${removedRounds} 轮）。当前工作区状态和最近一轮工具结果优先；如需旧细节，请重新读取当前状态。` });
+  if (!removedRounds) {
+    if (compactedEvidence) next.splice(previousSummaryIndex < 0 ? 1 : Math.min(previousSummaryIndex, next.length), 0, { role: "user", content: `${compactedToolHistoryPrefix}${compactedEvidence}` });
+    return next;
+  }
+  next.splice(1, 0, { role: "user", content: `${compactedToolHistoryPrefix}${compactedEvidence || `已压缩 ${removedRounds} 轮工具历史。`}` });
   return next;
+}
+
+function summarizeToolRound(round: AiChatMessage[]): string {
+  const assistant = round.find((message) => message.role === "assistant" && message.toolCalls?.length);
+  if (!assistant?.toolCalls?.length) return "";
+  const summaries = assistant.toolCalls.map((call) => {
+    const result = round.find((message) => message.role === "tool" && message.toolCallId === call.id);
+    let content = result?.content || "工具没有返回内容。";
+    let structured = false;
+    try {
+      const parsed: unknown = JSON.parse(content);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        structured = true;
+        content = compactAgentToolResult(call.function.name, parsed as Record<string, unknown>);
+        if (call.function.name === "get_task_block_directory") {
+          content = compactTaskBlockDirectory(content, 4_000)?.text || content;
+        } else if (call.function.name === "get_block_templates" && content.length > 4_000) {
+          const templates = (JSON.parse(content) as { templates?: unknown[] }).templates || [];
+          content = JSON.stringify({ templates: templates.slice(0, 12), omittedTemplateCount: Math.max(0, templates.length - 12) });
+        }
+      }
+    } catch {
+      // Preserve a bounded plain-text diagnostic when the tool result is not JSON.
+    }
+    if (!structured && content.length > 1_200) content = "非结构化工具输出过长，已省略正文。";
+    const boundedContent = content.length > 4_000 ? `${content.slice(0, 4_000)}\n[工具结果摘要已截断]` : content;
+    return `- ${call.function.name}(${call.function.arguments.slice(0, 300)}): ${boundedContent}`;
+  });
+  return summaries.join("\n");
+}
+
+function mergeCompactedToolEvidence(previous: string, next: string): string {
+  const combined = [previous.trim(), next.trim()].filter(Boolean).join("\n");
+  return combined.length > maxCompactedToolHistoryCharacters
+    ? `[较早的工具证据已省略]\n${combined.slice(-maxCompactedToolHistoryCharacters + 30)}`
+    : combined;
 }
 
 export function compactAgentAssistantMessage(content: string): string {
@@ -95,17 +291,30 @@ function boundedResultJson(result: Record<string, unknown>, max = 6_000): string
 export function compactAgentToolResult(_toolName: string, result: Record<string, unknown>): string {
   try {
     if (_toolName === "read_plugin_draft_file") return JSON.stringify(result);
-    if (_toolName === "add_workspace_block" || _toolName === "replace_workspace" || _toolName === "apply_workspace" || _toolName === "import_python_workspace" || _toolName === "append_workspace_blocks") {
+    if (_toolName === "get_task_block_directory") {
+      const compact = compactTaskBlockDirectory(JSON.stringify(result), 6_000);
+      if (compact) return compact.text;
+    }
+    if (_toolName === "get_block_templates") {
+      const templates = Array.isArray(result.templates) ? result.templates.map((template) => {
+        if (!template || typeof template !== "object" || Array.isArray(template)) return template;
+        const { state: _state, ...contract } = template as Record<string, unknown>;
+        const fields = Array.isArray(contract.fields) ? contract.fields.map((field) => {
+          if (!field || typeof field !== "object" || Array.isArray(field)) return field;
+          const item = field as Record<string, unknown>;
+          return { ...item, ...(Array.isArray(item.options) ? { options: item.options.slice(0, 20) } : {}) };
+        }) : [];
+        return { ...contract, fields };
+      }) : [];
+      return JSON.stringify({ templates });
+    }
+    if (_toolName === "apply_block_plan") {
       const compact = Object.fromEntries([
         ["ok", result.ok],
         ["changed", result.changed],
-        ["block", result.block],
-        ["firstBlock", result.firstBlock],
-        ["lastBlock", result.lastBlock],
-        ["statementTail", result.statementTail],
         ["blockCount", result.blockCount],
-        ["error", result.error],
-        ["detail", result.detail],
+        ["changedBlockIds", result.changedBlockIds],
+        ["issues", result.issues],
       ].filter(([, value]) => value !== undefined));
       return boundedResultJson(compact, 2_000);
     }

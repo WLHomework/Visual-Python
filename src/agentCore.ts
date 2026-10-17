@@ -2,7 +2,7 @@ import { type AiChatMessage, type AiChatToolCall } from "./aiConfig";
 import { chatCompletionsTransport, type AgentModelTransport } from "./agentTransport";
 import { coreAgentTools } from "./agentV2/toolRegistry";
 import { createAgentMemory, rememberAgentDecision, rememberAgentEvidence, serializeAgentMemory } from "./agentV2/memory";
-import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext } from "./agentV2/context";
+import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext, graphicalCatalogInstructions } from "./agentV2/context";
 import { createAgentTokenUsage, mergeProviderTokenUsage, recordAgentRequest, recordAgentToolResult } from "./agentV2/tokenLedger";
 import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
@@ -56,7 +56,12 @@ const systemRules = `你是 Visual Python 的通用软件智能体。你通过�
 - 需要确认的操作由宿主统一确认。用户拒绝后视为已取消，不要重复请求相同操作。
 - ask_user 只用于会显著改变结果的真实歧义。颜色、布局、动画节奏等普通实现细节由你专业判断，避免不必要的往返。
 - 最终回复只总结实际完成内容、验证结果和需要用户决定的事项。不要复述全部工具调用或输出未经处理的内部数据。
-- 图形化工作区：优先用 visual_python_manim_* 专用积木。没有对应积木的语句才用表达式，但不能整棵树都是表达式。有完整 Python 源码时用 import_python_workspace。从零搭建时不要每个积木调用一次，也不必一次交整课：先确保有场景积木，再用 append_workspace_blocks 按段追加（例如先标题和对象，再播放和等待），每批 3 到 20 个语句积木。replace_workspace 仅用于空工作区或用户明确要求整课重写。add_workspace_block 只修正单个积木。`;
+- 图形化工作区必须使用当前工具箱和已启用插件提供的积木，遵循对应能力声明的入口、字段、连接与运行契约；不要用代码编辑工具代替搭积木。没有对应积木的语句才使用表达式，不能把整棵树都生成为表达式。
+- 图形化写入只有 apply_block_plan：提交 version、mode 和 semantic operations，不提交 Blockly 原生 JSON、id、next、shadow、坐标或其它序列化字段。宿主会在隔离工作区中依据真实模板组装、验证并一次提交。
+- 普通创建或修改前先调用一次 get_task_block_directory。目录不足时，一次调用 get_block_templates 读取本次需要的多个类型；只有目录仍找不到必要积木时才调用一次 search_blocks。不要逐个搜索、重复读取或为了确认已知契约再次读模板。
+- apply_block_plan 支持 create、update、delete、connect；用 ref 标识本轮新建积木，用 {ref} 连接值输入，用 {refs:[...]} 连接语句输入。失败时根据 issues 中的 operationIndex、ref、fieldName、inputName 修正失败位置，不要重做整个工作区。
+- 同一批 create 中处于同级、具有前后语句连接的积木会按 create 顺序自动串成一条链，不需要为它们重复生成 connect；只有嵌套到容器语句输入时才用 {refs:[...]}，有多个独立入口时宿主不会擅自合并。
+- mode=replace 仅用于空工作区或用户明确要求重做；已有工作区的局部修改使用 patch，追加使用 append。`;
 
 const pluginAuthoringRules = `
 
@@ -93,6 +98,21 @@ function serializeResult(result: Record<string, unknown>): string {
     return JSON.stringify({ ...compact, truncated: true });
   } catch {
     return JSON.stringify({ ok: false, error: "工具返回了无法序列化的结果" });
+  }
+}
+
+function compactCachedReadResponse(response: string, toolName: string): string {
+  if (toolName === "get_block_templates") return response;
+  const compact = (value: unknown, depth = 0): unknown => {
+    if (typeof value === "string") return value.length > 180 ? `${value.slice(0, 180)}\n[内容已截断]` : value;
+    if (Array.isArray(value)) return value.slice(0, 8).map((item) => compact(item, depth + 1));
+    if (!value || typeof value !== "object" || depth >= 3) return value;
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, compact(item, depth + 1)]));
+  };
+  try {
+    return JSON.stringify(compact(JSON.parse(response)));
+  } catch {
+    return response.length > 180 ? `${response.slice(0, 180)}\n[内容已截断]` : response;
   }
 }
 
@@ -193,6 +213,12 @@ function toolCallFingerprint(name: string, args: Record<string, unknown>): strin
   return `${name}:${stableSerialize(args)}`;
 }
 
+type CachedReadResult = {
+  stateVersion: number;
+  repeatedHits: number;
+  response: string;
+};
+
 function failureDetail(result: Record<string, unknown>): string | undefined {
   for (const key of ["error", "warning", "detail", "message"]) {
     const value = result[key];
@@ -229,11 +255,13 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
   const capabilities = host.getCapabilities?.() ?? [];
   const snapshot = host.getSnapshot();
   const workspaceMode = snapshot.workspaceMode === "visual" || snapshot.workspaceMode === "split" || snapshot.workspaceMode === "code" ? snapshot.workspaceMode : "code";
+  const graphicalWorkspace = workspaceMode === "visual" || workspaceMode === "split";
+  const blockCatalog = graphicalWorkspace ? host.getBlockCatalog?.(prompt) : undefined;
   const capabilityRules = capabilities.length
     ? `\n\n当前可用能力：\n${capabilities.map((capability) => `- ${capability.name}（${capability.id}）：${capability.description}${capability.tools?.length ? `；专用工具：${capability.tools.join(", ")}` : ""}${capability.fileTypes?.length ? `；文件类型：${capability.fileTypes.join(", ")}` : ""}${capability.detect ? `；检测方式：${capability.detect}` : ""}${capability.codegen ? `；代码生成契约：入口 ${capability.codegen.entryBlock || "未声明"}，语句输入 ${capability.codegen.statementInput || "未声明"}，运行对象 ${(capability.codegen.runtimeNames || []).join(", ") || "无"}` : ""}`).join("\n")}`
     : "\n\n当前没有插件提供额外的 Agent 能力；按通用 Python 工程处理。";
   const workspaceConstructionRules = workspaceMode === "visual" || workspaceMode === "split"
-    ? `\n\n图形化工作区强制规则：\n- 当前是积木工作区，禁止用 replace_code / edit_code 等改 Python 来代替搭积木。代码面板由积木生成。\n- 有完整 Python 源码时用 import_python_workspace。\n- 从零搭建：先有场景积木，再用 append_workspace_blocks 按段追加（每批 3 到 20 个语句积木），不要每个积木调用一次。\n- 没有对应积木的语句才用表达式，但不能整棵树都是表达式。`
+    ? `\n\n图形化工作区规则：\n- 先判断本轮任务的主要意图：动画、静态绘图、海龟轨迹、数据处理、数学计算、文件/CSV 或普通 Python。依据 purpose、capabilities、intentTags、输入输出类型和真实 contract 选择积木；不要因为“绘制”“图形化”就默认使用 Matplotlib。\n- ${graphicalCatalogInstructions(blockCatalog)}\n- 唯一的图形化写入工具是 apply_block_plan。提交 version、mode 和 create/update/delete/connect 操作；用 ref 标识新建积木，用 {ref} 连接值槽，用 {refs:[...]} 连接语句槽。不要提交 Blockly 原生 JSON、id、next、shadow、坐标或序列化状态。\n- 宿主会在隔离工作区按真实模板组装并执行连接、上下文和 Python 检查；全部通过后一次提交。失败时只根据 issues 中 operationIndex、ref、fieldName、inputName 修正对应操作，不要整套重做。\n- append 用于追加，patch 用于局部修改；replace 仅用于工作区为空或用户明确要求重做。不得改用纯代码编辑工具绕过图形化工作区。`
     : "";
   const requestContext = createAgentRequestContext({
     system: `${systemRules}${pluginAuthoringRules}${capabilityRules}${workspaceConstructionRules}\n\n当前模式：${mode === "plan" ? "计划模式，只能读取和分析，不得修改工程" : "智能体模式，可以执行必要的工程操作"}`,
@@ -241,6 +269,7 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
     prompt,
     snapshot,
     memory: serializeAgentMemory(memory),
+    blockCatalog,
   });
   const usage = createAgentTokenUsage();
   let requestMessages = buildAgentRequestMessages(requestContext);
@@ -264,6 +293,7 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
   let stateVersion = 0;
   const failedToolCalls = new Map<string, { toolName: string; message: string; blocksCompletion: boolean; stateVersion: number; attempts: number; lastAttempt: number }>();
   const repeatedStructureFailures = new Map<string, number>();
+  const readOnlyToolCache = new Map<string, CachedReadResult>();
   const recordFailure = (fingerprint: string, toolName: string, message: string, blocksCompletion = true) => {
     const previous = failedToolCalls.get(fingerprint);
     const attempts = previous?.stateVersion === stateVersion ? previous.attempts + 1 : 1;
@@ -394,6 +424,32 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
       }
       const toolId = `tool-${round}-${toolCallCount}`;
       const fingerprint = toolCallFingerprint(call.function.name, args);
+      const currentTool = toolByName(taskAgentTools, call.function.name);
+      const cachedRead = currentTool?.readOnly ? readOnlyToolCache.get(fingerprint) : undefined;
+      if (cachedRead?.stateVersion === stateVersion) {
+        cachedRead.repeatedHits += 1;
+        let cachedResponse: string;
+        try {
+          const previousResult = JSON.parse(cachedRead.response);
+          cachedResponse = JSON.stringify({
+            ...(previousResult && typeof previousResult === "object" && !Array.isArray(previousResult) ? previousResult : { previousResult }),
+            cached: true,
+            stateUnchanged: true,
+            message: "状态未变化：已复用之前相同工具调用的结果，请不要再次读取并继续处理任务。",
+          });
+        } catch {
+          cachedResponse = JSON.stringify({
+            cached: true,
+            stateUnchanged: true,
+            previousResult: cachedRead.response,
+            message: "状态未变化：已复用之前相同工具调用的结果，请不要再次读取并继续处理任务。",
+          });
+        }
+        rememberAgentDecision(memory, toolLabel(call.function.name));
+        rememberAgentEvidence(memory, toolLabel(call.function.name), cachedResponse);
+        pushToolResponse(turnMessages, call.id, cachedResponse);
+        continue;
+      }
       rememberAgentDecision(memory, toolLabel(call.function.name));
       reportProgress({ phase: "executing", label: toolLabel(call.function.name) });
       emit({ id: toolId, kind: "tool", status: "running", title: toolLabel(call.function.name), toolName: call.function.name });
@@ -410,7 +466,6 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
         pushToolResponse(turnMessages, call.id, JSON.stringify({ ok: true, skipped: true, reason: message }));
         continue;
       }
-      const currentTool = toolByName(taskAgentTools, call.function.name);
       const permissionDenied = currentTool?.requiresPermission
         && (!onPermissionRequest || !(await onPermissionRequest({
           id: toolId,
@@ -440,6 +495,7 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
           clearFailuresFor(call.function.name);
           if (currentTool?.changesState && result.changed !== false) {
             stateVersion += 1;
+            readOnlyToolCache.clear();
           }
         }
         emit({ id: toolId, kind: "tool", status: resultFailed ? "error" : "done", title: toolLabel(call.function.name), detail: resultFailed ? "失败" : undefined, toolName: call.function.name, result, resultText, codeChange: result.__codeChange && typeof result.__codeChange === "object" ? result.__codeChange as AgentActivityEvent["codeChange"] : undefined });
@@ -486,6 +542,9 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
           }
         }
         pushToolResponse(turnMessages, call.id, combinedToolResponse);
+        if (!resultFailed && currentTool?.readOnly) {
+          readOnlyToolCache.set(fingerprint, { stateVersion, repeatedHits: 0, response: compactCachedReadResponse(combinedToolResponse, call.function.name) });
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         recordFailure(fingerprint, call.function.name, message);

@@ -29,7 +29,7 @@ Turtle 需要图形桌面环境。请使用包含 Tk 支持的本机 Python 运�
 
 ## 使用 AI 助手
 
-启用插件后，AI 可以通过 `inspect_turtle_capabilities` 读取 Turtle 的积木组合规则，并使用 Visual Python 通用图形化工具搜索积木、获取模板和修改工作区。
+启用插件后，AI 可以通过 `inspect_turtle_capabilities` 读取 Turtle 的积木组合规则，并优先使用 Visual Python 的 `compose_workspace` 一次提交积木方案；需要精确连接契约时再批量获取模板，局部修复才使用其它工作区工具。
 
 可直接提出目标，例如：
 

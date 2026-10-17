@@ -98,7 +98,7 @@ describe("bulk workspace loading", () => {
       await new Promise<void>((resolve) => {
         const tick = (left: number) => {
           if (left <= 0) resolve();
-          else requestAnimationFrame(() => tick(left - 1));
+          else setTimeout(() => tick(left - 1), 0);
         };
         tick(50);
       });

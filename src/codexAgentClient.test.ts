@@ -106,6 +106,48 @@ describe("CodexAgentClient", () => {
     vi.unstubAllGlobals();
   });
 
+  it("starts a fresh thread when the dynamic tool set changes", async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
+    const calls: string[] = [];
+    let currentThreadId = "";
+    let currentTurnId = "";
+    const invokeMock = vi.fn(async <T>(command: string, args?: Record<string, unknown>) => {
+      if (command === "codex_agent_start") return undefined as T;
+      if (command === "codex_agent_request") {
+        const request = args?.request as { method: string };
+        calls.push(request.method);
+        if (request.method === "thread/start") {
+          currentThreadId = `thread-${calls.filter((method) => method === "thread/start").length}`;
+          return { ok: true, result: { thread: { id: currentThreadId } } } as T;
+        }
+        if (request.method === "thread/resume") return { ok: true, result: { thread: { id: "thread-1" } } } as T;
+        if (request.method === "turn/start") {
+          currentTurnId = `turn-${calls.filter((method) => method === "turn/start").length}`;
+          return { ok: true, result: { turn: { id: currentTurnId, status: "inProgress" } } } as T;
+        }
+      }
+      if (command === "codex_agent_next_event") return { kind: "notification", notification: { method: "turn/completed", params: { threadId: currentThreadId, turn: { id: currentTurnId, status: "completed" } } } } as T;
+      throw new Error(`unexpected command ${command}`);
+    });
+    const client = new CodexAgentClient(invokeMock as CodexAgentInvoke);
+    const options = {
+      config: { baseUrl: "https://example.com/v1", model: "example-model" },
+      conversationTargetId: "project-1:conversation-1",
+    };
+
+    await client.runTurn("first", { ...options, dynamicTools: [{ type: "function", name: "old_tool", description: "old", inputSchema: { type: "object" } }] });
+    await client.runTurn("second", { ...options, dynamicTools: [{ type: "function", name: "new_tool", description: "new", inputSchema: { type: "object" } }] });
+
+    expect(calls.filter((method) => method === "thread/start")).toHaveLength(2);
+    expect(calls.filter((method) => method === "thread/resume")).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
   it("interrupts the active turn when the user aborts", async () => {
     const controller = new AbortController();
     const invokeMock = vi.fn(async <T>(command: string, args?: Record<string, unknown>) => {

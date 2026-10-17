@@ -72,6 +72,11 @@ const colours = {
   module: "#c58b32",
   file: "#4f7f8e",
 } as const;
+const scheduleAnimationFrame = (callback: FrameRequestCallback): number =>
+  typeof globalThis.requestAnimationFrame === "function"
+    ? globalThis.requestAnimationFrame(callback)
+    : globalThis.setTimeout(() => callback(performance.now()), 0);
+
 const expressionColour = colours.call;
 const collectionColour = colours.collection;
 const objectColour = colours.object;
@@ -144,7 +149,7 @@ class ThemedMutatorIcon extends Blockly.icons.MutatorIcon {
     try {
       await super.setBubbleVisible(true);
       await Blockly.renderManagement.finishQueuedRenders();
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      await new Promise<void>((resolve) => scheduleAnimationFrame(() => scheduleAnimationFrame(() => resolve())));
       keepMutatorBubbleInView(this);
     } finally {
       bubbleCanvas.classList.remove("visual-python-mutator-opening");
@@ -161,8 +166,8 @@ Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
   { type: "python_input_typed_assign", message0: "询问 %2 转换为 %3 并保存到 %1", args0: [{ type: "field_variable", name: "VAR", variable: "回答" }, { type: "input_value", name: "PROMPT", check: "String" }, { type: "field_dropdown", name: "TYPE", options: [["整数", "int"], ["小数", "float"], ["文本", "str"]] }], previousStatement: null, nextStatement: null, colour: colours.inputOutput, tooltip: "读取用户输入后立即转换为整数、小数或文本，并保存到变量。" },
   { type: "python_import", message0: "导入模块 %1", args0: [{ type: "field_input", name: "MODULE", text: "math" }], previousStatement: null, nextStatement: null, colour: colours.module },
   { type: "python_from_import", message0: "从 %1 导入 %2", args0: [{ type: "field_input", name: "MODULE", text: "math" }, { type: "field_input", name: "NAME", text: "sqrt" }], previousStatement: null, nextStatement: null, colour: colours.module },
-  { type: "python_raw_expression", message0: "Python 表达式 %1", args0: [{ type: "field_input", name: "CODE", text: "len(items)" }], output: null, colour: colours.module },
-  { type: "python_raw_statement", message0: "Python 语句 %1", args0: [{ type: "field_input", name: "CODE", text: "pass" }], previousStatement: null, nextStatement: null, colour: colours.module, tooltip: "直接写入一条 Python 语句。无法用其他积木表达时使用。" },
+  { type: "python_raw_expression", message0: "原始表达式 %1", args0: [{ type: "field_input", name: "CODE", text: "len(items)" }], output: null, colour: colours.module },
+  { type: "python_raw_statement", message0: "原始语句 %1", args0: [{ type: "field_input", name: "CODE", text: "pass" }], previousStatement: null, nextStatement: null, colour: colours.module, tooltip: "直接写入一条 Python 语句。无法用其他积木表达时使用。" },
   { type: "python_floor_divide", message0: "%1 整除 %2", args0: [{ type: "input_value", name: "A", check: "Number" }, { type: "input_value", name: "B", check: "Number" }], inputsInline: true, output: "Number", colour: "#4f72b8" },
   { type: "python_bitwise", message0: "%1 %2 %3", args0: [{ type: "input_value", name: "A", check: "Number" }, { type: "field_dropdown", name: "OP", options: [["按位与", "&"], ["按位或", "|"], ["按位异或", "^"], ["左移", "<<"], ["右移", ">>"]] }, { type: "input_value", name: "B", check: "Number" }], inputsInline: true, output: "Number", colour: "#4f72b8" },
   { type: "python_bitwise_not", message0: "按位取反 ~ %1", args0: [{ type: "input_value", name: "VALUE", check: "Number" }], output: "Number", colour: "#4f72b8" },
@@ -1790,13 +1795,13 @@ export function hydrateDeferredInputs(block: Blockly.Block, options?: { sync?: b
     }
     if (queue.some((item) => item.remaining.length)) {
       if (options?.sync) runChunk();
-      else requestAnimationFrame(runChunk);
+      else scheduleAnimationFrame(runChunk);
       return;
     }
     finishHydration(block, job);
   };
   if (options?.sync) runChunk();
-  else requestAnimationFrame(runChunk);
+  else scheduleAnimationFrame(runChunk);
   return true;
 }
 

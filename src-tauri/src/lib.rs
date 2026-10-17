@@ -93,7 +93,6 @@ struct BailianUploadPolicy {
 
 const BAILIAN_VOICE_CLONE_MODEL: &str = "qwen-audio-3.0-tts-plus";
 const BAILIAN_VOICE_ENROLLMENT_MODEL: &str = "voice-enrollment";
-const BAILIAN_PLUS_BUILTIN_VOICES: [&str; 2] = ["longanlingxin", "longanlufeng"];
 const MAX_VOICE_SAMPLE_BYTES: u64 = 10 * 1024 * 1024;
 
 #[derive(Clone, Deserialize, PartialEq, Eq)]
@@ -1555,6 +1554,7 @@ fn bailian_voice_customization_endpoint(base_url: &str) -> String {
     bailian_api_endpoint(base_url, "services/audio/tts/customization")
 }
 
+#[cfg(test)]
 fn bailian_voice_list_endpoint(base_url: &str) -> String {
     bailian_api_endpoint(base_url, "services/audio/tts/voice-list")
 }
@@ -1785,6 +1785,7 @@ fn push_tts_voice_option(out: &mut Vec<TtsVoiceOption>, seen: &mut HashSet<Strin
     });
 }
 
+#[cfg(test)]
 fn collect_tts_voice_options(value: &Value, out: &mut Vec<TtsVoiceOption>, seen: &mut HashSet<String>) {
     match value {
         Value::Object(object) => {
@@ -1816,6 +1817,7 @@ fn collect_tts_voice_options(value: &Value, out: &mut Vec<TtsVoiceOption>, seen:
     }
 }
 
+#[cfg(test)]
 fn parse_tts_voice_options(payload: &Value) -> Vec<TtsVoiceOption> {
     let mut voices = Vec::new();
     let mut seen = HashSet::new();
@@ -2474,6 +2476,7 @@ fn openai_reasoning_effort(effort: &str) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn apply_ai_reasoning_effort(
     body: &mut Value,
     reasoning_effort: Option<&str>,

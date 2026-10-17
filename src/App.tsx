@@ -15,7 +15,7 @@ import { AiModelSettings } from "./AiModelSettings";
 import { createVisualPythonHostAdapter } from "./agentV2/hostAdapter";
 import type { AgentActivityEvent, AgentTokenUsage, AiAgentActivity, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
 import { resolveAgentEventText } from "./agentEvents";
-import { blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockInputs } from "./agentV2/blocklyHost";
+import { allBlocklyToolNames, blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockContract } from "./agentV2/blocklyHost";
 import { createPluginDraftStore, validatePluginDraft, type PluginDraft } from "./agentV2/pluginAuthoring";
 import { restoreInstalledPluginFiles, restorePluginAfterFailure } from "./agentV2/pluginRuntime";
 import { runAgentWithProtocolFallback } from "./codexAgentRunner";
@@ -23,7 +23,7 @@ import type { AiAgentPermissionMode, AiReasoningEffort } from "./aiConfig";
 import { createAiConversationScope } from "./aiConversationContext";
 import { inspectVoiceovers } from "./aiVoiceover";
 import { defaultVisualThemeId, findWorkspaceBlockCodeRange, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateAllDeferredInputs, hydrateDeferredInputs, installDeferredHydration, isHydratingWorkspace, loadWorkspaceFast, registerUsedVariablesToolbox, saveWorkspaceState, starterState, toolbox, visualPythonThemes, type VisualThemeId } from "./pythonBlocks";
-import { validatePythonBlockContexts, type PythonContextIssue } from "./pythonSyntaxBlocks";
+import { validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 import { diagnosePythonError } from "./pythonDiagnostics";
 import { findPythonCallContext, findPythonIdentifierOccurrences, getPythonCompletions, getPythonOutline, getPythonSignatures, isPythonCompletionContext, isValidPythonIdentifier, type PythonCompletionKind, type PythonOutlineItem } from "./pythonCompletions";
 import { parsePythonRuntimeDiagnostic } from "./pythonRuntimeDiagnostics";
@@ -53,7 +53,8 @@ import { extractManimSceneNames } from "./plugins/builtin/manim/sceneNames";
 import { createCodeDocument, createCodeDocumentFromSource, type CodeDocument } from "./sceneDocuments";
 import { isBlockWorkspaceMode, normalizeWorkspaceMode, type WorkspaceMode } from "./workspaceMode";
 import { getWorkbenchShortcutAction } from "./workbenchShortcuts";
-import { blockSearchFlyout, createBlockSearchIndex, searchBlockIndex } from "./blockSearch";
+import { blockSearchFlyout, createBlockSearchIndex, createTaskBlockDirectory, searchBlockIndex } from "./blockSearch";
+import { getPythonBlockAgentMetadata, mergeBlockAgentMetadata } from "./pythonBlockKnowledge";
 import { buildBlockOutline, compactBlockOutline, filterBlockOutline, type BlockOutlineNode } from "./blockOutline";
 import { installFunctionCallLinks } from "./functionCallLinks";
 import { subscribeFormulaEditor, type FormulaEditorRequest } from "./formulaEditorBridge";
@@ -118,13 +119,18 @@ type AppNotice = { message: string; tone: "error" | "info" };
 type PythonPackageStatus = { name: string; installed: boolean };
 type ProblemKind = "context" | "syntax" | "runtime" | "timeout" | "environment" | "plugin" | "resource";
 type CodeProblem = { id: number | string; kind: ProblemKind; line: number; message: string; blockId?: string; suggestion?: string };
-const contextIssuesToProblems = (issues: PythonContextIssue[]): CodeProblem[] => issues.map((issue) => ({
-  id: `context-${issue.blockId}`,
+type WorkspaceContextIssue = { blockId?: string; message: string };
+const contextIssuesToProblems = (issues: WorkspaceContextIssue[]): CodeProblem[] => issues.map((issue, index) => ({
+  id: issue.blockId ? `context-${issue.blockId}` : `context-${index}-${issue.message}`,
   kind: "context",
   line: 0,
   message: issue.message,
   blockId: issue.blockId,
 }));
+const validateWorkspaceIssues = (workspace: Blockly.Workspace): WorkspaceContextIssue[] => [
+  ...validatePythonBlockContexts(workspace),
+  ...pluginRegistry.validateWorkspace(workspace),
+];
 const themeOptions: Array<{ id: VisualThemeId; label: string; description: string }> = [
   { id: "visual-dark", label: "Visual Dark", description: "深色环境" },
   { id: "visual-light", label: "Visual Light", description: "默认明亮" },
@@ -1647,6 +1653,7 @@ export default function App() {
       blockSearchDefinition.current,
       blockSearchLabelForType,
       (custom) => ws.getToolboxCategoryCallback(custom)?.(ws) ?? null,
+      { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) },
     );
     const results = searchBlockIndex(index, query);
     suppressToolboxAutoHide.current = true;
@@ -1797,7 +1804,7 @@ export default function App() {
     }
     applyBlockInputLayout(ws, blockInputLayoutRef.current);
     pruneUnusedVariables();
-    setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
+    setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws)));
     ws.clearUndo();
     if (draft) { const restoredProjectId = draft.projectId || createProjectId(); projectIdRef.current = restoredProjectId; setProjectId(restoredProjectId); setProjectName(draft.name); projectPathRef.current = draft.path; setProjectPath(draft.path); projectResourcesRef.current = draft.resources ?? []; setProjectResources(draft.resources ?? []); setDirty(true); }
     requestAnimationFrame(() => {
@@ -1890,7 +1897,7 @@ export default function App() {
     if (!ws) return;
     const frame = requestAnimationFrame(() => {
       if (workspace.current !== ws) return;
-      setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
+      setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws)));
     });
     return () => cancelAnimationFrame(frame);
   }, [code, workspaceRevision]);
@@ -4064,12 +4071,12 @@ export default function App() {
     if (!isBlockWorkspaceMode(workspaceMode)) return true;
     const ws = workspace.current;
     if (!ws) return true;
-    const issues = validatePythonBlockContexts(ws);
+    const issues = validateWorkspaceIssues(ws);
     setContextProblems(contextIssuesToProblems(issues));
     if (!issues.length) return true;
     setActivePanel("problems");
     setBottomPanelOpen(true);
-    requestAnimationFrame(() => focusBlock(issues[0].blockId));
+    if (issues[0].blockId) requestAnimationFrame(() => focusBlock(issues[0].blockId!));
     return false;
   }, [focusBlock, workspaceMode]);
 
@@ -5389,6 +5396,17 @@ export default function App() {
             if (workspaceModeRef.current !== agentWorkspaceMode) throw new Error("工作区模式已改变，请重新提交任务");
           },
           getCapabilities: getActiveAgentCapabilities,
+          getBlockCatalog: (task) => {
+            const index = createBlockSearchIndex(
+              blockSearchDefinition.current,
+              blockSearchLabelForType,
+              (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null,
+              { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) },
+            );
+            return JSON.stringify(createTaskBlockDirectory(index, task || "", {
+              describe: (type, state) => describeBlocklyBlockContract(type, state),
+            }));
+          },
           getTools: () => [
             ...blocklyAgentTools,
             ...pluginRegistry.getAgentTools().map(({ tool }) => ({
@@ -5408,17 +5426,29 @@ export default function App() {
           blocklyTools: createBlocklyToolExecutor({
             workspace: workspace.current!,
             selectedBlockId: () => selectedBlockIdRef.current,
+            getTaskBlockDirectory: (task, limit) => {
+              const index = createBlockSearchIndex(
+                blockSearchDefinition.current,
+                blockSearchLabelForType,
+                (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null,
+                { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) },
+              );
+              return createTaskBlockDirectory(index, task, {
+                limit,
+                describe: (type, state) => describeBlocklyBlockContract(type, state),
+              });
+            },
             searchBlocks: (query, limit) => {
-              const index = createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null);
-              return searchBlockIndex(index, query, limit).map((entry) => ({ type: entry.type, label: entry.label, category: entry.category, state: entry.item as unknown as Record<string, unknown>, inputSlots: describeBlocklyBlockInputs(entry.type) }));
+              const index = createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null, { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) });
+              return searchBlockIndex(index, query, limit).map((entry) => ({ type: entry.type, label: entry.label, category: entry.category, state: entry.item as unknown as Record<string, unknown>, ...describeBlocklyBlockContract(entry.type, entry.item as unknown as Record<string, unknown>) }));
             },
             getBlockTemplates: (types) => {
-              const index = createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null);
+              const index = createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null, { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) });
               const wanted = new Set(types);
-              return index.filter((entry) => wanted.has(entry.type)).map((entry) => ({ type: entry.type, label: entry.label, category: entry.category, state: entry.item as unknown as Record<string, unknown>, inputSlots: describeBlocklyBlockInputs(entry.type) }));
+              return index.filter((entry) => wanted.has(entry.type)).map((entry) => ({ type: entry.type, label: entry.label, category: entry.category, state: entry.item as unknown as Record<string, unknown>, ...describeBlocklyBlockContract(entry.type, entry.item as unknown as Record<string, unknown>) }));
             },
             generateCode: generateWorkspacePython,
-            validateContexts: (candidate) => validatePythonBlockContexts(candidate).map((issue) => ({ blockId: issue.blockId, message: issue.message })),
+            validateContexts: (candidate) => validateWorkspaceIssues(candidate),
             validateCode: async (candidate) => { await invoke("validate_python_code", { code: candidate, pythonPath: pythonEnvironment?.path || null }); },
             commit: (state, generatedCode) => {
               const ws = workspace.current;
@@ -5426,12 +5456,12 @@ export default function App() {
               Blockly.Events.disable();
               try { loadWorkspaceFast(ws, state); ws.clearUndo(); } finally { Blockly.Events.enable(); }
               setCode(generatedCode);
-              setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
+              setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws)));
               setDirty(true);
               setWorkspaceRevision((revision) => revision + 1);
             },
           }),
-          blocklyToolNames: blocklyAgentTools.map((tool) => tool.definition.function.name),
+          blocklyToolNames: allBlocklyToolNames,
           executePluginTool: (name, args, toolSignal, executeCapability) => pluginRegistry.executeAgentTool(name, args, (pluginId) => ({
             executeCapability: async (capability, capabilityArgs, capabilitySignal) => {
               if (pluginId !== manimPlugin.manifest.id) return executeCapability(capability, capabilityArgs, capabilitySignal);
@@ -5580,7 +5610,7 @@ export default function App() {
       try { Blockly.serialization.workspaces.load(replacement, ws); ws.clearUndo(); } finally { Blockly.Events.enable(); }
       const generatedCode = generateWorkspacePython(ws);
       setCode(generatedCode);
-      setContextProblems(contextIssuesToProblems(validatePythonBlockContexts(ws)));
+      setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws)));
       setDirty(true);
       setWorkspaceRevision((revision) => revision + 1);
       return true;

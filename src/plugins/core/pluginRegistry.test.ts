@@ -67,6 +67,114 @@ describe("PluginRegistry", () => {
     expect(Blockly.Blocks.test_sample_value).toBeUndefined();
   });
 
+  it("keeps optional block Agent metadata outside the Blockly definition and clears it with the plugin", async () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      manifest: {
+        id: "test.metadata",
+        name: "Metadata",
+        version: "1.0.0",
+        apiVersion: PLUGIN_API_VERSION,
+        agent: {
+          description: "Creates metadata-aware values.",
+          purpose: "Create reusable values for configuration tasks.",
+          aliases: ["配置值"],
+          keywords: ["configuration"],
+          capabilities: ["value-construction"],
+          dependencies: ["metadata-runtime"],
+          recommendedFor: ["配置"],
+          avoidFor: ["绘制图表"],
+          intentTags: ["configuration"],
+        },
+      },
+      activate(context) {
+        context.registerBlock({
+          type: "test_metadata_value",
+          message0: "value",
+          output: null,
+          colour: "#607d8b",
+          agent: {
+            description: "Creates a reusable value.",
+            aliases: ["value"],
+            keywords: ["sample", "constant"],
+            examples: ["create a value"],
+          },
+        }, () => ["'metadata'", Order.ATOMIC]);
+        context.registerToolboxCategory({ id: "test.metadata.toolbox", name: "Metadata", colour: "#607d8b", contents: [{ kind: "block", type: "test_metadata_value" }] });
+      },
+    });
+
+    await registry.activate("test.metadata");
+
+    expect(registry.getBlockAgentMetadata("test_metadata_value")).toEqual({
+      description: "Creates a reusable value.",
+      aliases: ["value"],
+      keywords: ["sample", "constant"],
+      examples: ["create a value"],
+    });
+    expect(registry.getBlockKnowledgeMetadata("test_metadata_value")).toMatchObject({
+      description: "Creates a reusable value.",
+      purpose: "Create reusable values for configuration tasks.",
+      aliases: expect.arrayContaining(["value", "配置值"]),
+      keywords: expect.arrayContaining(["Metadata", "test.metadata", "configuration"]),
+      capabilities: ["value-construction"],
+      dependencies: ["metadata-runtime"],
+      recommendedFor: ["配置"],
+      avoidFor: ["绘制图表"],
+      intentTags: ["configuration"],
+    });
+    expect(registry.getBlockKnowledgeMetadata("test_metadata_value")?.capabilities).not.toContain("Metadata");
+    expect(Blockly.Blocks.test_metadata_value).toBeDefined();
+    expect((Blockly.Blocks.test_metadata_value as unknown as Record<string, unknown>).agent).toBeUndefined();
+
+    await registry.deactivate("test.metadata");
+    expect(registry.getBlockAgentMetadata("test_metadata_value")).toBeUndefined();
+  });
+
+  it("keeps legacy blocks compatible when Agent metadata is omitted", async () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      manifest: { id: "test.legacy", name: "Legacy", version: "1.0.0", apiVersion: PLUGIN_API_VERSION },
+      activate(context) {
+        context.registerBlock({ type: "test_legacy_value", message0: "value", output: null }, () => ["1", Order.ATOMIC]);
+        context.registerToolboxCategory({ id: "test.legacy.toolbox", name: "Legacy", colour: "#607d8b", contents: [{ kind: "block", type: "test_legacy_value" }] });
+      },
+    });
+
+    await registry.activate("test.legacy");
+    expect(registry.getBlockAgentMetadata("test_legacy_value")).toBeUndefined();
+    expect(registry.getBlockKnowledgeMetadata("test_legacy_value")).toMatchObject({
+      description: "Legacy",
+      keywords: expect.arrayContaining(["Legacy", "test.legacy"]),
+    });
+    await registry.unregister("test.legacy");
+  });
+
+  it("exposes workspace validators only while their plugin is active", async () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      manifest: { id: "test.validation", name: "Validation", version: "1.0.0", apiVersion: PLUGIN_API_VERSION },
+      activate(context) {
+        context.registerBlock({ type: "test_validation_trigger", message0: "trigger", output: "Number" }, () => ["1", Order.ATOMIC]);
+        context.registerToolboxCategory({ id: "test.validation.toolbox", name: "Validation", colour: "#607d8b", contents: [{ kind: "block", type: "test_validation_trigger" }] });
+        context.registerWorkspaceValidator("test.validation.workspace", (workspace) =>
+          workspace.getAllBlocks(false).some((block) => block.type === "test_validation_trigger")
+            ? [{ blockId: workspace.getAllBlocks(false).find((block) => block.type === "test_validation_trigger")?.id, message: "Trigger is not allowed" }]
+            : [],
+        );
+      },
+    });
+    await registry.activate("test.validation");
+    const workspace = new Blockly.Workspace();
+    workspace.newBlock("test_validation_trigger");
+
+    expect(registry.validateWorkspace(workspace)).toEqual([{ blockId: workspace.getAllBlocks(false)[0].id, message: "Trigger is not allowed" }]);
+    await registry.deactivate("test.validation");
+    expect(registry.validateWorkspace(workspace)).toEqual([]);
+
+    workspace.dispose();
+  });
+
   it("records activation errors for blocks outside the plugin namespace", async () => {
     const registry = new PluginRegistry();
     registry.register({

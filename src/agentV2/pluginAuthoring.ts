@@ -16,8 +16,12 @@ export type PluginPlanBlock = {
   type: string;
   purpose: string;
   inputs: string[];
+  inputDescriptions?: Record<string, string>;
   output?: string;
   statementInput?: string;
+  capabilities?: string[];
+  keywords?: string[];
+  examples?: string[];
 };
 
 export type PluginPlan = {
@@ -80,6 +84,13 @@ export type PluginCodegenContract = {
   mode: "standalone" | "extension";
   provider?: string;
   runtimeNames: string[];
+  blocks?: Record<string, {
+    purpose: string;
+    capabilities: string[];
+    keywords: string[];
+    examples: string[];
+    inputDescriptions?: Record<string, string>;
+  }>;
 };
 
 export type PluginDraftValidationContext = {
@@ -138,9 +149,14 @@ export const pluginAuthoringContract = {
   apiVersion: "1",
   requiredFiles: ["plugin.json", "codegen.json", "index.js"],
   entry: "index.js or another relative .js/.mjs file exporting activate(context)",
-  registration: ["context.registerBlock", "context.registerToolboxCategory", "context.registerSetting", "context.registerCommand", "context.registerAgentTool"],
+  registration: ["context.registerBlock", "context.registerToolboxCategory", "context.registerSetting", "context.registerCommand", "context.registerAgentTool", "context.registerWorkspaceValidator"],
+  blockAgentMetadata: {
+    required: ["description", "capabilities", "keywords", "examples"],
+    optional: ["aliases", "dependencies", "inputDescriptions"],
+    inputDescriptions: "Map each real Blockly input name to a concise semantic description; names must match args0 or registered input connections.",
+  },
   stages: ["inspect_plugin_api", "create_plugin_plan", "create_plugin_draft", "read_plugin_draft_file", "edit_plugin_draft_file", "update_plugin_draft", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"],
-  rules: ["block and category ids must use the plugin id namespace", "generated Python must use four spaces and no tabs", "installation is allowed only after static and runtime validation"],
+  rules: ["block and category ids must use the plugin id namespace", "every registered block must include agent metadata with a purpose and searchable keywords", "generated Python must use four spaces and no tabs", "installation is allowed only after static and runtime validation"],
 };
 
 const normalizePlan = (input: CreatePluginPlanInput, id = planId()): PluginPlan => ({
@@ -180,6 +196,13 @@ const scaffoldFiles = (input: CreatePluginDraftInput, plan: PluginPlan): PluginD
       ...(args.length ? { args0: args } : {}),
       ...(block.output ? { output: block.output } : { previousStatement: null, nextStatement: null }),
       colour: "#397ca5",
+      agent: {
+        description: block.purpose,
+        capabilities: block.capabilities?.length ? block.capabilities : [block.purpose],
+        keywords: block.keywords?.length ? block.keywords : [block.purpose, block.type],
+        examples: block.examples?.length ? block.examples : [block.purpose],
+        ...(block.inputDescriptions ? { inputDescriptions: block.inputDescriptions } : {}),
+      },
     };
     const functionName = block.type.replace(/[^A-Za-z0-9_]/g, "_");
     const values = block.inputs.map((name) => `generator.valueToCode(block, ${JSON.stringify(name)}, 0) || "None"`);
@@ -195,6 +218,10 @@ const scaffoldFiles = (input: CreatePluginDraftInput, plan: PluginPlan): PluginD
   const codegenBlocks = Object.fromEntries(blocks.map((block) => [block.type, {
     purpose: block.purpose,
     inputs: block.inputs,
+    capabilities: block.capabilities?.length ? block.capabilities : [block.purpose],
+    keywords: block.keywords?.length ? block.keywords : [block.purpose, block.type],
+    examples: block.examples?.length ? block.examples : [block.purpose],
+    ...(block.inputDescriptions ? { inputDescriptions: block.inputDescriptions } : {}),
     ...(block.output ? { output: block.output } : {}),
     ...(block.statementInput ? { statementInput: block.statementInput } : {}),
   }]));
@@ -321,6 +348,7 @@ const pluginContributionMethods = [
   "registerCodeDocumentHandler",
   "registerCommand",
   "registerAgentTool",
+  "registerWorkspaceValidator",
 ] as const;
 
 function pluginActivationCalls(source: string) {
@@ -355,6 +383,28 @@ function parseCodegenContract(text: string | undefined, issues: string[]): Plugi
       : [];
     if (Array.isArray(value.runtimeNames) && runtimeNames.length !== value.runtimeNames.length) issues.push("codegen.json 的 runtimeNames 只能包含 Python 标识符");
     const provider = typeof value.provider === "string" ? value.provider.trim() : undefined;
+    const blocks: PluginCodegenContract["blocks"] = {};
+    if (value.blocks !== undefined) {
+      if (!value.blocks || typeof value.blocks !== "object" || Array.isArray(value.blocks)) {
+        issues.push("codegen.json 的 blocks 必须是对象");
+      } else {
+        for (const [blockType, rawBlock] of Object.entries(value.blocks as Record<string, unknown>)) {
+          const block = rawBlock && typeof rawBlock === "object" && !Array.isArray(rawBlock) ? rawBlock as Record<string, unknown> : {};
+          const purpose = typeof block.purpose === "string" ? block.purpose.trim() : "";
+          const capabilities = Array.isArray(block.capabilities) ? block.capabilities.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
+          const keywords = Array.isArray(block.keywords) ? block.keywords.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
+          const examples = Array.isArray(block.examples) ? block.examples.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
+          const inputDescriptions = block.inputDescriptions && typeof block.inputDescriptions === "object" && !Array.isArray(block.inputDescriptions)
+            ? Object.fromEntries(Object.entries(block.inputDescriptions as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string" && Boolean(entry[1].trim())))
+            : undefined;
+          if (!purpose || !capabilities.length || !keywords.length || !examples.length) {
+            issues.push(`codegen.json 中的积木 ${blockType} 缺少完整 Agent 文档：purpose、capabilities、keywords、examples 均为必填`);
+            continue;
+          }
+          blocks[blockType] = { purpose, capabilities, keywords, examples, ...(inputDescriptions && Object.keys(inputDescriptions).length ? { inputDescriptions } : {}) };
+        }
+      }
+    }
     if (value.mode === "extension") {
       if (!provider || !pluginIdPattern.test(provider)) issues.push("扩展模式必须声明有效的 provider 插件 ID");
       if (!runtimeNames.length) issues.push("扩展模式必须声明 runtimeNames");
@@ -362,7 +412,13 @@ function parseCodegenContract(text: string | undefined, issues: string[]): Plugi
       issues.push("standalone 模式不能声明外部 provider 或 runtimeNames");
     }
     if (value.version !== 1 || (value.mode !== "standalone" && value.mode !== "extension")) return undefined;
-    return { version: 1, mode: value.mode, ...(provider ? { provider } : {}), runtimeNames: [...new Set(runtimeNames)] };
+    return {
+      version: 1,
+      mode: value.mode,
+      ...(provider ? { provider } : {}),
+      runtimeNames: [...new Set(runtimeNames)],
+      ...(Object.keys(blocks).length ? { blocks } : {}),
+    };
   } catch (error) {
     issues.push(`codegen.json 不是有效 JSON：${String(error)}`);
     return undefined;
@@ -449,6 +505,11 @@ export function validatePluginDraft(draft: Pick<PluginDraft, "files">, context: 
     if (codegenDeclaresBlocks(files["codegen.json"]) && !activationCalls.has("registerBlock")) {
       issues.push("codegen.json 只描述代码生成契约，不会自动注册积木；请在 activate(context) 中调用 context.registerBlock() 和 context.registerToolboxCategory()");
     }
+    const directBlockRegistrationCount = (entrySource.match(/\bregisterBlock\s*\(\s*\{/g) || []).length;
+    const directBlockDocumentationCount = (entrySource.match(/\bagent\s*:/g) || []).length;
+    if (codegenDeclaresBlocks(files["codegen.json"]) && directBlockRegistrationCount > directBlockDocumentationCount) {
+      issues.push("每个 registerBlock() 积木定义都必须包含 agent 文档：description、capabilities、keywords 和 examples");
+    }
     if (manifest?.id) {
       const prefix = pluginPrefix(manifest.id);
       for (const match of entrySource.matchAll(/registerBlock\s*\(\s*\{\s*type\s*:\s*["']([^"']+)["']/g)) {
@@ -489,7 +550,7 @@ export const pluginAuthoringTools: AgentTool[] = [
       description: text,
       kind: { type: "string", enum: ["standalone", "extension"] },
       files: { type: "array", items: objectSchema({ path: text, purpose: text }, ["path", "purpose"]) },
-      blocks: { type: "array", items: objectSchema({ type: text, purpose: text, inputs: { type: "array", items: text }, output: text, statementInput: text }, ["type", "purpose", "inputs"]) },
+      blocks: { type: "array", items: objectSchema({ type: text, purpose: text, inputs: { type: "array", items: text }, inputDescriptions: { type: "object", additionalProperties: { type: "string" } }, output: text, statementInput: text, capabilities: { type: "array", items: text }, keywords: { type: "array", items: text }, examples: { type: "array", items: text } }, ["type", "purpose", "inputs"]) },
       dependencies: { type: "array", items: text },
     }, ["id", "name", "description"])),
     label: "规划插件",

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
 
@@ -176,12 +176,25 @@ describe("AI assistant Markdown", () => {
   });
 
   it("separates tool work from assistant replies in the run body", () => {
-    const body = composeAgentRunBody([
+    const activities: AiAgentActivity[] = [
       { id: "thinking-1", kind: "message", channel: "thinking", status: "done", title: "思考过程", markdown: "先读代码" },
       { id: "tool-1", kind: "tool", status: "done", title: "读取当前工程", toolName: "get_context" },
-      { id: "message-1", kind: "message", status: "done", title: "已经看过当前工程。" },
-    ]);
+      { id: "message-1", kind: "message", channel: "message", status: "done", title: "已经看过当前工程。", markdown: "已经看过当前工程。\n\n接下来会检查冒泡排序。" },
+    ];
+    const body = composeAgentRunBody(activities);
     expect(body.map((block) => block.kind)).toEqual(["timeline", "reply"]);
+    expect(body[1]).toMatchObject({ kind: "reply", activity: { markdown: "已经看过当前工程。\n\n接下来会检查冒泡排序。" } });
+  });
+
+  it("renders assistant narration as Markdown outside the grouped activity timeline", () => {
+    const html = renderToStaticMarkup(<AgentRunBody activities={[
+      { id: "tool-1", kind: "tool", status: "done", title: "读取当前工程", toolName: "get_context" },
+      { id: "message-1", kind: "message", channel: "message", status: "done", title: "检查结果", markdown: "已读取。\n\n**冒泡排序**存在边界问题。" },
+    ]} onRevealCodeChange={() => undefined} onRevealProblem={() => undefined}/>);
+
+    expect(html).toContain('class="ai-agent-worklog"');
+    expect(html).toContain('<strong>冒泡排序</strong>存在边界问题。');
+    expect(html).not.toContain("其它 2 项");
   });
 
   it("keeps an empty running reply mounted so tokens can stream in", () => {
@@ -269,6 +282,40 @@ describe("AI assistant Markdown", () => {
       toolName: "inspect_rendered_output",
       result: JSON.stringify({ valid: false, warning: "输出画面疑似空白" }),
     })).toBe("输出画面疑似空白");
+  });
+
+  it("shows structured failure details and process output instead of a generic failure", () => {
+    const result = formatAgentToolResult({
+      id: "sort-failure",
+      kind: "tool",
+      status: "error",
+      title: "运行项目",
+      toolName: "run_project",
+      result: JSON.stringify({
+        ok: false,
+        error: { message: "执行失败", details: "第 8 行存在错误", issues: [{ message: "列表长度为 0 时访问了首项" }] },
+        stderr: "IndexError: list index out of range",
+        stdout: "开始测试冒泡排序",
+      }),
+    });
+
+    expect(result).toContain("执行失败");
+    expect(result).toContain("第 8 行存在错误");
+    expect(result).toContain("列表长度为 0 时访问了首项");
+    expect(result).toContain("IndexError: list index out of range");
+    expect(result).toContain("开始测试冒泡排序");
+    expect(result).not.toBe("执行失败");
+  });
+
+  it("extracts nested issue arrays and traceback diagnostics", () => {
+    expect(formatAgentToolResult({
+      id: "nested-failure",
+      kind: "tool",
+      status: "error",
+      title: "运行项目",
+      toolName: "run_project",
+      result: JSON.stringify({ ok: false, error: { issues: [{ message: "输入数据为空" }] }, traceback: "Traceback (most recent call last):\n  File \"main.py\", line 4\nIndexError: list index out of range" }),
+    })).toContain("输入数据为空\nIndexError: list index out of range");
   });
 
   it("reduces tracebacks to the final actionable exception", () => {
@@ -444,7 +491,7 @@ describe("AI assistant Markdown", () => {
         kind: "tool",
         status: "error",
         title: "从 Python 生成积木",
-        toolName: "import_python_workspace",
+        toolName: "apply_block_plan",
         detail: "积木连接检查未通过：场景中的配音积木只能放在 Manim 场景内部。",
       }}
       onRevealCodeChange={() => undefined}
@@ -582,6 +629,13 @@ describe("AI assistant failed-run cleanup", () => {
     ];
     expect(removeFinalMessageActivity(activities, "任务已完成。"))
       .toEqual([activities[1]]);
+  });
+
+  it("removes only the last matching streamed answer and compares Markdown as well", () => {
+    const first: AiAgentActivity = { id: "message-1", kind: "message", channel: "message", status: "done", title: "阶段说明" };
+    const intermediate: AiAgentActivity = { id: "message-2", kind: "message", channel: "message", status: "done", title: "最终结果", markdown: "最终结果" };
+    const final: AiAgentActivity = { id: "message-3", kind: "message", channel: "message", status: "done", title: "占位标题", markdown: "最终结果" };
+    expect(removeFinalMessageActivity([first, intermediate, final], "最终结果")).toEqual([first, intermediate]);
   });
 });
 

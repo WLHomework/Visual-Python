@@ -199,7 +199,7 @@ export const defaultTtsConfig: TtsConfig = {
   model: "qwen-audio-3.0-tts-flash",
   voice: "longanhuan_v3.6",
   speed: 1,
-  audioFormat: "mp3",
+  audioFormat: "wav",
   ...defaultTtsExpression,
 };
 

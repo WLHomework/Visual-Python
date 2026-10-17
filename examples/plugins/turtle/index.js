@@ -244,7 +244,7 @@ const capabilityTool = {
       "按键和点击事件在 main 函数中注册，入口积木统一启动 screen.mainloop。",
       "生成代码只依赖 Python 标准库 turtle，可作为独立 Python 文件运行。",
     ],
-    workspaceTools: ["search_blocks", "get_block_templates", "add_workspace_block", "apply_workspace"],
+    workspaceTools: ["get_workspace", "get_task_block_directory", "search_blocks", "get_block_templates", "apply_block_plan"],
     supports: ["movement", "pen", "colour", "fill", "shape", "text", "screen", "keyboard", "mouse"],
   }),
 };
