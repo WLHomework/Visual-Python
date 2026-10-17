@@ -22,13 +22,18 @@ const collectToolboxBlocks = (contents: Array<Record<string, any>>): Array<Recor
     ? collectToolboxBlocks(item.contents ?? [])
     : item.kind === "block" ? [item] : []);
 
-const activateManimPlugin = async () => {
-  if (Blockly.Blocks.visual_python_manim_scene) return;
+let activeRegistry: PluginRegistry | null = null;
+
+const activateManimPlugin = async (): Promise<PluginRegistry | null> => {
+  if (activeRegistry) return activeRegistry;
+  if (Blockly.Blocks.visual_python_manim_scene) return null;
   const registry = new PluginRegistry();
   registry.register(manimPlugin);
   await registry.activate(manimPlugin.manifest.id);
   const record = registry.getRecord(manimPlugin.manifest.id);
   if (record?.state !== "active") throw new Error(record?.error || "Manim plugin activation failed");
+  activeRegistry = registry;
+  return registry;
 };
 
 describe("Manim plugin generators", () => {
@@ -54,6 +59,19 @@ describe("Manim plugin generators", () => {
       entryBlock: "visual_python_manim_scene",
       statementInput: "BODY",
       runtimeNames: ["self"],
+    });
+  });
+
+  it("publishes per-block agent metadata for task discovery", async () => {
+    const registry = await activateManimPlugin();
+    expect(registry).not.toBeNull();
+    expect(registry!.getBlockKnowledgeMetadata("visual_python_manim_circle_object")).toMatchObject({
+      purpose: expect.stringContaining("弹跳小球"),
+      aliases: expect.arrayContaining(["小球"]),
+    });
+    expect(registry!.getBlockKnowledgeMetadata("visual_python_manim_animate_set_color_gradient")).toMatchObject({
+      purpose: expect.stringContaining("动画效果"),
+      intentTags: expect.arrayContaining(["animation"]),
     });
   });
 

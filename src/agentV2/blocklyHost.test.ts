@@ -93,6 +93,39 @@ describe("Blockly Agent host", () => {
     workspace.dispose();
   });
 
+  it("returns contracts with search results and reports unknown template types", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    host.searchBlocks = vi.fn(() => [{ type: "agent_host_value", label: "数字", category: "Python", state: { type: "agent_host_value" } } as never]);
+    const execute = createBlocklyToolExecutor(host);
+
+    const search = await execute("search_blocks", { query: "数字" }, signal()) as { matches: Array<Record<string, unknown>> };
+    expect(search.matches[0]).toMatchObject({ type: "agent_host_value", inputSlots: [] });
+    expect(search.matches[0]).not.toHaveProperty("state");
+
+    await expect(execute("get_block_templates", { types: ["agent_host_statement", "missing_block"] }, signal())).resolves.toMatchObject({
+      templates: [{ type: "agent_host_statement" }],
+      notFound: ["missing_block"],
+    });
+    workspace.dispose();
+  });
+
+  it("attaches block contracts for the reported types when a plan fails", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    const execute = createBlocklyToolExecutor(host);
+    const result = await execute("apply_block_plan", {
+      version: 1,
+      mode: "replace",
+      operations: [{ action: "create", ref: "value", block: "agent_host_value", fields: { MISSING: "x" } }],
+    }, signal()) as { ok: boolean; contracts?: Array<Record<string, unknown>> };
+
+    expect(result.ok).toBe(false);
+    expect(result.contracts?.[0]).toMatchObject({ type: "agent_host_value", inputSlots: [] });
+    expect(host.commit).not.toHaveBeenCalled();
+    workspace.dispose();
+  });
+
   it("compiles a semantic plan in isolation and commits once", async () => {
     const workspace = new Blockly.Workspace();
     const host = services(workspace);

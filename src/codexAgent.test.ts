@@ -160,7 +160,7 @@ describe("runCodexVisualPythonAgent", () => {
     const transport: CodexAgentTransport = {
       runTurn: vi.fn(async (_prompt, options) => {
         expect(options.developerInstructions).toContain("omittedCandidateCount");
-        expect(options.developerInstructions).toContain("at most one broad search_blocks");
+        expect(options.developerInstructions).toContain("make at most one search_blocks call");
         expect(options.developerInstructions).not.toContain("do not call get_task_block_directory or search_blocks");
         options.onEvent?.({ type: "textDelta", threadId: "thread-truncated", turnId: "turn-truncated", itemId: "message-truncated", delta: "Done" });
         options.onEvent?.({ type: "turnCompleted", threadId: "thread-truncated", turnId: "turn-truncated", status: "completed" });
@@ -181,7 +181,7 @@ describe("runCodexVisualPythonAgent", () => {
         candidates: Array.from({ length: 80 }, (_, index) => ({
           type: `python_block_${index}`,
           label: `积木 ${index}`,
-          description: "用于当前任务的积木描述。".repeat(80),
+          purpose: "用于当前任务的积木描述。".repeat(80),
         })),
       }),
       getTools: () => [],
@@ -190,7 +190,7 @@ describe("runCodexVisualPythonAgent", () => {
     const transport: CodexAgentTransport = {
       runTurn: vi.fn(async (_prompt, options) => {
         expect(options.developerInstructions).toContain("omittedCandidateCount");
-        expect(options.developerInstructions).toContain("at most one broad search_blocks");
+        expect(options.developerInstructions).toContain("make at most one search_blocks call");
         expect(options.developerInstructions).not.toContain("do not call get_task_block_directory or search_blocks");
         options.onEvent?.({ type: "textDelta", threadId: "thread-compressed", turnId: "turn-compressed", itemId: "message-compressed", delta: "Done" });
         options.onEvent?.({ type: "turnCompleted", threadId: "thread-compressed", turnId: "turn-compressed", status: "completed" });

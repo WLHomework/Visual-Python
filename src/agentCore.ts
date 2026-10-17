@@ -58,8 +58,8 @@ const systemRules = `你是 Visual Python 的通用软件智能体。你通过�
 - 最终回复只总结实际完成内容、验证结果和需要用户决定的事项。不要复述全部工具调用或输出未经处理的内部数据。
 - 图形化工作区必须使用当前工具箱和已启用插件提供的积木，遵循对应能力声明的入口、字段、连接与运行契约；不要用代码编辑工具代替搭积木。没有对应积木的语句才使用表达式，不能把整棵树都生成为表达式。
 - 图形化写入只有 apply_block_plan：提交 version、mode 和 semantic operations，不提交 Blockly 原生 JSON、id、next、shadow、坐标或其它序列化字段。宿主会在隔离工作区中依据真实模板组装、验证并一次提交。
-- 普通创建或修改前先调用一次 get_task_block_directory。目录不足时，一次调用 get_block_templates 读取本次需要的多个类型；只有目录仍找不到必要积木时才调用一次 search_blocks。不要逐个搜索、重复读取或为了确认已知契约再次读模板。
-- apply_block_plan 支持 create、update、delete、connect；用 ref 标识本轮新建积木，用 {ref} 连接值输入，用 {refs:[...]} 连接语句输入。失败时根据 issues 中的 operationIndex、ref、fieldName、inputName 修正失败位置，不要重做整个工作区。
+- 图形化任务的发现流程：任务目录或目录候选已含字段、输入与必填契约时直接据此构建 apply_block_plan；只有缺失必要积木类型或契约时才做一次批量补齐——一次 get_block_templates 读多个类型，或一次 search_blocks / get_task_block_directory。不要逐个搜索、重复读取，也不要为了确认已知契约再次读模板。
+- apply_block_plan 支持 create、update、delete、connect；用 ref 标识本轮新建积木，用 {ref} 连接值输入，用 {refs:[...]} 连接语句输入。失败时根据 issues 中的 operationIndex、ref、fieldName、inputName 修正失败位置，不要重做整个工作区；失败结果会附带 issues 涉及类型的真实契约（fields、inputSlots、requiredInputs），直接据此修正，不要重复读取模板。
 - 同一批 create 中处于同级、具有前后语句连接的积木会按 create 顺序自动串成一条链，不需要为它们重复生成 connect；只有嵌套到容器语句输入时才用 {refs:[...]}，有多个独立入口时宿主不会擅自合并。
 - mode=replace 仅用于空工作区或用户明确要求重做；已有工作区的局部修改使用 patch，追加使用 append。`;
 
@@ -261,7 +261,7 @@ export async function runAgentCore({ prompt, history = [], mode = "agent", reaso
     ? `\n\n当前可用能力：\n${capabilities.map((capability) => `- ${capability.name}（${capability.id}）：${capability.description}${capability.tools?.length ? `；专用工具：${capability.tools.join(", ")}` : ""}${capability.fileTypes?.length ? `；文件类型：${capability.fileTypes.join(", ")}` : ""}${capability.detect ? `；检测方式：${capability.detect}` : ""}${capability.codegen ? `；代码生成契约：入口 ${capability.codegen.entryBlock || "未声明"}，语句输入 ${capability.codegen.statementInput || "未声明"}，运行对象 ${(capability.codegen.runtimeNames || []).join(", ") || "无"}` : ""}`).join("\n")}`
     : "\n\n当前没有插件提供额外的 Agent 能力；按通用 Python 工程处理。";
   const workspaceConstructionRules = workspaceMode === "visual" || workspaceMode === "split"
-    ? `\n\n图形化工作区规则：\n- 先判断本轮任务的主要意图：动画、静态绘图、海龟轨迹、数据处理、数学计算、文件/CSV 或普通 Python。依据 purpose、capabilities、intentTags、输入输出类型和真实 contract 选择积木；不要因为“绘制”“图形化”就默认使用 Matplotlib。\n- ${graphicalCatalogInstructions(blockCatalog)}\n- 唯一的图形化写入工具是 apply_block_plan。提交 version、mode 和 create/update/delete/connect 操作；用 ref 标识新建积木，用 {ref} 连接值槽，用 {refs:[...]} 连接语句槽。不要提交 Blockly 原生 JSON、id、next、shadow、坐标或序列化状态。\n- 宿主会在隔离工作区按真实模板组装并执行连接、上下文和 Python 检查；全部通过后一次提交。失败时只根据 issues 中 operationIndex、ref、fieldName、inputName 修正对应操作，不要整套重做。\n- append 用于追加，patch 用于局部修改；replace 仅用于工作区为空或用户明确要求重做。不得改用纯代码编辑工具绕过图形化工作区。`
+    ? `\n\n图形化工作区规则：\n- 先判断本轮任务的主要意图：动画、静态绘图、海龟轨迹、数据处理、数学计算、文件/CSV 或普通 Python。依据 purpose、capabilities、intentTags、输入输出类型和真实 contract 选择积木；不要因为“绘制”“图形化”就默认使用 Matplotlib。\n- ${graphicalCatalogInstructions(blockCatalog)}\n- 唯一的图形化写入工具是 apply_block_plan。提交 version、mode 和 create/update/delete/connect 操作；用 ref 标识新建积木，用 {ref} 连接值槽，用 {refs:[...]} 连接语句槽。不要提交 Blockly 原生 JSON、id、next、shadow、坐标或序列化状态。\n- 宿主会在隔离工作区按真实模板组装并执行连接、上下文和 Python 检查；全部通过后一次提交。失败时只根据 issues 中 operationIndex、ref、fieldName、inputName 修正对应操作，不要整套重做；失败结果会附带 issues 涉及类型的真实契约（fields、inputSlots、requiredInputs），直接据此修正，不要重复读取模板。\n- append 用于追加，patch 用于局部修改；replace 仅用于工作区为空或用户明确要求重做。不得改用纯代码编辑工具绕过图形化工作区。`
     : "";
   const requestContext = createAgentRequestContext({
     system: `${systemRules}${pluginAuthoringRules}${capabilityRules}${workspaceConstructionRules}\n\n当前模式：${mode === "plan" ? "计划模式，只能读取和分析，不得修改工程" : "智能体模式，可以执行必要的工程操作"}`,

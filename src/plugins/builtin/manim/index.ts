@@ -9,7 +9,9 @@ import { registerValueBlocks } from "./blocks/values";
 import { registerManimAngleField } from "./angleField";
 import { registerManimColorField } from "./colorField";
 import { registerManimFormulaField } from "./formulaField";
-import { registerManimToolbox } from "./toolbox";
+import { registerManimToolbox, manimToolboxBlockPaths } from "./toolbox";
+import { manimBlockAgentMetadata } from "./blockKnowledge";
+import { mergeBlockAgentMetadata } from "../../../pythonBlockKnowledge";
 import { installFileBlockPickerFields } from "../../../fileBlockPicker";
 import { colourForManimBlock } from "./constants";
 import { getManimRenderConfig, isDefaultManimRenderConfig, loadManimRenderConfig, resetManimRenderConfig } from "./renderConfig";
@@ -44,25 +46,33 @@ export const manimPlugin: VisualPythonPlugin = {
     registerManimColorField();
     registerManimFormulaField();
 
-    const colouredContext = new Proxy(context, {
+    const typePaths = manimToolboxBlockPaths();
+    const enrichedContext = new Proxy(context, {
       get(target, property, receiver) {
         if (property !== "registerBlock") return Reflect.get(target, property, receiver);
         return (definition: Parameters<typeof context.registerBlock>[0], generator: Parameters<typeof context.registerBlock>[1]) => {
-          context.registerBlock({ ...definition, colour: colourForManimBlock(definition.type) }, generator);
+          const message = typeof definition.message0 === "string" ? definition.message0 : "";
+          const label = message.replace(/%\{?\d+\}?/g, " ").replace(/\s+/g, " ").trim();
+          const metadata = mergeBlockAgentMetadata(manimBlockAgentMetadata(definition.type, typePaths.get(definition.type) ?? [], label), definition.agent);
+          context.registerBlock({
+            ...definition,
+            colour: colourForManimBlock(definition.type),
+            ...(metadata && Object.keys(metadata).length > 0 ? { agent: metadata } : {}),
+          }, generator);
         };
       },
     });
 
-    registerSceneBlocks(colouredContext);
+    registerSceneBlocks(enrichedContext);
     installFileBlockPickerFields();
-    registerBasicObjectBlocks(colouredContext);
-    registerObjectExtraBlocks(colouredContext);
-    registerAnimationBlocks(colouredContext);
-    registerDynamicBlocks(colouredContext);
-    registerValueBlocks(colouredContext);
-    registerMethodBlocks(colouredContext);
+    registerBasicObjectBlocks(enrichedContext);
+    registerObjectExtraBlocks(enrichedContext);
+    registerAnimationBlocks(enrichedContext);
+    registerDynamicBlocks(enrichedContext);
+    registerValueBlocks(enrichedContext);
+    registerMethodBlocks(enrichedContext);
 
-    registerManimToolbox(colouredContext);
+    registerManimToolbox(enrichedContext);
     registerManimAgentTools(context);
     context.registerCodeDocumentHandler({
       id: "visual-python.manim.code-documents",

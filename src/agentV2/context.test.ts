@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AiChatMessage } from "../aiConfig";
-import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext } from "./context";
+import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext, graphicalCatalogInstructions } from "./context";
 
 describe("Agent context compression", () => {
   it("builds one immutable initial request with the current code snapshot", () => {
@@ -95,6 +95,41 @@ describe("Agent context compression", () => {
     expect(() => JSON.parse(result)).not.toThrow();
   });
 
+  it("keeps planning fields and drops scoring-only metadata in compacted directories", () => {
+    const result = compactAgentToolResult("get_task_block_directory", {
+      categories: [],
+      candidates: [{
+        type: "visual_python_manim_circle_object",
+        label: "圆形",
+        category: "Manim / 常用",
+        purpose: "创建圆形对象，可用于弹跳小球动画",
+        keywords: ["小球", "ball"],
+        aliases: ["小球"],
+        intentTags: ["geometry"],
+        capabilities: ["create-object"],
+        dependencies: ["manim"],
+        recommendedFor: ["弹跳动画"],
+        contract: {
+          inputSlots: [],
+          hasOutputConnection: true,
+          outputCheck: ["ManimObject"],
+          hasPreviousConnection: false,
+          previousCheck: null,
+          hasNextConnection: false,
+          nextCheck: null,
+          fields: [],
+        },
+      }],
+    });
+
+    const parsed = JSON.parse(result) as { candidates: Array<Record<string, unknown>> };
+    expect(parsed.candidates[0]).toMatchObject({ type: "visual_python_manim_circle_object", purpose: "创建圆形对象，可用于弹跳小球动画", recommendedFor: ["弹跳动画"] });
+    expect(parsed.candidates[0]).toHaveProperty("contract");
+    expect(parsed.candidates[0]).not.toHaveProperty("keywords");
+    expect(parsed.candidates[0]).not.toHaveProperty("aliases");
+    expect(parsed.candidates[0]).not.toHaveProperty("intentTags");
+  });
+
   it("keeps the request under the total character limit without sending duplicate block states", () => {
     const catalog = JSON.stringify({
       categories: [{
@@ -125,7 +160,23 @@ describe("Agent context compression", () => {
     expect(blocks.length + compactCatalog.omittedBlockCount).toBe(1_200);
     expect(blocks[0]).not.toHaveProperty("state");
     expect(blocks[0].type).toBe("python_block_0");
-    expect(messages.some((message) => message.content.includes("仅附带部分积木摘要"))).toBe(compactCatalog.omittedBlockCount > 0);
+    expect(messages.some((message) => message.content.includes("仅附带部分积木候选"))).toBe(compactCatalog.omittedBlockCount > 0);
+  });
+
+  it("prefers attached contracts over extra directory discovery", () => {
+    const truncated = graphicalCatalogInstructions(JSON.stringify({
+      candidates: [{ type: "python_print", label: "输出", contract: { inputSlots: [], fields: [], requiredInputs: ["VALUE"] } }],
+      omittedCandidateCount: 5,
+    }));
+    expect(truncated).toContain("omittedCandidateCount");
+    expect(truncated).toContain("requiredInputs");
+    expect(truncated).not.toContain("do not call get_task_block_directory or search_blocks");
+
+    const complete = graphicalCatalogInstructions(JSON.stringify({
+      candidates: [{ type: "python_print", label: "输出", contract: { inputSlots: [], fields: [] } }],
+    }));
+    expect(complete).toContain("complete catalog");
+    expect(complete).toContain("do not call get_task_block_directory or search_blocks");
   });
 
   it("keeps only recent bounded conversation context", () => {

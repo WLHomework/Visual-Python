@@ -1111,7 +1111,7 @@ const requiredInputsByType: Record<string, Array<[string, string]>> = {
 
 const hasConnectedBlock = (block: Blockly.Block, inputName: string) => Boolean(block.getInput(inputName)?.connection?.targetBlock());
 
-export function getPythonRequiredInputWarning(block: Blockly.Block): string | null {
+export function getRequiredInputEntries(block: Blockly.Block): Array<[string, string]> {
   const required = [...(requiredInputsByType[block.type] ?? [])];
   if (block.type.startsWith("visual_python_manim_")) {
     const labels: Record<string, string> = {
@@ -1161,7 +1161,15 @@ export function getPythonRequiredInputWarning(block: Blockly.Block): string | nu
     required.push(["DICT", "字典"]);
     if (["pop", "setdefault"].includes(block.getFieldValue("METHOD"))) required.push(["KEY", "键"]);
   }
-  const missing = required.filter(([name]) => !hasConnectedBlock(block, name)).map(([, label]) => label);
+  return required;
+}
+
+export function getRequiredInputNames(block: Blockly.Block): string[] {
+  return [...new Set(getRequiredInputEntries(block).filter(([name]) => Boolean(block.getInput(name))).map(([name]) => name))];
+}
+
+export function getPythonRequiredInputWarning(block: Blockly.Block): string | null {
+  const missing = getRequiredInputEntries(block).filter(([name]) => !hasConnectedBlock(block, name)).map(([, label]) => label);
   return missing.length ? `缺少必填输入：${missing.join("、")}。` : null;
 }
 

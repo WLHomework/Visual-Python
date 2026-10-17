@@ -218,6 +218,89 @@ describe("block search", () => {
     });
   });
 
+  it("reports omitted candidates and attaches contracts when a describer is provided", () => {
+    const entries = createBlockSearchIndex({
+      kind: "categoryToolbox",
+      contents: [{
+        kind: "category",
+        name: "图形",
+        contents: Array.from({ length: 12 }, (_, index) => ({ kind: "block", type: `draw_shape_${index}` })),
+      }],
+    } as any, (type) => `绘制 ${type}`, undefined, {
+      metadataForType: () => ({ purpose: "绘制图形", intentTags: ["drawing"] }),
+    });
+
+    const directory = createTaskBlockDirectory(entries, "绘制一个图形", {
+      limit: 5,
+      describe: () => ({
+        inputSlots: [{ name: "SIZE", kind: "value" as const }],
+        hasOutputConnection: false,
+        outputCheck: null,
+        hasPreviousConnection: true,
+        previousCheck: null,
+        hasNextConnection: true,
+        nextCheck: null,
+        fields: [{ name: "COLOR", value: "BLUE", text: "蓝色" }],
+        requiredInputs: ["SIZE"],
+      }),
+    });
+
+    expect(directory.candidates).toHaveLength(5);
+    expect(directory.omittedCandidateCount).toBe(7);
+    expect(directory.candidates[0]?.contract?.requiredInputs).toEqual(["SIZE"]);
+  });
+
+  it("keeps one candidate per nested toolbox section for broad tasks", () => {
+    const entries = createBlockSearchIndex({
+      kind: "categoryToolbox",
+      contents: [
+        { kind: "category", name: "Manim", contents: [
+          { kind: "category", name: "动画", contents: Array.from({ length: 6 }, (_, index) => ({ kind: "block", type: `manim_animate_${index}` })) },
+          { kind: "category", name: "对象", contents: [{ kind: "block", type: "manim_circle" }, { kind: "block", type: "manim_square" }] },
+          { kind: "category", name: "数值", contents: [{ kind: "block", type: "manim_tracker" }] },
+        ] },
+      ],
+    } as any, (type) => `绘制 ${type}`, undefined, {
+      metadataForType: () => ({ purpose: "绘制动画" }),
+    });
+
+    const directory = createTaskBlockDirectory(entries, "绘制一个动画", { limit: 4 });
+    const types = directory.candidates.map((block) => block.type);
+    expect(types).toContain("manim_circle");
+    expect(types).toContain("manim_tracker");
+  });
+
+  it("lists each block type once even when the toolbox repeats it", () => {
+    const entries = createBlockSearchIndex({
+      kind: "categoryToolbox",
+      contents: [
+        { kind: "category", name: "常用", contents: [{ kind: "block", type: "manim_scene", fields: { NAME: "A" } }] },
+        { kind: "category", name: "场景", contents: [{ kind: "block", type: "manim_scene", fields: { NAME: "B" } }] },
+      ],
+    } as any, () => "动画场景", undefined, {
+      metadataForType: () => ({ purpose: "创建场景" }),
+    });
+
+    const directory = createTaskBlockDirectory(entries, "创建一个场景");
+    expect(directory.candidates.filter((block) => block.type === "manim_scene")).toHaveLength(1);
+    expect(directory.omittedCandidateCount).toBeUndefined();
+  });
+
+  it("adds related blocks of top candidates for narrow tasks", () => {
+    const entries = createBlockSearchIndex({
+      kind: "categoryToolbox",
+      contents: [{ kind: "category", name: "扩展", contents: [
+        { kind: "block", type: "draw_shape" },
+        { kind: "block", type: "shape_collection" },
+      ] }],
+    } as any, (type) => ({ draw_shape: "变形动画", shape_collection: "图形集合" })[type] ?? type, undefined, {
+      metadataForType: (type) => type === "draw_shape" ? { purpose: "播放变形动画", relatedBlocks: ["shape_collection"] } : undefined,
+    });
+
+    const directory = createTaskBlockDirectory(entries, "让对象变形");
+    expect(directory.candidates.map((block) => block.type)).toEqual(["draw_shape", "shape_collection"]);
+  });
+
   it("keeps broad drawing tasks diverse instead of filling the directory with one library", () => {
     const contents = [
       ...Array.from({ length: 8 }, (_, index) => ({ kind: "block", type: `matplotlib_draw_${index}` })),

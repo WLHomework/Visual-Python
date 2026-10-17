@@ -3,6 +3,7 @@ import type { AgentHost, AgentTool } from "./types";
 import type { AiChatToolDefinition } from "../aiConfig";
 import type { WorkspaceMode } from "../workspaceMode";
 import { hydrateAllDeferredInputs, saveWorkspaceState } from "../pythonBlocks";
+import { getRequiredInputNames } from "../pythonSyntaxBlocks";
 import type { BlockCatalogContract, BlockCatalogField, BlockTaskDirectory } from "../blockSearch";
 import { BlockPlanValidationError, blockPlanToolSchema, parseBlockPlan } from "./blockPlan";
 import { compileBlockPlan } from "./blockPlanCompiler";
@@ -19,6 +20,7 @@ export type BlockTemplate = {
   previousCheck?: string[] | null;
   nextCheck?: string[] | null;
   fields?: BlockFieldDescription[];
+  requiredInputs?: string[];
 };
 
 type ContextIssue = { blockId?: string; message: string };
@@ -47,9 +49,9 @@ const tool = (name: string, description: string, parameters: Record<string, unkn
 
 const allBlocklyTools: AgentTool[] = [
   { definition: tool("get_workspace", "Read a compact summary of the current graphical workspace. Set includeState=true only when the serialized state is explicitly required.", { includeState: { type: "boolean" } }), label: "读取图形化工作区", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: tool("get_task_block_directory", "Return task-relevant toolbox categories and candidate blocks in one batch. Use this before searching individual blocks.", { task: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 80 } }), label: "读取任务积木目录", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: tool("search_blocks", "Search the registered block catalog only when the task directory cannot identify a required block. Use one broad query instead of repeated single-block searches.", { query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } }), label: "搜索积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: tool("get_block_templates", "Read the real fields and connection contracts for a batch of required block types. Do not request full Blockly serialization state.", { types: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 } }), label: "读取积木模板", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
+  { definition: tool("get_task_block_directory", "Return task-relevant toolbox categories and candidate blocks in one batch, each with its field, input and required-input contract. Use this before searching individual blocks.", { task: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 80 } }), label: "读取任务积木目录", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
+  { definition: tool("search_blocks", "Search the registered block catalog only when the task directory cannot identify a required block. Returns type, label, category and field/connection contracts. Use one broad query instead of repeated single-block searches.", { query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } }), label: "搜索积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
+  { definition: tool("get_block_templates", "Read the real fields, input slots, required inputs and connection contracts for a batch of required block types. Reports notFound for types outside the toolbox. Do not request full Blockly serialization state.", { types: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 } }), label: "读取积木模板", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
   { definition: { type: "function", function: { name: "apply_block_plan", description: "The only graphical workspace write operation. Submit a BlockPlan with semantic create, update, delete and connect operations. The host builds and validates it in an isolated workspace, then commits once. Do not submit id, next, shadow, coordinates, or native Blockly state.", parameters: blockPlanToolSchema() } }, label: "应用积木方案", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
 ];
 
@@ -143,6 +145,7 @@ export function describeBlocklyBlockContract(type: string, state?: Record<string
       hasNextConnection: Boolean(block.nextConnection),
       nextCheck: normalizedCheck(block.nextConnection),
       fields,
+      requiredInputs: getRequiredInputNames(block),
     };
   } catch {
     return { inputSlots: [], hasOutputConnection: false, outputCheck: null, hasPreviousConnection: false, previousCheck: null, hasNextConnection: false, nextCheck: null, fields: [] };
@@ -154,6 +157,16 @@ export function describeBlocklyBlockContract(type: string, state?: Record<string
 
 export function describeBlocklyBlockInputs(type: string): BlockInputSlot[] {
   return describeBlocklyBlockContract(type).inputSlots;
+}
+
+function templateContract({ state: _state, ...template }: BlockTemplate): Omit<BlockTemplate, "state"> {
+  const needsInputSlots = !template.inputSlots?.length;
+  const needsRequiredInputs = !template.requiredInputs?.length;
+  if (!needsInputSlots && !needsRequiredInputs) return { ...template };
+  const contract = describeBlocklyBlockContract(template.type);
+  const inputSlots = needsInputSlots ? contract.inputSlots : template.inputSlots!;
+  const requiredInputs = needsRequiredInputs ? contract.requiredInputs ?? [] : template.requiredInputs!;
+  return { ...template, inputSlots, ...(requiredInputs.length ? { requiredInputs } : {}) };
 }
 
 function invalidPlanResult(error: unknown): Record<string, unknown> {
@@ -185,7 +198,7 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
       const query = typeof args.query === "string" ? args.query.trim() : "";
       if (!query) throw new Error("query must not be empty");
       const limit = typeof args.limit === "number" && Number.isInteger(args.limit) ? Math.max(1, Math.min(50, args.limit)) : 20;
-      return { query, matches: services.searchBlocks(query, limit).map(({ type, label, category }) => ({ type, label, category })) };
+      return { query, matches: services.searchBlocks(query, limit).map(templateContract) };
     }
 
     if (name === "get_task_block_directory") {
@@ -199,12 +212,10 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
     if (name === "get_block_templates") {
       const types = checkedArray(args.types, "types").filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
       if (!types.length || types.length > 50) throw new Error("types must contain 1 to 50 block types");
-      return {
-        templates: services.getBlockTemplates(types).map((template) => {
-          const { state: _state, ...contract } = template;
-          return { ...contract, inputSlots: template.inputSlots.length ? template.inputSlots : describeBlocklyBlockInputs(template.type) };
-        }),
-      };
+      const templates = services.getBlockTemplates(types).map(templateContract);
+      const found = new Set(templates.map((template) => template.type));
+      const notFound = [...new Set(types)].filter((type) => !found.has(type));
+      return { templates, ...(notFound.length ? { notFound } : {}) };
     }
 
     if (name === "apply_block_plan") {
@@ -224,6 +235,14 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
         commit: services.commit,
       }, signal);
       const { state: _state, code: _code, ...compact } = result;
+      if (compact.ok === false && Array.isArray(compact.issues)) {
+        const types = [...new Set(compact.issues.flatMap((issue) => {
+          if (!issue || typeof issue !== "object") return [];
+          const blockType = (issue as Record<string, unknown>).blockType;
+          return typeof blockType === "string" && blockType ? [blockType] : [];
+        }))].slice(0, 12);
+        if (types.length) return { ...compact, contracts: services.getBlockTemplates(types).map(templateContract) };
+      }
       return compact as Record<string, unknown>;
     }
 

@@ -521,12 +521,7 @@ const annotationSceneBlock = {
   },
 };
 
-export const registerManimToolbox = (context: PluginContext) => {
-  context.registerToolboxCategory({
-    id: "visual-python.manim.toolbox",
-    name: "Manim",
-    colour,
-    contents: withManimToolboxDefaults([
+const manimToolboxGroups: Array<Record<string, any>> = [
       category("常用", [
         starterSceneBlock,
         toolboxBlock("visual_python_manim_scene"),
@@ -1083,6 +1078,38 @@ export const registerManimToolbox = (context: PluginContext) => {
           toolboxBlock("visual_python_manim_apply_matrix", { MATRIX: dynamicMatrixDataShadow() }),
         ]),
       ]),
-    ]),
+];
+
+let cachedBlockPaths: Map<string, string[]> | null = null;
+
+const collectBlockPaths = (items: Array<Record<string, any>>, path: string[], canonical: Map<string, string[]>, fallback: Map<string, string[]>): void => {
+  for (const item of items) {
+    if (item.kind === "category") {
+      collectBlockPaths(item.contents ?? [], [...path, String(item.name ?? "")].filter(Boolean), canonical, fallback);
+      continue;
+    }
+    if (item.kind !== "block" || typeof item.type !== "string") continue;
+    const target = path[0] === "常用" ? fallback : canonical;
+    if (!target.has(item.type)) target.set(item.type, path);
+  }
+};
+
+export const manimToolboxBlockPaths = (): Map<string, string[]> => {
+  if (!cachedBlockPaths) {
+    const canonical = new Map<string, string[]>();
+    const fallback = new Map<string, string[]>();
+    collectBlockPaths(manimToolboxGroups, [], canonical, fallback);
+    for (const [type, path] of fallback) if (!canonical.has(type)) canonical.set(type, path);
+    cachedBlockPaths = canonical;
+  }
+  return cachedBlockPaths;
+};
+
+export const registerManimToolbox = (context: PluginContext) => {
+  context.registerToolboxCategory({
+    id: "visual-python.manim.toolbox",
+    name: "Manim",
+    colour,
+    contents: withManimToolboxDefaults(manimToolboxGroups),
   });
 };

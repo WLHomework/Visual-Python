@@ -41,6 +41,7 @@ export type BlockCatalogContract = {
   hasNextConnection: boolean;
   nextCheck: string[] | null;
   fields: BlockCatalogField[];
+  requiredInputs?: string[];
 };
 export type BlockCatalogBlock = BlockCatalogContract & {
   type: string;
@@ -89,6 +90,7 @@ export type BlockTaskDirectory = {
   schema: "visual-python.block-api";
   categories: Array<{ name: string; blockCount: number }>;
   candidates: BlockTaskDirectoryCandidate[];
+  omittedCandidateCount?: number;
   hint?: string;
 };
 
@@ -340,15 +342,32 @@ function isBroadTask(task: string): boolean {
 }
 
 function candidateDiversityKey(entry: BlockSearchEntry): string {
-  return entry.category.split(" / ")[0] || entry.category;
+  const segments = entry.category.split(" / ").filter(Boolean);
+  return segments[segments.length - 1] || entry.category;
 }
 
 function selectTaskCandidates(
   ranked: Array<{ entry: BlockSearchEntry; score: number; order: number }>,
   limit: number,
   broad: boolean,
+  entryByType: Map<string, BlockSearchEntry>,
 ): BlockSearchEntry[] {
-  if (!broad) return ranked.slice(0, limit).map(({ entry }) => entry);
+  if (!broad) {
+    const selected = ranked.slice(0, limit).map(({ entry }) => entry);
+    if (selected.length >= limit) return selected;
+    const selectedTypes = new Set(selected.map((entry) => entry.type));
+    for (const { entry } of ranked.slice(0, 3)) {
+      for (const relatedType of entry.agent?.relatedBlocks ?? []) {
+        if (selected.length >= limit) return selected;
+        if (selectedTypes.has(relatedType)) continue;
+        const related = entryByType.get(relatedType);
+        if (!related) continue;
+        selectedTypes.add(relatedType);
+        selected.push(related);
+      }
+    }
+    return selected;
+  }
   const groups = new Map<string, Array<typeof ranked[number]>>();
   for (const item of ranked) {
     const group = candidateDiversityKey(item.entry);
@@ -378,15 +397,25 @@ export function createTaskBlockDirectory(
 ): BlockTaskDirectory {
   const terms = taskQueryTerms(task);
   const broad = isBroadTask(task);
+  const uniqueTypeCount = new Set(entries.map((entry) => entry.type)).size;
   const rankedResults = entries
     .map((entry, order) => ({ entry, score: taskMatchScore(entry, task, terms), order }))
     .filter(({ score }) => broad || score > 0)
     .sort((left, right) => right.score - left.score || left.order - right.order);
-  const ranked = selectTaskCandidates(rankedResults, options.limit ?? 40, broad);
+  const seenTypes = new Set<string>();
+  const rankedByType = rankedResults.filter(({ entry }) => {
+    if (seenTypes.has(entry.type)) return false;
+    seenTypes.add(entry.type);
+    return true;
+  });
+  const entryByType = new Map<string, BlockSearchEntry>();
+  for (const entry of entries) if (!entryByType.has(entry.type)) entryByType.set(entry.type, entry);
+  const ranked = selectTaskCandidates(rankedByType, options.limit ?? 40, broad, entryByType);
   const selected = new Set(ranked.map((entry) => entry.type));
   const summaryEntries = selected.size ? ranked : entries;
   const counts = new Map<string, number>();
   for (const entry of summaryEntries) counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1);
+  const omittedCandidateCount = ranked.length ? Math.max(0, uniqueTypeCount - ranked.length) : 0;
   const candidates = ranked.map((entry) => {
     const agent = entry.agent ?? {};
     const state = entry.item as unknown as Record<string, unknown>;
@@ -420,6 +449,7 @@ export function createTaskBlockDirectory(
     schema: "visual-python.block-api",
     categories: [...counts].map(([name, blockCount]) => ({ name, blockCount })),
     candidates,
+    ...(omittedCandidateCount ? { omittedCandidateCount } : {}),
     ...(candidates.length ? {} : { hint: "未找到直接匹配的积木。请使用 search_blocks，并只传入一个能描述目标能力的关键词。" }),
   };
 }

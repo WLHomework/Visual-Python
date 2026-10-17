@@ -43,15 +43,31 @@ export function hasTruncatedBlockCatalog(value?: string): boolean {
   }
 }
 
+function catalogHasContracts(value: string): boolean {
+  try {
+    const parsed = JSON.parse(value) as { candidates?: unknown };
+    return Array.isArray(parsed?.candidates) && parsed.candidates.some((candidate) => Boolean(candidate && typeof candidate === "object" && (candidate as Record<string, unknown>).contract));
+  } catch {
+    return false;
+  }
+}
+
 export function graphicalCatalogInstructions(blockCatalog?: string): string {
   const catalog = blockCatalog?.trim();
+  const contracts = Boolean(catalog && catalogHasContracts(catalog));
+  const contractText = contracts ? " with exact fields, input slots and requiredInputs" : "";
   const discoveryRules = !catalog
-    ? "No task block catalog is attached. Call get_task_block_directory once for task discovery, then use the returned candidates; do not search for blocks one by one."
+    ? "No task block catalog is attached. Call get_task_block_directory once for task discovery; its candidates include the field, input and required-input contract, so build the plan from that result. Do not search for blocks one by one."
     : hasTruncatedBlockCatalog(catalog)
-      ? "The attached task block catalog is truncated and reports omittedCandidateCount or omittedBlockCount. You may make at most one broad search_blocks call only if the required block is absent; do not repeat discovery or search individual blocks."
-      : "The prompt contains a complete catalog. do not call get_task_block_directory or search_blocks. Use the catalog directly and call get_block_templates at most once in a batch for required block types."
+      ? `The attached task block catalog is a ranked candidate selection and reports omittedCandidateCount, so other blocks were omitted. Its candidates${contractText} let you build apply_block_plan directly; do not repeat discovery. Only if a required block type is absent, make at most one search_blocks call or one get_task_block_directory call with a different task phrase, and read get_block_templates only for types whose contract is still missing or empty.`
+      : `The prompt contains a complete catalog${contractText}. do not call get_task_block_directory or search_blocks. Use the catalog directly to build apply_block_plan, and call get_block_templates at most once in a batch only for types whose contract is missing or empty.`;
   return `Catalog strategy for this graphical task: ${discoveryRules}`;
 }
+
+const planningCandidateKeys = new Set([
+  "type", "label", "category", "purpose", "recommendedFor", "relatedBlocks", "avoidFor", "requires",
+  "inputDescriptions", "inputTypes", "outputType", "statement", "examples", "contract",
+]);
 
 function compactTaskBlockDirectory(value: string, maxCharacters: number): { text: string; omittedBlocks: number } | null {
   let parsed: unknown;
@@ -68,11 +84,13 @@ function compactTaskBlockDirectory(value: string, maxCharacters: number): { text
     ? record.omittedCandidateCount
     : 0;
   const build = (limit: number) => {
-    const kept = candidates.slice(0, limit).map((candidate) => Object.fromEntries(Object.entries(candidate).map(([key, item]) => {
-      if (typeof item === "string") return [key, truncate(item, 800)];
-      if (Array.isArray(item)) return [key, item.slice(0, 8).map((entry) => typeof entry === "string" ? truncate(entry, 300) : entry)];
-      return [key, item];
-    })));
+    const kept = candidates.slice(0, limit).map((candidate) => Object.fromEntries(Object.entries(candidate)
+      .filter(([key]) => planningCandidateKeys.has(key))
+      .map(([key, item]) => {
+        if (typeof item === "string") return [key, truncate(item, 800)];
+        if (Array.isArray(item)) return [key, item.slice(0, 8).map((entry) => typeof entry === "string" ? truncate(entry, 300) : entry)];
+        return [key, item];
+      })));
     const omittedBlocks = previouslyOmitted + candidates.length - limit;
     return {
       text: JSON.stringify({ categories, candidates: kept, ...(record.hint ? { hint: record.hint } : {}), ...(omittedBlocks ? { omittedCandidateCount: omittedBlocks } : {}) }),
@@ -186,8 +204,8 @@ export function buildAgentRequestMessages(context: AgentRequestContext): AiChatM
     const catalog = compactTaskBlockDirectory(context.blockCatalog.trim(), catalogBudget) ?? compactBlockCatalog(context.blockCatalog.trim(), catalogBudget);
     if (!catalog?.text) return messages;
     const notice = catalog.omittedBlocks
-      ? `积木目录受本轮请求长度限制，仅附带部分积木摘要；还有 ${catalog.omittedBlocks} 个积木未展开，可用 search_blocks 搜索并用 get_block_templates 获取真实模板。`
-      : "以下是积木目录摘要；需要精确 Blockly 模板状态时再调用 get_block_templates。";
+      ? `积木目录受本轮请求长度限制，仅附带部分积木候选；还有 ${catalog.omittedBlocks} 个积木未展开。候选已带字段与输入契约，可直接构建 apply_block_plan；缺少的类型再用 search_blocks 补齐，并用 get_block_templates 读取缺失契约。`
+      : "以下积木目录已带字段与输入契约，可直接据此构建 apply_block_plan；只有契约缺失或为空的类型才调用 get_block_templates。";
     messages.push({ role: "user", content: `[Block catalog]\n${catalog.text}\n\n${notice}` });
   }
   return messages;
@@ -315,8 +333,9 @@ export function compactAgentToolResult(_toolName: string, result: Record<string,
         ["blockCount", result.blockCount],
         ["changedBlockIds", result.changedBlockIds],
         ["issues", result.issues],
+        ["contracts", result.contracts],
       ].filter(([, value]) => value !== undefined));
-      return boundedResultJson(compact, 2_000);
+      return boundedResultJson(compact, result.contracts ? 8_000 : 2_000);
     }
     return boundedResultJson(result);
   } catch {
