@@ -140,11 +140,41 @@ describe("Blockly Agent host", () => {
       ],
     }, signal());
 
-    expect(result).toMatchObject({ ok: true, changed: true, blockCount: 3 });
+    expect(result).toMatchObject({ ok: true, changed: true, blockCount: 3, refIds: { scene: expect.any(String), step: expect.any(String), amount: expect.any(String) } });
     expect(result).not.toHaveProperty("state");
     expect(result).not.toHaveProperty("code");
     expect(host.commit).toHaveBeenCalledOnce();
     expect(workspace.getAllBlocks(false)).toHaveLength(3);
+    expect(workspace.getBlockById((result as { refIds: Record<string, string> }).refIds.amount!)).toBeTruthy();
+    workspace.dispose();
+  });
+
+  it("places appended statements inside the declared entry block", async () => {
+    if (!Blockly.Blocks.agent_host_linked_scene) {
+      Blockly.common.defineBlocksWithJsonArray([{
+        type: "agent_host_linked_scene",
+        message0: "linked scene %1 %2",
+        args0: [{ type: "field_input", name: "NAME", text: "MainScene" }, { type: "input_statement", name: "BODY" }],
+        previousStatement: null,
+        nextStatement: null,
+      }]);
+    }
+    const workspace = new Blockly.Workspace();
+    const scene = workspace.newBlock("agent_host_linked_scene");
+    const host = { ...services(workspace), entryBlockTypes: ["agent_host_linked_scene"] };
+    const execute = createBlocklyToolExecutor(host);
+
+    const summary = await execute("get_workspace", {}, signal()) as { statementTail: Record<string, unknown> | null };
+    expect(summary.statementTail).toMatchObject({ sceneId: scene.id, inputName: "BODY", lastBlockId: null });
+
+    const result = await execute("apply_block_plan", {
+      version: 1,
+      mode: "append",
+      operations: [{ action: "create", ref: "step", block: "agent_host_statement" }],
+    }, signal()) as { refIds: Record<string, string> };
+    expect(result).toMatchObject({ ok: true, refIds: { step: expect.any(String) } });
+    const nested = workspace.getBlockById(scene.id)?.getInput("BODY")?.connection?.targetBlock();
+    expect(nested?.id).toBe(result.refIds.step);
     workspace.dispose();
   });
 

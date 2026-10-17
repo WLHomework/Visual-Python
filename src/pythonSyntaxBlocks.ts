@@ -927,7 +927,7 @@ export function getManimVoiceoverContextWarning(block: Blockly.Block): string | 
 
 export function getManimSceneContextWarning(block: Blockly.Block): string | null {
   if (!manimSceneStatementBlockTypes.has(block.type)) return null;
-  return isInsideManimScene(block) ? null : "此积木只能放在 Manim 场景内部。";
+  return isInsideManimScene(block) ? null : "此积木只能放在 Manim 场景内部（请把它放进场景积木的 BODY 语句输入）。";
 }
 
 export function getManimObjectReferenceWarning(block: Blockly.Block): string | null {
@@ -936,10 +936,12 @@ export function getManimObjectReferenceWarning(block: Blockly.Block): string | n
   if (!rawName) return "对象引用缺少名称。";
   const normalizeName = (value: unknown) => sanitizePythonIdentifier(value, "obj");
   const name = normalizeName(rawName);
-  const assignments = block.workspace.getAllBlocks(false)
+  const assignedNames = block.workspace.getAllBlocks(false)
     .filter((candidate) => !candidate.isShadow?.() && (candidate.type === "visual_python_manim_assign" || candidate.type === "visual_python_manim_assign_add"))
-    .map((candidate) => normalizeName(candidate.getFieldValue("VAR")));
-  return assignments.includes(name) ? null : `场景中没有名为“${name}”的已创建对象。`;
+    .map((candidate) => String(candidate.getFieldValue("VAR") ?? "").trim());
+  if (assignedNames.map(normalizeName).includes(name)) return null;
+  const available = [...new Set(assignedNames.filter(Boolean).map(normalizeName))].slice(0, 8);
+  return `场景中没有名为“${name}”的已创建对象${available.length ? `（现有对象：${available.join("、")}）` : ""}。请先用创建对象积木命名对象，再引用它。`;
 }
 
 export function getManimAnimationConnectionWarning(block: Blockly.Block): string | null {
@@ -1169,7 +1171,9 @@ export function getRequiredInputNames(block: Blockly.Block): string[] {
 }
 
 export function getPythonRequiredInputWarning(block: Blockly.Block): string | null {
-  const missing = getRequiredInputEntries(block).filter(([name]) => !hasConnectedBlock(block, name)).map(([, label]) => label);
+  const missing = getRequiredInputEntries(block)
+    .filter(([name]) => !hasConnectedBlock(block, name))
+    .map(([name, label]) => (label && label !== name ? `${label}（${name}）` : name));
   return missing.length ? `缺少必填输入：${missing.join("、")}。` : null;
 }
 

@@ -34,6 +34,7 @@ export type BlocklyAgentServices = {
   validateContexts(workspace: Blockly.Workspace): ContextIssue[];
   validateCode(code: string): Promise<void>;
   commit(state: object, code: string): void;
+  entryBlockTypes?: string[];
 };
 
 const objectSchema = (properties: Record<string, unknown> = {}, required: string[] = []) => ({
@@ -52,7 +53,7 @@ const allBlocklyTools: AgentTool[] = [
   { definition: tool("get_task_block_directory", "Return task-relevant toolbox categories and candidate blocks in one batch, each with its field, input and required-input contract. Use this before searching individual blocks.", { task: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 80 } }), label: "读取任务积木目录", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
   { definition: tool("search_blocks", "Search the registered block catalog only when the task directory cannot identify a required block. Returns type, label, category and field/connection contracts. Use one broad query instead of repeated single-block searches.", { query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } }), label: "搜索积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
   { definition: tool("get_block_templates", "Read the real fields, input slots, required inputs and connection contracts for a batch of required block types. Reports notFound for types outside the toolbox. Do not request full Blockly serialization state.", { types: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 } }), label: "读取积木模板", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: { type: "function", function: { name: "apply_block_plan", description: "The only graphical workspace write operation. Submit a BlockPlan with semantic create, update, delete and connect operations. The host builds and validates it in an isolated workspace, then commits once. Do not submit id, next, shadow, coordinates, or native Blockly state.", parameters: blockPlanToolSchema() } }, label: "应用积木方案", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
+  { definition: { type: "function", function: { name: "apply_block_plan", description: "The only graphical workspace write operation. Submit a BlockPlan with semantic create, update, delete and connect operations. The host builds and validates it in an isolated workspace, then commits once; a failed plan never changes the workspace, so repair only the operations reported in issues (each carries ref, operationIndex, fieldName or inputName). mode replace is rejected unless the workspace is empty: to rebuild, delete the root block (e.g. the scene) in the same plan and recreate it. Created statement blocks are placed automatically after the existing same-level chain or inside the single scene/entry block. The success result includes refIds mapping your plan refs to real block ids; use those blockIds for later update/connect/delete instead of rebuilding. Do not submit id, next, shadow, coordinates, or native Blockly state.", parameters: blockPlanToolSchema() } }, label: "应用积木方案", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
 ];
 
 export const blocklyAgentTools: AgentTool[] = allBlocklyTools;
@@ -81,8 +82,15 @@ function isEntryBlock(block: Blockly.Block) {
   return !block.previousConnection && !block.nextConnection
     && block.inputList.some((input) => input.type === Blockly.inputs.inputTypes.STATEMENT);
 }
-function sceneStatementTail(workspace: Blockly.Workspace) {
-  const entries = workspace.getTopBlocks(false).filter(isEntryBlock);
+function statementEntryBlocks(workspace: Blockly.Workspace, entryBlockTypes: readonly string[] = []): Blockly.Block[] {
+  const topBlocks = workspace.getTopBlocks(false);
+  const entryTypes = new Set(entryBlockTypes);
+  const declared = topBlocks.filter((block) => entryTypes.has(block.type)
+    && block.inputList.some((input) => input.type === Blockly.inputs.inputTypes.STATEMENT));
+  return declared.length ? declared : topBlocks.filter(isEntryBlock);
+}
+function sceneStatementTail(workspace: Blockly.Workspace, entryBlockTypes: readonly string[] = []) {
+  const entries = statementEntryBlocks(workspace, entryBlockTypes);
   if (entries.length !== 1) return null;
   const scene = entries[0];
   if (!scene) return null;
@@ -187,7 +195,7 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
         topBlockIds: services.workspace.getTopBlocks(true).map((block) => block.id),
         selectedBlockId,
         selectedBlock: selectedBlockId ? blocks.find((block) => block.id === selectedBlockId) ? blockSummary(blocks.find((block) => block.id === selectedBlockId)!) : null : null,
-        statementTail: sceneStatementTail(services.workspace),
+        statementTail: sceneStatementTail(services.workspace, services.entryBlockTypes),
         blocks: blocks.slice(0, 200).map(blockSummary),
         code: services.generateCode(services.workspace),
         ...(args.includeState === true ? { workspace: workspaceState(services.workspace) } : {}),
@@ -233,6 +241,7 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
         validateContexts: services.validateContexts,
         validateCode: services.validateCode,
         commit: services.commit,
+        entryBlockTypes: services.entryBlockTypes,
       }, signal);
       const { state: _state, code: _code, ...compact } = result;
       if (compact.ok === false && Array.isArray(compact.issues)) {

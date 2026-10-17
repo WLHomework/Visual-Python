@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
-import { buildDefinedClassConstructorToolbox, buildDefinedFunctionCallToolbox, defaultVisualThemeId, deferHeavyStatementInputs, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateDeferredInputs, loadWorkspaceFast, markHeavyStacksCollapsed, restoreDeferredIntoState, saveWorkspaceState, starterState, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
+import { buildDefinedClassConstructorToolbox, buildDefinedFunctionCallToolbox, defaultVisualThemeId, deferHeavyStatementInputs, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateDeferredInputs, loadWorkspaceFast, markHeavyStacksCollapsed, pushWorkspaceUndoSnapshot, restoreDeferredIntoState, saveWorkspaceState, starterState, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
 import { getManimVoiceoverContextWarning, getPythonCollectionTypeWarning, getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, uniqueIssueMessages, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 
 const variableFields: Record<string, string[]> = {
@@ -114,6 +114,79 @@ describe("bulk workspace loading", () => {
     try {
       expect(() => loadWorkspaceFast(workspace, { blocks: { languageVersion: 0, blocks: [{ type: "does_not_exist" }] } })).toThrow();
       expect(Blockly.Events.isEnabled()).toBe(wasEnabled);
+    } finally {
+      workspace.dispose();
+    }
+  });
+});
+
+describe("workspace undo snapshots", () => {
+  const textState = (text: string) => ({
+    blocks: { languageVersion: 0, blocks: [{ type: "text", x: 10, y: 10, fields: { TEXT: text } }] },
+  });
+  const topTexts = (workspace: Blockly.Workspace) => workspace.getTopBlocks(false).map((block) => String(block.getFieldValue("TEXT")));
+  const flushBlocklyEvents = async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  };
+
+  it("records one undo step for a bulk commit and replays both directions", async () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      loadWorkspaceFast(workspace, textState("before"));
+      workspace.clearUndo();
+      const before = saveWorkspaceState(workspace);
+      loadWorkspaceFast(workspace, textState("after"));
+      pushWorkspaceUndoSnapshot(workspace, before, saveWorkspaceState(workspace));
+      expect(workspace.getUndoStack()).toHaveLength(1);
+      expect(topTexts(workspace)).toEqual(["after"]);
+
+      workspace.undo(false);
+      await flushBlocklyEvents();
+      expect(topTexts(workspace)).toEqual(["before"]);
+      expect(workspace.getUndoStack()).toHaveLength(0);
+      expect(workspace.getRedoStack()).toHaveLength(1);
+
+      workspace.undo(true);
+      await flushBlocklyEvents();
+      expect(topTexts(workspace)).toEqual(["after"]);
+      expect(workspace.getUndoStack()).toHaveLength(1);
+      expect(workspace.getRedoStack()).toHaveLength(0);
+    } finally {
+      workspace.dispose();
+    }
+  });
+
+  it("keeps the undo replay out of the history and drops redo after a new edit", async () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      loadWorkspaceFast(workspace, textState("before"));
+      workspace.clearUndo();
+      const before = saveWorkspaceState(workspace);
+      loadWorkspaceFast(workspace, textState("after"));
+      pushWorkspaceUndoSnapshot(workspace, before, saveWorkspaceState(workspace));
+
+      workspace.undo(false);
+      await flushBlocklyEvents();
+      expect(workspace.getUndoStack()).toHaveLength(0);
+      expect(workspace.getRedoStack()).toHaveLength(1);
+
+      workspace.newBlock("text");
+      await flushBlocklyEvents();
+      expect(workspace.getRedoStack()).toHaveLength(0);
+      expect(workspace.getUndoStack().length).toBeGreaterThan(0);
+    } finally {
+      workspace.dispose();
+    }
+  });
+
+  it("keeps plain bulk loads out of the undo history", () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      loadWorkspaceFast(workspace, textState("one"));
+      loadWorkspaceFast(workspace, textState("two"));
+      expect(workspace.getUndoStack()).toHaveLength(0);
+      expect(workspace.getRedoStack()).toHaveLength(0);
     } finally {
       workspace.dispose();
     }
@@ -1409,7 +1482,7 @@ describe("Python block generators", () => {
   it("validates required inputs without flagging optional sockets", () => {
     const workspace = new Blockly.Workspace();
     const assignment = workspace.newBlock("python_assign_target");
-    expect(getPythonRequiredInputWarning(assignment)).toBe("缺少必填输入：赋值目标、赋值内容。");
+    expect(getPythonRequiredInputWarning(assignment)).toBe("缺少必填输入：赋值目标（TARGET）、赋值内容（VALUE）。");
 
     const target = workspace.newBlock("python_variable_target");
     const assignedValue = workspace.newBlock("math_number");
@@ -1426,32 +1499,32 @@ describe("Python block generators", () => {
 
     const call = workspace.newBlock("python_call_structured") as Blockly.Block & { loadExtraState(state: object): void };
     call.loadExtraState({ arguments: [{ kind: "positional", name: "" }] });
-    expect(getPythonRequiredInputWarning(call)).toBe("缺少必填输入：第 1 个调用参数。");
+    expect(getPythonRequiredInputWarning(call)).toBe("缺少必填输入：第 1 个调用参数（ARG0）。");
 
     const functionBlock = workspace.newBlock("python_function_structured") as Blockly.Block & { loadExtraState(state: object): void };
     functionBlock.loadExtraState({ parameters: [{ kind: "default", name: "count" }] });
-    expect(getPythonRequiredInputWarning(functionBlock)).toBe("缺少必填输入：参数 count 的默认值。");
+    expect(getPythonRequiredInputWarning(functionBlock)).toBe("缺少必填输入：参数 count 的默认值（PARAM0）。");
 
     const matchBlock = workspace.newBlock("python_match");
-    expect(getPythonRequiredInputWarning(matchBlock)).toBe("缺少必填输入：匹配对象、至少一个 case。");
+    expect(getPythonRequiredInputWarning(matchBlock)).toBe("缺少必填输入：匹配对象（SUBJECT）、至少一个 case（CASES）。");
 
     const sortedBlock = workspace.newBlock("python_builtin_sorted");
-    expect(getPythonRequiredInputWarning(sortedBlock)).toBe("缺少必填输入：可迭代对象。");
+    expect(getPythonRequiredInputWarning(sortedBlock)).toBe("缺少必填输入：可迭代对象（ITERABLE）。");
     const sortedItems = workspace.newBlock("python_raw_expression");
     sortedBlock.getInput("ITERABLE")!.connection!.connect(sortedItems.outputConnection!);
     expect(getPythonRequiredInputWarning(sortedBlock)).toBeNull();
 
     const mapBlock = workspace.newBlock("python_builtin_map_filter");
-    expect(getPythonRequiredInputWarning(mapBlock)).toBe("缺少必填输入：函数、可迭代对象。");
+    expect(getPythonRequiredInputWarning(mapBlock)).toBe("缺少必填输入：函数（CALLABLE）、可迭代对象（ITERABLE）。");
 
     const nextBlock = workspace.newBlock("python_builtin_next");
-    expect(getPythonRequiredInputWarning(nextBlock)).toBe("缺少必填输入：迭代器。");
+    expect(getPythonRequiredInputWarning(nextBlock)).toBe("缺少必填输入：迭代器（ITERATOR）。");
     const iterator = workspace.newBlock("python_raw_expression");
     nextBlock.getInput("ITERATOR")!.connection!.connect(iterator.outputConnection!);
     expect(getPythonRequiredInputWarning(nextBlock)).toBeNull();
 
     const jsonDumps = workspace.newBlock("python_json_dumps");
-    expect(getPythonRequiredInputWarning(jsonDumps)).toBe("缺少必填输入：待转换值。");
+    expect(getPythonRequiredInputWarning(jsonDumps)).toBe("缺少必填输入：待转换值（VALUE）。");
     const jsonValue = workspace.newBlock("python_raw_expression");
     jsonDumps.getInput("VALUE")!.connection!.connect(jsonValue.outputConnection!);
     expect(getPythonRequiredInputWarning(jsonDumps)).toBeNull();
@@ -1459,11 +1532,11 @@ describe("Python block generators", () => {
     const timeDelta = workspace.newBlock("python_datetime_timedelta");
     expect(getPythonRequiredInputWarning(timeDelta)).toBeNull();
     const timeSleep = workspace.newBlock("python_time_sleep");
-    expect(getPythonRequiredInputWarning(timeSleep)).toBe("缺少必填输入：等待秒数。");
+    expect(getPythonRequiredInputWarning(timeSleep)).toBe("缺少必填输入：等待秒数（SECONDS）。");
     const listDirectory = workspace.newBlock("python_os_listdir");
     expect(getPythonRequiredInputWarning(listDirectory)).toBeNull();
     const readPath = workspace.newBlock("python_path_read_text");
-    expect(getPythonRequiredInputWarning(readPath)).toBe("缺少必填输入：路径。");
+    expect(getPythonRequiredInputWarning(readPath)).toBe("缺少必填输入：路径（PATH）。");
     const pathValue = workspace.newBlock("python_raw_expression");
     readPath.getInput("PATH")!.connection!.connect(pathValue.outputConnection!);
     expect(getPythonRequiredInputWarning(readPath)).toBeNull();
@@ -1471,7 +1544,7 @@ describe("Python block generators", () => {
     const counter = workspace.newBlock("python_collections_counter");
     expect(getPythonRequiredInputWarning(counter)).toBeNull();
     const regexSearch = workspace.newBlock("python_re_search");
-    expect(getPythonRequiredInputWarning(regexSearch)).toBe("缺少必填输入：正则模式、待匹配文本。");
+    expect(getPythonRequiredInputWarning(regexSearch)).toBe("缺少必填输入：正则模式（PATTERN）、待匹配文本（TEXT）。");
     const pattern = workspace.newBlock("text");
     const matchedText = workspace.newBlock("text");
     regexSearch.getInput("PATTERN")!.connection!.connect(pattern.outputConnection!);

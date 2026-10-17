@@ -11,6 +11,9 @@ import { parseVoiceoverMarker } from "./voiceoverMarkers";
 import { parseLocalAudioMarker } from "./localAudioMarkers";
 import { customColorExpression, customColorHex, FieldManimColor, hexToHsv, hsvToHex, parseRecentColours } from "./colorField";
 import { manimAgentTools } from "./agentTools";
+import { parseBlockPlan } from "../../../agentV2/blockPlan";
+import { compileBlockPlan, type BlockPlanCompilerServices } from "../../../agentV2/blockPlanCompiler";
+import type { BlockTemplate } from "../../../agentV2/blocklyHost";
 
 const number = (value: number) => ({ block: { type: "math_number", fields: { NUM: value } } });
 const text = (value: string) => ({ block: { type: "text", fields: { TEXT: value } } });
@@ -34,6 +37,30 @@ const activateManimPlugin = async (): Promise<PluginRegistry | null> => {
   if (record?.state !== "active") throw new Error(record?.error || "Manim plugin activation failed");
   activeRegistry = registry;
   return registry;
+};
+
+const buildManimPlanServices = (workspace: Blockly.Workspace, onCommit: (state: object) => void): BlockPlanCompilerServices => {
+  const registered: Array<{ contents: Array<Record<string, any>> }> = [];
+  registerManimToolbox({ registerToolboxCategory: (category: any) => registered.push(category) } as any);
+  const templates = new Map<string, BlockTemplate>(collectToolboxBlocks(registered[0].contents).map((state) => [String(state.type), {
+    type: String(state.type),
+    label: String(state.type),
+    category: "",
+    state: state as Record<string, unknown>,
+    inputSlots: [],
+  }]));
+  return {
+    workspace,
+    getBlockTemplates: (types) => types.flatMap((type) => {
+      const template = templates.get(type);
+      return template ? [template] : [];
+    }),
+    generateCode: (target) => generatePython(Blockly.serialization.workspaces.save(target) as any),
+    validateContexts: (target) => validatePythonBlockContexts(target),
+    validateCode: async () => {},
+    commit: (state) => onCommit(state),
+    entryBlockTypes: [String(manimPlugin.manifest.agent?.codegen?.entryBlock ?? "visual_python_manim_scene")],
+  };
 };
 
 describe("Manim plugin generators", () => {
@@ -424,8 +451,60 @@ describe("Manim plugin generators", () => {
 
     expect(validatePythonBlockContexts(workspace)).toContainEqual({
       blockId: expect.any(String),
-      message: "此积木只能放在 Manim 场景内部。",
+      message: "此积木只能放在 Manim 场景内部（请把它放进场景积木的 BODY 语句输入）。",
     });
+    workspace.dispose();
+  });
+
+  it("places an appended statement inside the existing scene body through the plan compiler", async () => {
+    await activateManimPlugin();
+    const workspace = new Blockly.Workspace();
+    const scene = workspace.newBlock("visual_python_manim_scene");
+    let committed: Record<string, unknown> | null = null;
+    const services = buildManimPlanServices(workspace, (state) => { committed = state as Record<string, unknown>; });
+    const result = await compileBlockPlan(parseBlockPlan({
+      version: 1,
+      mode: "append",
+      operations: [{ action: "create", ref: "wait", block: "visual_python_manim_wait" }],
+    }), services, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: true, autoChained: 1, refIds: { wait: expect.any(String) } });
+    const checkWorkspace = new Blockly.Workspace();
+    Blockly.serialization.workspaces.load(committed!, checkWorkspace);
+    const body = checkWorkspace.getBlockById(scene.id)?.getInput("BODY")?.connection?.targetBlock();
+    expect(body?.type).toBe("visual_python_manim_wait");
+    expect(body?.id).toBe((result.refIds as Record<string, string>).wait);
+    expect(checkWorkspace.getTopBlocks(false)).toHaveLength(1);
+    expect(validatePythonBlockContexts(checkWorkspace)).toEqual([]);
+    checkWorkspace.dispose();
+    workspace.dispose();
+  });
+
+  it("nests statements created together with a new scene through the plan compiler", async () => {
+    await activateManimPlugin();
+    const workspace = new Blockly.Workspace();
+    let committed: Record<string, unknown> | null = null;
+    const services = buildManimPlanServices(workspace, (state) => { committed = state as Record<string, unknown>; });
+    const result = await compileBlockPlan(parseBlockPlan({
+      version: 1,
+      mode: "replace",
+      operations: [
+        { action: "create", ref: "scene", block: "visual_python_manim_scene" },
+        { action: "create", ref: "wait", block: "visual_python_manim_wait" },
+      ],
+    }), services, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: true, autoChained: 1, refIds: { scene: expect.any(String), wait: expect.any(String) } });
+    const checkWorkspace = new Blockly.Workspace();
+    Blockly.serialization.workspaces.load(committed!, checkWorkspace);
+    const refIds = result.refIds as Record<string, string>;
+    const checkScene = checkWorkspace.getBlockById(refIds.scene!);
+    let last = checkScene?.getInput("BODY")?.connection?.targetBlock() ?? null;
+    while (last?.getNextBlock()) last = last.getNextBlock();
+    expect(last?.id).toBe(refIds.wait);
+    expect(checkWorkspace.getTopBlocks(false)).toHaveLength(1);
+    expect(validatePythonBlockContexts(checkWorkspace)).toEqual([]);
+    checkWorkspace.dispose();
     workspace.dispose();
   });
 
@@ -456,7 +535,7 @@ describe("Manim plugin generators", () => {
 
     expect(validatePythonBlockContexts(workspace)).toContainEqual({
       blockId: expect.any(String),
-      message: "场景中没有名为“obj”的已创建对象。",
+      message: "场景中没有名为“obj”的已创建对象。请先用创建对象积木命名对象，再引用它。",
     });
     workspace.dispose();
   });

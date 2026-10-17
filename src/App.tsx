@@ -22,7 +22,7 @@ import { runAgentWithProtocolFallback } from "./codexAgentRunner";
 import type { AiAgentPermissionMode, AiReasoningEffort } from "./aiConfig";
 import { createAiConversationScope } from "./aiConversationContext";
 import { inspectVoiceovers } from "./aiVoiceover";
-import { defaultVisualThemeId, findWorkspaceBlockCodeRange, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateAllDeferredInputs, hydrateDeferredInputs, installDeferredHydration, isHydratingWorkspace, loadWorkspaceFast, registerUsedVariablesToolbox, saveWorkspaceState, starterState, toolbox, visualPythonThemes, type VisualThemeId } from "./pythonBlocks";
+import { defaultVisualThemeId, findWorkspaceBlockCodeRange, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateAllDeferredInputs, hydrateDeferredInputs, installDeferredHydration, isHydratingWorkspace, loadWorkspaceFast, pushWorkspaceUndoSnapshot, registerUsedVariablesToolbox, saveWorkspaceState, starterState, toolbox, visualPythonThemes, type VisualThemeId } from "./pythonBlocks";
 import { validatePythonBlockContexts } from "./pythonSyntaxBlocks";
 import { diagnosePythonError } from "./pythonDiagnostics";
 import { findPythonCallContext, findPythonIdentifierOccurrences, getPythonCompletions, getPythonOutline, getPythonSignatures, isPythonCompletionContext, isValidPythonIdentifier, type PythonCompletionKind, type PythonOutlineItem } from "./pythonCompletions";
@@ -5448,13 +5448,19 @@ export default function App() {
             commit: (state, generatedCode) => {
               const ws = workspace.current;
               if (!ws) throw new Error("图形化工作区尚未就绪");
+              const undoBeforeState = saveWorkspaceState(ws);
               Blockly.Events.disable();
-              try { loadWorkspaceFast(ws, state); ws.clearUndo(); } finally { Blockly.Events.enable(); }
+              try {
+                loadWorkspaceFast(ws, state);
+                pushWorkspaceUndoSnapshot(ws, undoBeforeState, saveWorkspaceState(ws));
+              } finally { Blockly.Events.enable(); }
               setCode(generatedCode);
               setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws)));
               setDirty(true);
               setWorkspaceRevision((revision) => revision + 1);
             },
+            entryBlockTypes: getActiveAgentCapabilities()
+              .flatMap((capability) => capability.codegen?.entryBlock ? [capability.codegen.entryBlock] : []),
           }),
           blocklyToolNames: allBlocklyToolNames,
           executePluginTool: (name, args, toolSignal, executeCapability) => pluginRegistry.executeAgentTool(name, args, (pluginId) => ({

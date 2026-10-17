@@ -19,6 +19,18 @@ const curated: Record<string, PluginBlockAgentMetadata> = {
     recommendedFor: ["整体动画", "动画视频"],
     relatedBlocks: ["visual_python_manim_play", "visual_python_manim_wait"],
   },
+  visual_python_manim_assign: {
+    purpose: "创建并命名对象：把对象保存为指定名称，后续动画、引用、追踪都通过这个名字使用它",
+    aliases: ["命名对象", "创建并命名", "保存对象", "赋值"],
+    keywords: ["assign", "命名"],
+    relatedBlocks: ["visual_python_manim_object_ref", "visual_python_manim_assign_add"],
+  },
+  visual_python_manim_object_ref: {
+    purpose: "按名称引用已创建的对象；引用前必须先用“创建并命名对象”积木命名，名字必须与命名积木完全一致",
+    aliases: ["对象引用", "引用对象", "引用"],
+    keywords: ["reference", "已有对象"],
+    relatedBlocks: ["visual_python_manim_assign"],
+  },
   visual_python_manim_play: {
     purpose: "播放一段动画：执行一个动画效果（出现、移动、变形、强调等）",
     aliases: ["播放", "运行动画", "执行动画"],

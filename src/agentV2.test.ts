@@ -81,6 +81,10 @@ describe("Visual Python Agent Core", () => {
     expect(graphicalRules.match(/get_block_templates/g)).toHaveLength(1);
     expect(graphicalRules).toContain("唯一的图形化写入工具是 apply_block_plan");
     expect(graphicalRules).not.toMatch(/compose_workspace|append_workspace_blocks|add_workspace_block|apply_workspace|replace_workspace/);
+    // The graphical protocol lives in the mode-specific section only; keep the general rules free of duplicates.
+    const generalRules = visualSystem.slice(0, visualSystem.indexOf("图形化工作区规则"));
+    expect(generalRules).not.toContain("apply_block_plan");
+    expect(visualSystem).not.toContain("Structured plugin workflow");
     expect(getBlockCatalog).toHaveBeenCalledOnce();
 
     mocks.streamAiChat.mockReset();

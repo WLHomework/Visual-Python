@@ -62,6 +62,7 @@ export type BlockPlanIssueCode =
   | "INVALID_TARGET"
   | "UNKNOWN_BLOCK"
   | "CONNECTION_MISMATCH"
+  | "REPLACE_NOT_ALLOWED"
   | "CONTEXT_VALIDATION_FAILED"
   | "CODE_VALIDATION_FAILED"
   | "ABORTED";
@@ -182,11 +183,15 @@ function parseOperation(value: unknown, operationIndex: number): BlockPlanOperat
 export function parseBlockPlan(value: unknown): BlockPlan {
   rejectRawState(value);
   if (!record(value)) issue("INVALID_PLAN", "BlockPlan 必须是对象");
-  const keys = Object.keys(value);
-  if (keys.some((key) => !["version", "mode", "operations"].includes(key))) issue("INVALID_PLAN", "BlockPlan 包含未知字段");
-  if (value.version !== 1) issue("INVALID_PLAN", "BlockPlan.version 必须为 1");
-  if (value.mode !== "append" && value.mode !== "replace" && value.mode !== "patch") issue("INVALID_PLAN", "BlockPlan.mode 必须为 append、replace 或 patch");
-  if (!Array.isArray(value.operations) || value.operations.length === 0) issue("INVALID_PLAN", "BlockPlan.operations 不能为空");
+  if (value.version !== undefined && value.version !== 1 && value.version !== "1") {
+    issue("INVALID_PLAN", `BlockPlan.version 必须为 1（当前收到：${JSON.stringify(value.version)}）`);
+  }
+  const rawMode = value.mode === undefined ? "append" : value.mode;
+  if (rawMode !== "append" && rawMode !== "replace" && rawMode !== "patch") {
+    issue("INVALID_PLAN", `BlockPlan.mode 必须是 append、replace 或 patch（当前收到：${JSON.stringify(value.mode)}）`);
+  }
+  const mode: BlockPlan["mode"] = rawMode;
+  if (!Array.isArray(value.operations) || value.operations.length === 0) issue("INVALID_PLAN", "BlockPlan.operations 不能为空（顶层只接受 version、mode、operations 三个字段）");
   if (value.operations.length > 200) issue("INVALID_PLAN", "BlockPlan.operations 不能超过 200 个操作");
   const operations = value.operations.map((operation, index) => parseOperation(operation, index));
   const refs = new Set<string>();
@@ -203,7 +208,7 @@ export function parseBlockPlan(value: unknown): BlockPlan {
       if (ref && !refs.has(ref)) issue("UNKNOWN_REF", `未知的积木 ref：${ref}`, operationIndex, { ref });
     }
   }
-  return { version: 1, mode: value.mode, operations };
+  return { version: 1, mode, operations };
 }
 
 function inputRefs(inputs: Record<string, BlockPlanInput> | undefined): string[] {

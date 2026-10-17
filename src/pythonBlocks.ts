@@ -1854,9 +1854,10 @@ export function generateWorkspacePython(workspace: Blockly.Workspace): string {
   return withRestoredWorkspace(workspace, (current) => stripGeneratedVariableDeclarations(pythonGenerator.workspaceToCode(current)));
 }
 
-export function loadWorkspaceFast(workspace: Blockly.Workspace, state: object, options?: { collapseIfBlocks?: number }) {
+export function loadWorkspaceFast(workspace: Blockly.Workspace, state: object, options?: { collapseIfBlocks?: number; keepEvents?: boolean }) {
   const eventsWereEnabled = typeof Blockly.Events.isEnabled === "function" ? Blockly.Events.isEnabled() : true;
-  Blockly.Events.disable();
+  const keepEvents = Boolean(options?.keepEvents) && eventsWereEnabled;
+  if (!keepEvents) Blockly.Events.disable();
   const svgWorkspace = workspace as Blockly.WorkspaceSvg;
   const canToggleResize = typeof svgWorkspace.setResizesEnabled === "function";
   try {
@@ -1869,8 +1870,53 @@ export function loadWorkspaceFast(workspace: Blockly.Workspace, state: object, o
     if (workspace.getAllBlocks(false).length >= collapseAt) collapseHeavyStatementBlocks(workspace);
   } finally {
     if (canToggleResize) svgWorkspace.setResizesEnabled(true);
-    if (eventsWereEnabled) Blockly.Events.enable();
+    if (!keepEvents && eventsWereEnabled) Blockly.Events.enable();
   }
+}
+
+/**
+ * One undo-stack entry that swaps the workspace between two saved states.
+ * Bulk commits replace most block instances, so replaying their individual
+ * create/delete events would take many undo steps; a single snapshot keeps
+ * "one Ctrl+Z per commit" while still restoring the exact previous state.
+ */
+class WorkspaceUndoSnapshotEvent extends Blockly.Events.Abstract {
+  isBlank = false;
+  type = "workspace_undo_snapshot";
+  private readonly snapshotWorkspace: Blockly.Workspace;
+  private readonly beforeState: object;
+  private readonly afterState: object;
+
+  constructor(workspace: Blockly.Workspace, beforeState: object, afterState: object) {
+    super();
+    this.snapshotWorkspace = workspace;
+    this.workspaceId = workspace.id;
+    this.beforeState = beforeState;
+    this.afterState = afterState;
+    // A snapshot must never merge into a neighbouring event group.
+    this.group = "";
+  }
+
+  override run(forward: boolean) {
+    // Keep events enabled so change listeners refresh generated code and UI state,
+    // while Blockly's undo() marks the events fired here as non-recordable.
+    loadWorkspaceFast(this.snapshotWorkspace, forward ? this.afterState : this.beforeState, { keepEvents: true });
+  }
+}
+
+/**
+ * Records an undoable commit without notifying change listeners: the caller
+ * already refreshes code, problems and dirty state itself, and listener work
+ * (for example the variable prune) would otherwise add follow-up undo entries
+ * on top of the snapshot.
+ */
+export function pushWorkspaceUndoSnapshot(workspace: Blockly.Workspace, beforeState: object, afterState: object) {
+  const event = new WorkspaceUndoSnapshotEvent(workspace, beforeState, afterState);
+  event.recordUndo = true;
+  const undoStack = workspace.getUndoStack();
+  undoStack.push(event);
+  while (undoStack.length > workspace.MAX_UNDO && workspace.MAX_UNDO >= 0) undoStack.shift();
+  workspace.getRedoStack().length = 0;
 }
 
 export type GeneratedBlockMap = { code: string; blockIdByLine: Map<number, string> };

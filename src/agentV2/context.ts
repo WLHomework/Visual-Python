@@ -332,6 +332,7 @@ export function compactAgentToolResult(_toolName: string, result: Record<string,
         ["changed", result.changed],
         ["blockCount", result.blockCount],
         ["changedBlockIds", result.changedBlockIds],
+        ["refIds", result.refIds],
         ["issues", result.issues],
         ["contracts", result.contracts],
       ].filter(([, value]) => value !== undefined));

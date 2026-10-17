@@ -11,6 +11,7 @@ export type BlockPlanCompilerServices = {
   validateContexts(workspace: Blockly.Workspace): ContextIssue[];
   validateCode(code: string): Promise<void>;
   commit(state: object, code: string): void;
+  entryBlockTypes?: string[];
 };
 
 export type BlockPlanCompilation = {
@@ -22,6 +23,7 @@ export type BlockPlanCompilation = {
   code?: string;
   issues?: BlockPlanIssue[];
   changedBlockIds?: string[];
+  refIds?: Record<string, string>;
 };
 
 class PlanCompileError extends Error {
@@ -99,18 +101,58 @@ function literal(workspace: Blockly.Workspace, value: string | number | boolean,
   }
 }
 
-function setFields(block: Blockly.Block, fields: Record<string, string | number | boolean> | undefined, operationIndex: number) {
+type DeferredField = { block: Blockly.Block; field: Blockly.Field; fieldName: string; value: string; operationIndex: number };
+
+function dropdownRefresher(field: Blockly.Field): ((useCache?: boolean) => Array<[string, string]>) | null {
+  const getOptions = (field as Blockly.Field & { getOptions?: (useCache?: boolean) => Array<[string, string]> }).getOptions;
+  return typeof getOptions === "function" ? getOptions : null;
+}
+
+function dropdownOptionList(field: Blockly.Field): string | null {
+  const getOptions = dropdownRefresher(field);
+  if (!getOptions) return null;
+  try {
+    const options = getOptions.call(field, false).map(([label, value]) => (label === value ? String(value) : `${label}(${value})`));
+    return options.length ? options.slice(0, 12).join("、") : null;
+  } catch {
+    return null;
+  }
+}
+
+function setFields(block: Blockly.Block, fields: Record<string, string | number | boolean> | undefined, operationIndex: number, deferred: Map<Blockly.Field, DeferredField>) {
   for (const [fieldName, value] of Object.entries(fields ?? {})) {
     const field = block.getField(fieldName);
-    if (!field) issue("INVALID_FIELD", `Block ${block.type} does not contain field ${fieldName}`, operationIndex, { blockType: block.type, fieldName });
+    if (!field) issue("INVALID_FIELD", `积木 ${block.type} 不包含字段 ${fieldName}`, operationIndex, { blockType: block.type, fieldName });
+    const normalized = String(value);
     try {
-      field.setValue(String(value));
+      field.setValue(normalized);
     } catch (error) {
-      issue("INVALID_FIELD", `Invalid value for field ${fieldName}: ${error instanceof Error ? error.message : String(error)}`, operationIndex, { blockType: block.type, fieldName });
+      issue("INVALID_FIELD", `字段 ${fieldName} 的值无效（积木 ${block.type}）：${error instanceof Error ? error.message : String(error)}`, operationIndex, { blockType: block.type, fieldName });
     }
-    if (String(field.getValue()) !== String(value)) {
-      issue("INVALID_FIELD", `Field ${fieldName} rejected value ${String(value)}`, operationIndex, { blockType: block.type, fieldName });
+    if (String(field.getValue()) === normalized) {
+      deferred.delete(field);
+      continue;
     }
+    // Dynamic dropdowns (for example Manim object references) only offer values whose
+    // dependencies are already connected elsewhere in the workspace. Retry after every
+    // operation connected its inputs instead of failing the whole plan on ordering.
+    deferred.set(field, { block, field, fieldName, value: normalized, operationIndex });
+  }
+}
+
+function flushDeferredFields(deferred: Map<Blockly.Field, DeferredField>) {
+  for (const entry of deferred.values()) {
+    if ((entry.block as { workspace?: Blockly.Workspace | null }).workspace == null) continue;
+    try { dropdownRefresher(entry.field)?.call(entry.field, false); } catch { /* keep the previous options */ }
+    try { entry.field.setValue(entry.value); } catch { /* reported below */ }
+    if (String(entry.field.getValue()) === entry.value) continue;
+    const options = dropdownOptionList(entry.field);
+    issue(
+      "INVALID_FIELD",
+      `字段 ${entry.fieldName} 拒绝值“${entry.value}”（积木 ${entry.block.type}）${options ? `；当前可选值：${options}` : ""}。请让该值来自工作区当前可用的选项，或先创建它依赖的积木再设置。`,
+      entry.operationIndex,
+      { blockType: entry.block.type, fieldName: entry.fieldName },
+    );
   }
 }
 
@@ -235,6 +277,19 @@ function statementInput(block: Blockly.Block): Blockly.Input | null {
   return statementInputs.length === 1 ? statementInputs[0]! : null;
 }
 
+function statementFreeConnection(block: Blockly.Block): Blockly.Connection | null {
+  const input = statementInput(block);
+  if (!input?.connection) return null;
+  if (!input.connection.isConnected()) return input.connection;
+  const tail = statementTail(input.connection.targetBlock());
+  return tail?.nextConnection && !tail.nextConnection.isConnected() ? tail.nextConnection : null;
+}
+
+function isStatementEntry(block: Blockly.Block, entryTypes: ReadonlySet<string>): boolean {
+  if (!statementInput(block)) return false;
+  return entryTypes.has(block.type) || (!block.previousConnection && !block.nextConnection);
+}
+
 function connectStatementPair(parent: Blockly.Block, child: Blockly.Block): boolean {
   const parentConnection = parent.nextConnection;
   const childConnection = child.previousConnection;
@@ -244,53 +299,47 @@ function connectStatementPair(parent: Blockly.Block, child: Blockly.Block): bool
   return true;
 }
 
-function existingStatementTailConnection(workspace: Blockly.Workspace, createdIds: Set<string>): Blockly.Connection | null {
+function existingStatementTailConnection(workspace: Blockly.Workspace, createdIds: Set<string>, entryTypes: ReadonlySet<string>): Blockly.Connection | null {
   const existingTopBlocks = workspace.getTopBlocks(false).filter((block) => !createdIds.has(block.id));
+  const declaredEntries = existingTopBlocks.filter((block) => entryTypes.has(block.type) && Boolean(statementInput(block)));
+  if (declaredEntries.length === 1) return statementFreeConnection(declaredEntries[0]!);
+  if (declaredEntries.length > 1) return null;
   const chainRoots = existingTopBlocks.filter((block) => Boolean(block.previousConnection));
   if (chainRoots.length === 1) {
     const tail = statementTail(chainRoots[0]!);
     return tail?.nextConnection && !tail.nextConnection.isConnected() ? tail.nextConnection : null;
   }
-  const entries = existingTopBlocks.filter((block) => !block.previousConnection && !block.nextConnection && statementInput(block));
+  const entries = existingTopBlocks.filter((block) => !block.previousConnection && !block.nextConnection && Boolean(statementInput(block)));
   if (entries.length !== 1) return null;
-  const input = statementInput(entries[0]!);
-  if (!input?.connection) return null;
-  const tail = statementTail(input.connection.targetBlock());
-  if (tail?.nextConnection && !tail.nextConnection.isConnected()) return tail.nextConnection;
-  return tail ? null : input.connection;
+  return statementFreeConnection(entries[0]!);
 }
 
 function autoChainCreatedStatements(
   plan: BlockPlan,
   workspace: Blockly.Workspace,
   created: Array<{ block: Blockly.Block; operationIndex: number }>,
+  entryTypes: ReadonlySet<string>,
 ): number {
   const createdIds = new Set(created.map(({ block }) => block.id));
   const roots = created
-    .filter(({ block }) => Boolean(block.previousConnection) && !block.getParent())
+    .filter(({ block }) => Boolean(block.previousConnection) && !block.getParent() && !isStatementEntry(block, entryTypes))
     .map(({ block }) => block);
   let autoChained = 0;
   for (let index = 1; index < roots.length; index += 1) {
     const previousTail = statementTail(roots[index - 1]!);
     if (previousTail && connectStatementPair(previousTail, roots[index]!)) autoChained += 1;
   }
-  const createdEntries = workspace.getTopBlocks(false).filter((block) => {
-    return createdIds.has(block.id)
-      && !block.previousConnection
-      && !block.nextConnection
-      && Boolean(statementInput(block));
-  });
+  const createdEntries = workspace.getTopBlocks(false).filter((block) => createdIds.has(block.id) && isStatementEntry(block, entryTypes));
   const firstCreatedRoot = roots.find((block) => !block.getParent()) || null;
   if (createdEntries.length === 1 && firstCreatedRoot?.previousConnection && !firstCreatedRoot.previousConnection.isConnected()) {
-    const input = statementInput(createdEntries[0]!);
-    if (input?.connection && !input.connection.isConnected()
-      && workspace.connectionChecker.canConnect(input.connection, firstCreatedRoot.previousConnection, false)) {
-      input.connection.connect(firstCreatedRoot.previousConnection);
+    const free = statementFreeConnection(createdEntries[0]!);
+    if (free && workspace.connectionChecker.canConnect(free, firstCreatedRoot.previousConnection, false)) {
+      free.connect(firstCreatedRoot.previousConnection);
       autoChained += 1;
     }
   }
   if (roots.length > 0 && (plan.mode === "append" || plan.mode === "patch") && !firstCreatedRoot?.getParent()) {
-    const existingConnection = existingStatementTailConnection(workspace, createdIds);
+    const existingConnection = existingStatementTailConnection(workspace, createdIds, entryTypes);
     const first = firstCreatedRoot || roots[0]!;
     if (existingConnection && first.previousConnection && !first.previousConnection.isConnected() && workspace.connectionChecker.canConnect(existingConnection, first.previousConnection, false)) {
       existingConnection.connect(first.previousConnection);
@@ -300,9 +349,10 @@ function autoChainCreatedStatements(
   return autoChained;
 }
 
-function applyOperations(plan: BlockPlan, candidate: Blockly.Workspace, templates: Map<string, BlockTemplate>) {
+function applyOperations(plan: BlockPlan, candidate: Blockly.Workspace, templates: Map<string, BlockTemplate>, entryTypes: ReadonlySet<string>) {
   const refs = new Map<string, Blockly.Block>();
   const created: Array<{ block: Blockly.Block; operationIndex: number }> = [];
+  const deferredFields = new Map<Blockly.Field, DeferredField>();
   const createOperations = plan.operations.filter((operation): operation is Extract<BlockPlanOperation, { action: "create" }> => operation.action === "create");
   for (const operation of createOperations) {
     const operationIndex = plan.operations.indexOf(operation);
@@ -318,7 +368,7 @@ function applyOperations(plan: BlockPlan, candidate: Blockly.Workspace, template
     if (block.type !== operation.block) issue("UNKNOWN_BLOCK", `Template type mismatch for ${operation.block}`, operationIndex, { blockType: operation.block, ref: operation.ref });
     refs.set(operation.ref, block);
     created.push({ block, operationIndex });
-    setFields(block, operation.fields, operationIndex);
+    setFields(block, operation.fields, operationIndex, deferredFields);
   }
   for (const [operationIndex, operation] of plan.operations.entries()) {
     if (operation.action === "create") {
@@ -326,7 +376,7 @@ function applyOperations(plan: BlockPlan, candidate: Blockly.Workspace, template
       setInputs(block, operation.inputs, refs, candidate, operationIndex);
     } else if (operation.action === "update") {
       const block = targetBlock(operation.target, refs, candidate, operationIndex);
-      setFields(block, operation.fields, operationIndex);
+      setFields(block, operation.fields, operationIndex, deferredFields);
       setInputs(block, operation.inputs, refs, candidate, operationIndex);
     } else if (operation.action === "delete") {
       applyTargetDelete(operation.target, refs, candidate, operationIndex);
@@ -334,30 +384,47 @@ function applyOperations(plan: BlockPlan, candidate: Blockly.Workspace, template
       applyConnect(operation, refs, candidate, operationIndex);
     }
   }
-  return { refs, autoChained: autoChainCreatedStatements(plan, candidate, created) };
+  flushDeferredFields(deferredFields);
+  return { refs, autoChained: autoChainCreatedStatements(plan, candidate, created, entryTypes) };
 }
 
 export async function compileBlockPlan(plan: BlockPlan, services: BlockPlanCompilerServices, signal: AbortSignal): Promise<BlockPlanCompilation> {
   if (signal.aborted) return { ok: false, changed: false, issues: [{ code: "ABORTED", message: "Agent task stopped" }] };
+  const entryTypes = new Set(services.entryBlockTypes ?? []);
+  const existingBlocks = services.workspace.getAllBlocks(false).filter((block) => !block.isShadow?.());
+  if (plan.mode === "replace" && existingBlocks.length > 0) {
+    return {
+      ok: false,
+      changed: false,
+      issues: [{
+        code: "REPLACE_NOT_ALLOWED",
+        message: `工作区已有 ${existingBlocks.length} 个积木，replace 只允许在空工作区使用，失败不会改动工作区。请改用 append/patch，只提交需要新增或修正的操作；确需整体重建时，请在同一计划里先用 delete 删除根积木（如场景），再重新创建。`,
+      }],
+    };
+  }
   const before = stateOf(services.workspace);
   const candidate = new Blockly.Workspace();
   try {
     if (plan.mode !== "replace") Blockly.serialization.workspaces.load(structuredClone(before), candidate);
     const types = [...new Set(plan.operations.filter((operation): operation is Extract<BlockPlanOperation, { action: "create" }> => operation.action === "create").map((operation) => operation.block))];
     const templates = new Map(services.getBlockTemplates(types).map((template) => [template.type, template]));
-    const { refs, autoChained } = applyOperations(plan, candidate, templates);
+    const { refs, autoChained } = applyOperations(plan, candidate, templates, entryTypes);
     if (signal.aborted) return { ok: false, changed: false, issues: [{ code: "ABORTED", message: "Agent task stopped" }] };
     const contextIssues = services.validateContexts(candidate);
     if (contextIssues.length) {
+      const refByBlockId = new Map([...refs.entries()].map(([ref, block]) => [block.id, ref]));
       return {
         ok: false,
         changed: false,
-        issues: contextIssues.map((entry) => ({
-          code: "CONTEXT_VALIDATION_FAILED",
-          message: entry.message,
-          ...(entry.blockId ? { ref: entry.blockId } : {}),
-          ...(entry.blockType || entry.blockId ? { blockType: entry.blockType || (entry.blockId ? candidate.getBlockById(entry.blockId)?.type : undefined) } : {}),
-        })),
+        issues: contextIssues.map((entry) => {
+          const planRef = entry.blockId ? refByBlockId.get(entry.blockId) : undefined;
+          return {
+            code: "CONTEXT_VALIDATION_FAILED",
+            message: entry.message,
+            ...(planRef || entry.blockId ? { ref: planRef ?? entry.blockId } : {}),
+            ...(entry.blockType || entry.blockId ? { blockType: entry.blockType || (entry.blockId ? candidate.getBlockById(entry.blockId)?.type : undefined) } : {}),
+          };
+        }),
       };
     }
     const code = services.generateCode(candidate);
@@ -370,7 +437,16 @@ export async function compileBlockPlan(plan: BlockPlan, services: BlockPlanCompi
     const after = stateOf(candidate);
     const changed = JSON.stringify(before) !== JSON.stringify(after);
     if (changed) services.commit(after, code);
-    return { ok: true, changed, autoChained, blockCount: candidate.getAllBlocks(false).length, state: after, code, changedBlockIds: [...refs.values()].map((block) => block.id) };
+    return {
+      ok: true,
+      changed,
+      autoChained,
+      blockCount: candidate.getAllBlocks(false).length,
+      state: after,
+      code,
+      changedBlockIds: [...refs.values()].map((block) => block.id),
+      refIds: Object.fromEntries([...refs.entries()].map(([ref, block]) => [ref, block.id])),
+    };
   } catch (error) {
     if (error instanceof PlanCompileError) return { ok: false, changed: false, issues: [error.issue] };
     return { ok: false, changed: false, issues: [{ code: "INVALID_OPERATION", message: error instanceof Error ? error.message : String(error) }] };

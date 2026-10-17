@@ -277,13 +277,14 @@ describe("Agent context compression", () => {
       ok: true,
       changed: true,
       changedBlockIds: ["block-2"],
+      refIds: { scene: "block-2" },
       blockCount: 2,
       code: "x".repeat(20_000),
       state: { blocks: { blocks: ["x".repeat(20_000)] } },
       issues: [],
     });
 
-    expect(JSON.parse(result)).toMatchObject({ ok: true, changed: true, blockCount: 2, changedBlockIds: ["block-2"], issues: [] });
+    expect(JSON.parse(result)).toMatchObject({ ok: true, changed: true, blockCount: 2, changedBlockIds: ["block-2"], refIds: { scene: "block-2" }, issues: [] });
     expect(result).not.toContain('"state"');
     expect(result).not.toContain('"code"');
     expect(result).not.toContain("x".repeat(500));
