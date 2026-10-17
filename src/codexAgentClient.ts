@@ -37,9 +37,17 @@ export type CodexRunTurnOptions = {
   conversationTargetId?: string;
   fallbackPrompt?: string;
   signal?: AbortSignal;
+  images?: Array<{ url: string; detail?: "low" | "auto" | "high" }>;
   onEvent?: (event: AgentModelEvent) => void;
   onServerRequest?: (request: CodexServerRequest) => Promise<void>;
 };
+
+export function buildCodexTurnInput(prompt: string, images: CodexRunTurnOptions["images"] = []) {
+  return [
+    { type: "text" as const, text: prompt, textElements: [] },
+    ...images.map((image) => ({ type: "image" as const, url: image.url, detail: image.detail || "auto" as const })),
+  ];
+}
 
 export type CodexTurnResult = {
   threadId: string;
@@ -233,7 +241,7 @@ export class CodexAgentClient {
     }
     const turnResponse = await this.request<{ turn: { id: string; status?: string } }>("turn/start", {
       threadId,
-      input: [{ type: "text", text: storedThreadId && !resumed ? options.fallbackPrompt || prompt : prompt, textElements: [] }],
+      input: buildCodexTurnInput(storedThreadId && !resumed ? options.fallbackPrompt || prompt : prompt, options.images),
       model: options.config.model,
       effort: options.effort || null,
     });

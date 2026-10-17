@@ -57,4 +57,27 @@ describe("AI conversation context", () => {
     expect(history).toHaveLength(1);
     expect(history[0].assistant).toContain("没有找到场景类");
   });
+
+  it("keeps same-session image payloads but only describes restored images", () => {
+    const sendable = {
+      id: "live",
+      name: "live.png",
+      mimeType: "image/png" as const,
+      width: 100,
+      height: 80,
+      sourceBytes: 20,
+      dataUrl: "data:image/jpeg;base64,private",
+      sendable: true,
+    };
+    const restored = { ...sendable, id: "restored", name: "restored.png", dataUrl: undefined, sendable: false };
+    const history = buildAiConversationHistory([
+      { id: 4, prompt: "修改图片中的布局", status: "done", result: { summary: "完成" }, activities: [{ id: "done", kind: "message", status: "done", title: "完成" }], attachments: [sendable] },
+      { id: 5, prompt: "继续处理", status: "done", result: { summary: "完成" }, activities: [{ id: "done", kind: "message", status: "done", title: "完成" }], attachments: [restored] },
+    ]);
+
+    expect(history[0].attachments?.[0].dataUrl).toBe("data:image/jpeg;base64,private");
+    expect(history[1].attachments).toBeUndefined();
+    expect(history[1].user).toContain("restored.png");
+    expect(JSON.stringify(history[1])).not.toContain("private");
+  });
 });

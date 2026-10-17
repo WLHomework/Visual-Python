@@ -1503,8 +1503,37 @@ button { font: inherit; }
 .ai-agent-user-message {
   min-width: 0;
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px;
   justify-content: flex-end;
   margin-bottom: 10px;
+}
+
+.ai-agent-user-attachments {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ai-agent-user-attachment {
+  display: block;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.ai-agent-user-attachment img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .ai-agent-worklog {
@@ -5499,6 +5528,65 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   background: var(--surface-1);
 }
 
+.ai-composer-input.dragging {
+  border-color: #2f9e8f;
+  background: color-mix(in srgb,#2f9e8f,var(--surface-1) 94%);
+}
+
+.ai-composer-attachments {
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 1px 1px 4px;
+}
+
+.ai-composer-attachment {
+  position: relative;
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.ai-composer-attachment img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.ai-composer-attachment button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0,0,0,.68);
+  color: #fff;
+  cursor: pointer;
+}
+
+.ai-composer-attachment-error {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 3px;
+  color: #d97878;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .ai-composer-input:focus-within {
   border-color: #2f9e8f;
   box-shadow: 0 0 0 2px color-mix(in srgb,#2f9e8f,transparent 82%);
@@ -5697,6 +5785,16 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   background: #2f8f80;
   color: #fff;
   cursor: pointer;
+}
+
+.ai-composer-footer > button.ai-composer-attach {
+  background: transparent;
+  color: var(--muted);
+}
+
+.ai-composer-footer > button.ai-composer-attach:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
 }
 
 .ai-composer-footer > button:hover:not(:disabled) {

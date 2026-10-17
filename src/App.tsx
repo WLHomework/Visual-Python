@@ -21,6 +21,7 @@ import { serializePluginIrFile as serializePluginIr } from "./agentV2/pluginIr";
 import { restoreInstalledPluginFiles, restorePluginAfterFailure } from "./agentV2/pluginRuntime";
 import { runAgentWithProtocolFallback } from "./codexAgentRunner";
 import type { AiAgentPermissionMode, AiReasoningEffort } from "./aiConfig";
+import type { AiImageAttachment } from "./aiImageAttachments";
 import { createAiConversationScope } from "./aiConversationContext";
 import { inspectVoiceovers } from "./aiVoiceover";
 import "./blocklyStyleOverrides";
@@ -5150,6 +5151,7 @@ export default function App() {
 
   const runAiCodeAgentTask = useCallback(async ({
     prompt,
+    attachments,
     history,
     conversationId,
     agentMode,
@@ -5161,6 +5163,7 @@ export default function App() {
     signal,
   }: {
     prompt: string;
+    attachments?: AiImageAttachment[];
     history: AiConversationTurn[];
     conversationId: string;
     agentMode: AiAgentMode;
@@ -5580,6 +5583,7 @@ export default function App() {
         });
       const agentResult = await runAgentWithProtocolFallback({
         prompt,
+        attachments,
         history,
         mode: agentMode,
         reasoningEffort,

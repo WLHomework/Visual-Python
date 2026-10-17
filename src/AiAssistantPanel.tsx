@@ -1,5 +1,5 @@
 import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ArrowDown, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, RefreshCw, SearchCheck, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { AlertCircle, ArrowDown, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, RefreshCw, SearchCheck, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -18,6 +18,7 @@ import "katex/dist/katex.min.css";
 import { createCodeChangePreview } from "./agentV2/codeChanges";
 import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2/types";
 import { getAiAgentPermissionMode, getAiReasoningEffort, saveAiReasoningEffort, type AiAgentPermissionMode, type AiReasoningEffort } from "./aiConfig";
+import { MAX_IMAGE_COUNT, prepareImageFile, restorePersistedImageAttachment, toPersistedImageAttachment, validateImageFiles, type AiImageAttachment, type PersistedAiImageAttachment } from "./aiImageAttachments";
 import { buildAiConversationHistory } from "./aiConversationContext";
 import { CONVERSATION_STORES_PREFIX, conversationStoreKey, conversationStoreTimestamp, isStorageQuotaError } from "./sessionPersistence";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
@@ -39,6 +40,7 @@ const markdownKatexOptions: RehypeKatexOptions = {
 
 type RunAgentArgs = {
   prompt: string;
+  attachments?: AiImageAttachment[];
   history: AiConversationTurn[];
   conversationId: string;
   agentMode: AiAgentMode;
@@ -82,6 +84,8 @@ type AgentRun = {
   startedAt?: number;
   finishedAt?: number;
   permission?: AiAgentPermissionRequest;
+  attachments?: AiImageAttachment[];
+  persistedAttachments?: PersistedAiImageAttachment[];
 };
 
 type AiConversation = {
@@ -105,6 +109,14 @@ type AgentActivityEntry =
 
 type AgentToolCategory = "explore" | "edit" | "verify" | "execute" | "other";
 
+export function mergePendingAiAttachments(current: readonly AiImageAttachment[], incoming: readonly AiImageAttachment[]): AiImageAttachment[] {
+  return [...current, ...incoming].slice(0, MAX_IMAGE_COUNT);
+}
+
+export function canSubmitAiPrompt(prompt: string, attachments: readonly AiImageAttachment[]): boolean {
+  return Boolean(prompt.trim()) || attachments.some((attachment) => attachment.sendable && Boolean(attachment.dataUrl));
+}
+
 const legacyAiHistoryStorageKey = "visual-python:ai-conversation-history";
 const maxStoredRuns = 30;
 const maxStoredConversations = 12;
@@ -112,6 +124,12 @@ const maxStoredHistoryCharacters = 1_500_000;
 const maxContextTurns = 24;
 const maxContextCharacters = 64_000;
 let conversationSequence = 1;
+
+function formatImageAttachmentSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const aiHistoryStorageKey = (scope: string) => `${legacyAiHistoryStorageKey}:${encodeURIComponent(scope)}`;
 const reasoningEffortLabels: Record<AiReasoningEffort, string> = {
@@ -160,11 +178,18 @@ export function parseStoredRuns(value: unknown): AgentRun[] {
       if (typeof step.step !== "string" || (step.status !== "pending" && step.status !== "in_progress" && step.status !== "completed")) return [];
       return [{ step: step.step.slice(0, 120), status: step.status }];
     }).slice(0, 10) : [];
+    const storedAttachments = Array.isArray(run.persistedAttachments)
+      ? run.persistedAttachments
+      : Array.isArray(run.attachments) ? run.attachments : [];
+    const attachments = storedAttachments.flatMap((candidate) => {
+      const restored = restorePersistedImageAttachment(candidate);
+      return restored ? [restored] : [];
+    });
     // 历史数据里可能保留着与最终响应重复的流式回复（例如带 follow-up 元数据），读取时就地自愈。
     const activities = run.result && typeof run.result.summary === "string"
       ? removeFinalMessageActivity(run.activities, run.result.summary)
       : run.activities;
-    return [{ ...run, id: run.id, prompt: run.prompt, mode: run.mode === "plan" ? "plan" : "agent", ...(initialPlan.length ? { initialPlan } : { initialPlan: undefined }), activities, status, finishedAt } as AgentRun];
+    return [{ ...run, id: run.id, prompt: run.prompt, mode: run.mode === "plan" ? "plan" : "agent", ...(initialPlan.length ? { initialPlan } : { initialPlan: undefined }), ...(attachments.length ? { attachments, persistedAttachments: undefined } : { attachments: undefined, persistedAttachments: undefined }), activities, status, finishedAt } as AgentRun];
   });
 }
 
@@ -240,6 +265,8 @@ function serializeConversationState(state: AiConversationState) {
     runs: conversation.runs.slice(-maxStoredRuns).map((run): AgentRun => ({
       ...run,
       ...(run.status === "running" ? { status: "stopped", finishedAt: run.finishedAt ?? Date.now() } : {}),
+      attachments: undefined,
+      ...(run.attachments?.length ? { persistedAttachments: run.attachments.map(toPersistedImageAttachment) } : {}),
       activities: run.activities.map((activity) => ({
         ...activity,
         ...(activity.execution ? {
@@ -258,6 +285,15 @@ function serializeConversationState(state: AiConversationState) {
     conversations = conversations.map(transform);
     serialized = serialize();
   };
+
+  if (serialized.length > maxStoredHistoryCharacters) {
+    update((conversation) => ({
+      ...conversation,
+      runs: conversation.runs.map((run) => run.persistedAttachments?.length
+        ? { ...run, persistedAttachments: run.persistedAttachments.map((attachment) => ({ ...attachment, previewDataUrl: undefined })) }
+        : run),
+    }));
+  }
 
   if (serialized.length > maxStoredHistoryCharacters) {
     update((conversation) => ({
@@ -369,6 +405,9 @@ export function trimAiConversationHistory(turns: AiConversationTurn[]): AiConver
     const turn = {
       user: turns[index].user.slice(0, 4000),
       assistant: turns[index].assistant.slice(0, 4000),
+      ...((turns[index].attachments || []).some((attachment) => attachment.sendable && attachment.dataUrl)
+        ? { attachments: (turns[index].attachments || []).filter((attachment) => attachment.sendable && attachment.dataUrl) }
+        : {}),
       ...(turns[index].clarification ? { clarification: true } : {}),
     };
     const turnCharacters = turn.user.length + turn.assistant.length;
@@ -1301,6 +1340,8 @@ export function settlePermissionResolvers(resolvers: Map<number, (approved: bool
 
 export function AiAssistantPanel({ lineCount, contextName, conversationScope, conversationMigrationScopes = [], workspaceEpoch, onOpenSettings, onClose, onRunAgent, onRevealCodeChange, onRevealProblem, onUndoTaskChange, onApplyTaskChange, onClearConversationConfirm }: AiAssistantPanelProps) {
   const [prompt, setPrompt] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<AiImageAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [agentMode, setAgentMode] = useState<AiAgentMode>("agent");
   const [agentModeMenuOpen, setAgentModeMenuOpen] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<AiReasoningEffort>(() => getAiReasoningEffort());
@@ -1322,6 +1363,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const threadScrollbarThumbRef = useRef<HTMLDivElement>(null);
   const threadScrollbarDragRef = useRef<{ startY: number; startScrollTop: number; maxScrollTop: number; maxThumbTop: number } | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const conversationMenuRef = useRef<HTMLDivElement>(null);
   const agentModeMenuRef = useRef<HTMLDivElement>(null);
   const agentModeTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1331,6 +1373,41 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const stickToLatestRef = useRef(true);
   const running = runs.some((run) => run.status === "running");
   const awaitingClarification = runs.at(-1)?.status === "done" && Boolean(runs.at(-1)?.result?.clarification);
+
+  const addImageFiles = async (files: readonly File[]) => {
+    if (!files.length) return;
+    const validation = validateImageFiles(files, pendingAttachments.length, pendingAttachments.reduce((total, attachment) => total + attachment.sourceBytes, 0));
+    if (!validation.ok) {
+      setAttachmentError(`图片无法添加：${validation.errors.map((error) => error.code).join("、")}`);
+      return;
+    }
+    setAttachmentError(null);
+    try {
+      const prepared = await Promise.all(files.map((file) => prepareImageFile(file)));
+      setPendingAttachments((current) => mergePendingAiAttachments(current, prepared));
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleImageInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files || []);
+    event.currentTarget.value = "";
+    void addImageFiles(files);
+  };
+
+  const handleComposerPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files || []).filter((file) => file.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    void addImageFiles(files);
+  };
+
+  const handleComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const files = Array.from(event.dataTransfer.files || []).filter((file) => file.type.startsWith("image/"));
+    void addImageFiles(files);
+  };
 
   useEffect(() => {
     if (!conversationMigrationScopes.length) return;
@@ -1542,10 +1619,20 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     }));
   };
 
-  const runAgent = async (nextPrompt = prompt, excludedRunId?: number, existingRunId?: number, visiblePrompt = nextPrompt, runMode: AiAgentMode = agentMode, initialPlan: AiAgentPlanStep[] = []): Promise<void> => {
+  const runAgent = async (nextPrompt = prompt, excludedRunId?: number, existingRunId?: number, visiblePrompt = nextPrompt, runMode: AiAgentMode = agentMode, initialPlan: AiAgentPlanStep[] = [], nextAttachments?: AiImageAttachment[]): Promise<void> => {
     const normalizedPrompt = nextPrompt.trim();
-    const normalizedVisiblePrompt = visiblePrompt.trim() || normalizedPrompt;
-    if (!normalizedPrompt || runsRef.current.some((run) => run.status === "running")) return;
+    const existingRun = existingRunId === undefined ? undefined : runsRef.current.find((run) => run.id === existingRunId);
+    const sourceAttachments = nextAttachments ?? (existingRunId === undefined
+      ? pendingAttachments
+      : existingRun?.attachments || pendingAttachments);
+    const hasReplacementAttachments = nextAttachments?.some((attachment) => attachment.sendable && Boolean(attachment.dataUrl));
+    if (existingRunId !== undefined && existingRun?.attachments?.some((attachment) => !attachment.sendable) && !hasReplacementAttachments) {
+      setAttachmentError("该历史消息中的原图已不可发送，请重新添加图片后再重试。");
+      return;
+    }
+    const runAttachments = sourceAttachments.filter((attachment) => attachment.sendable && Boolean(attachment.dataUrl));
+    const normalizedVisiblePrompt = visiblePrompt.trim() || normalizedPrompt || (runAttachments.length ? `图片附件（${runAttachments.length} 张）` : "");
+    if (!canSubmitAiPrompt(normalizedPrompt, runAttachments) || runsRef.current.some((run) => run.status === "running")) return;
     const id = existingRunId ?? runId.current++;
     const controller = new AbortController();
     const history = trimAiConversationHistory(buildAiConversationHistory(
@@ -1566,6 +1653,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       ...(normalizedPrompt !== normalizedVisiblePrompt ? { request: normalizedPrompt } : {}),
       mode: runMode,
       ...(initialPlan.length ? { initialPlan } : {}),
+      ...(runAttachments.length ? { attachments: runAttachments } : {}),
       activities: [],
       status: "running",
       progress: { phase: "preparing", label: "正在准备任务" },
@@ -1575,10 +1663,12 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       ? [...items, nextRun]
       : items.map((run) => run.id === existingRunId ? nextRun : run));
     setPrompt("");
+    setPendingAttachments([]);
     let completedSuccessfully = false;
     try {
       const result = await onRunAgent({
         prompt: normalizedPrompt,
+        attachments: runAttachments,
         history,
         conversationId: conversationState.activeId,
         agentMode: runMode,
@@ -1626,34 +1716,50 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       if (activeController.current === controller) activeController.current = null;
       if (completedSuccessfully) {
         const next = runsRef.current.find((run) => run.status === "queued");
-        if (next) queueMicrotask(() => void runAgent(next.request || next.prompt, undefined, next.id, next.prompt, next.mode, next.initialPlan));
+        if (next) queueMicrotask(() => void runAgent(next.request || next.prompt, undefined, next.id, next.prompt, next.mode, next.initialPlan, next.attachments));
       }
     }
   };
 
-  const enqueuePrompt = (nextPrompt = prompt) => {
+  const enqueuePrompt = (nextPrompt = prompt, nextAttachments = pendingAttachments) => {
     const normalizedPrompt = nextPrompt.trim();
-    if (!normalizedPrompt) return;
+    if (!canSubmitAiPrompt(normalizedPrompt, nextAttachments)) return;
     if (!runsRef.current.some((run) => run.status === "running")) {
-      void runAgent(normalizedPrompt);
+      void runAgent(normalizedPrompt, undefined, undefined, normalizedPrompt, agentMode, [], nextAttachments);
       return;
     }
-    setRuns((items) => [...items, { id: runId.current++, prompt: normalizedPrompt, mode: agentMode, activities: [], status: "queued" }]);
+    setRuns((items) => [...items, { id: runId.current++, prompt: normalizedPrompt || `图片附件（${nextAttachments.length} 张）`, mode: agentMode, activities: [], status: "queued", attachments: nextAttachments }]);
     setPrompt("");
+    setPendingAttachments([]);
   };
 
-  const startQueuedRun = (run: AgentRun) => void runAgent(run.request || run.prompt, undefined, run.id, run.prompt, run.mode, run.initialPlan);
+  const startQueuedRun = (run: AgentRun) => void runAgent(run.request || run.prompt, undefined, run.id, run.prompt, run.mode, run.initialPlan, run.attachments);
+  const attachmentsForFollowUp = (run: AgentRun): AiImageAttachment[] | undefined | null => {
+    if (run.attachments?.some((attachment) => !attachment.sendable)) {
+      if (!pendingAttachments.length) {
+        setAttachmentError("该历史消息中的原图已不可发送，请重新添加图片后再继续。");
+        return null;
+      }
+      return pendingAttachments;
+    }
+    return pendingAttachments.length ? pendingAttachments : run.attachments;
+  };
+  const retryBlocked = (run: AgentRun) => Boolean(run.attachments?.some((attachment) => !attachment.sendable) && !pendingAttachments.some((attachment) => attachment.sendable && attachment.dataUrl));
   const executePlan = (run: AgentRun) => {
     const result = run.result;
     if (running || result?.mode !== "plan" || !result.planPrompt || result.clarification) return;
+    const attachments = attachmentsForFollowUp(run);
+    if (attachments === null) return;
     setAgentMode("agent");
-    void runAgent(buildPlanExecutionRequest(result.planPrompt, result.summary), undefined, undefined, "执行计划", "agent", createInitialTaskPlan(extractPlanSteps(result.summary)));
+    void runAgent(buildPlanExecutionRequest(result.planPrompt, result.summary), undefined, undefined, "执行计划", "agent", createInitialTaskPlan(extractPlanSteps(result.summary)), attachments || undefined);
   };
   const resumeRun = (run: AgentRun) => {
     const resumedPlan = prepareTaskPlanForResume(run.progress?.taskPlan || []);
     if (running || resumedPlan.length < 2) return;
+    const attachments = attachmentsForFollowUp(run);
+    if (attachments === null) return;
     setAgentMode("agent");
-    void runAgent(buildTaskResumeRequest(run.request || run.prompt, resumedPlan), undefined, undefined, "继续执行", "agent", resumedPlan);
+    void runAgent(buildTaskResumeRequest(run.request || run.prompt, resumedPlan), undefined, undefined, "继续执行", "agent", resumedPlan, attachments || undefined);
   };
   const removeQueuedRun = (id: number) => setRuns((items) => items.filter((run) => run.id !== id || run.status !== "queued"));
   const respondToPermission = (id: number, approved: boolean) => permissionResolvers.current.get(id)?.(approved);
@@ -1747,7 +1853,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         <div ref={threadContentRef} className="ai-thread-content">
         {!runs.length && <AiAssistantWelcome onSelect={selectSuggestion} contextName={contextName} lineCount={lineCount}/>}
         {runs.map((run) => <article className="ai-agent-run" key={run.id}>
-          <div className="ai-agent-user-message"><p className="ai-agent-prompt">{run.prompt}</p></div>
+          <div className="ai-agent-user-message"><p className="ai-agent-prompt">{run.prompt}</p>{run.attachments?.length ? <div className="ai-agent-user-attachments" aria-label="消息图片">{run.attachments.map((attachment) => <span className="ai-agent-user-attachment" key={attachment.id} title={`${attachment.name} · ${formatImageAttachmentSize(attachment.sourceBytes)}${attachment.sendable ? "" : "（需要重新添加后才能发送）"}`}><img src={attachment.previewDataUrl || attachment.dataUrl} alt={attachment.name}/></span>)}</div> : null}</div>
           <div className="ai-agent-activity-list">
           <AgentRunBody activities={run.activities} hiddenToolName={run.permission?.toolName} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>
           {run.status === "done" && run.result?.taskPlan?.length ? <AgentTaskPlan steps={run.result.taskPlan} collapsed/> : null}
@@ -1771,12 +1877,12 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
                 <button disabled={run.taskUndone} title={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} aria-label={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} onClick={() => { if (run.result?.taskChange && onUndoTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: true }); }}><Undo2 size={13}/></button>
               </span>}
               {run.result?.mode === "plan" && run.result.planPrompt && !run.result.clarification && <button type="button" className="ai-plan-execute" disabled={running} onClick={() => executePlan(run)} title="由 Agent 按此计划执行"><Play size={13}/><span>执行计划</span></button>}
-              <AiResponseActions markdown={run.result?.summary || "完成"} disabled={running} onRetry={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)}/>
+              <AiResponseActions markdown={run.result?.summary || "完成"} disabled={running || retryBlocked(run)} onRetry={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan, pendingAttachments.length ? pendingAttachments : undefined)}/>
             </AgentResponseFooter>
           </div>}
           {run.status === "queued" && <div className="ai-agent-run-state queued"><Clock3 size={14}/><span>等待当前任务完成</span><span className="ai-agent-queued-actions"><button disabled={running} title="立即执行" aria-label="立即执行排队任务" onClick={() => startQueuedRun(run)}><Play size={13}/></button><button title="移出队列" aria-label="移出任务队列" onClick={() => removeQueuedRun(run.id)}><X size={14}/></button></span></div>}
-          {run.status === "stopped" && <div className="ai-agent-run-state stopped"><Square size={12}/><span>已停止{run.startedAt ? ` · ${formatAgentElapsed(run.startedAt, run.finishedAt)}` : ""}</span><span className="ai-run-failure-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])} onClick={() => resumeRun(run)}><Play size={13}/></button> : <button className="ai-run-retry" disabled={running} title="重新执行此任务" aria-label="重新执行此任务" onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)}><RefreshCw size={13}/></button>}</span></div>}
-          {run.error && <div className="ai-agent-error"><span className="ai-agent-error-content"><strong>任务未完成</strong><span title={run.error}>{formatAgentRunError(run.error)}</span>{run.startedAt ? <small>{formatAgentElapsed(run.startedAt, run.finishedAt)}</small> : null}</span><span className="ai-agent-error-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running} onClick={() => resumeRun(run)} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])}><Play size={14}/></button> : <button disabled={running} onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan)} title="重新执行此任务" aria-label="重新执行此任务"><RefreshCw size={15}/></button>}<button onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={15}/></button></span></div>}
+          {run.status === "stopped" && <div className="ai-agent-run-state stopped"><Square size={12}/><span>已停止{run.startedAt ? ` · ${formatAgentElapsed(run.startedAt, run.finishedAt)}` : ""}</span><span className="ai-run-failure-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running || retryBlocked(run)} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])} onClick={() => resumeRun(run)}><Play size={13}/></button> : <button className="ai-run-retry" disabled={running || retryBlocked(run)} title={retryBlocked(run) ? "请重新添加图片后重试" : "重新执行此任务"} aria-label="重新执行此任务" onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan, pendingAttachments.length ? pendingAttachments : undefined)}><RefreshCw size={13}/></button>}</span></div>}
+          {run.error && <div className="ai-agent-error"><span className="ai-agent-error-content"><strong>任务未完成</strong><span title={run.error}>{formatAgentRunError(run.error)}</span>{run.startedAt ? <small>{formatAgentElapsed(run.startedAt, run.finishedAt)}</small> : null}</span><span className="ai-agent-error-actions">{(run.progress?.taskPlan?.length || 0) >= 2 ? <button className="ai-run-resume" disabled={running || retryBlocked(run)} onClick={() => resumeRun(run)} title={taskPlanResumeLabel(run.progress?.taskPlan || [])} aria-label={taskPlanResumeLabel(run.progress?.taskPlan || [])}><Play size={14}/></button> : <button disabled={running || retryBlocked(run)} onClick={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan, pendingAttachments.length ? pendingAttachments : undefined)} title={retryBlocked(run) ? "请重新添加图片后重试" : "重新执行此任务"} aria-label="重新执行此任务"><RefreshCw size={15}/></button>}<button onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={15}/></button></span></div>}
         </article>)}
         {runs.length > 0 && shouldShowAiFollowUpSuggestions(runs) && !runs.at(-1)?.result?.clarification && <div className="ai-agent-followups"><AiAssistantSuggestionButtons onSelect={selectSuggestion} suggestions={getAiFollowUpSuggestions(runs.at(-1)!, contextName)} className="followups"/></div>}
         </div>
@@ -1787,8 +1893,16 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       {showScrollToLatest && runs.length > 0 && <button type="button" className="ai-scroll-to-latest" onClick={scrollToLatest} title="回到最新消息" aria-label="回到最新消息"><ArrowDown size={16}/></button>}
     </div>
     <div className="ai-composer">
-      <div className="ai-composer-input">
-        <textarea ref={promptRef} value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); running ? enqueuePrompt() : void runAgent(); } }} placeholder={running ? "输入后续指令..." : awaitingClarification ? "输入序号或补充要求..." : agentMode === "plan" ? "描述需要规划的任务..." : "输入任务..."} aria-label="AI 指令" rows={2}/>
+      <div className="ai-composer-input" onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add("dragging"); }} onDragLeave={(event) => event.currentTarget.classList.remove("dragging")} onDrop={(event) => { event.currentTarget.classList.remove("dragging"); handleComposerDrop(event); }}>
+        {pendingAttachments.length > 0 && <div className="ai-composer-attachments" aria-label="待发送图片">
+          {pendingAttachments.map((attachment) => <div className="ai-composer-attachment" key={attachment.id} title={`${attachment.name} · ${formatImageAttachmentSize(attachment.sourceBytes)}`}>
+            <img src={attachment.previewDataUrl || attachment.dataUrl} alt={attachment.name}/>
+            <button type="button" onClick={() => setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id))} title={`移除 ${attachment.name}`} aria-label={`移除 ${attachment.name}`}><X size={12}/></button>
+          </div>)}
+        </div>}
+        {attachmentError && <div className="ai-composer-attachment-error" role="alert"><AlertCircle size={13}/><span>{attachmentError}</span></div>}
+        <textarea ref={promptRef} value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} onPaste={handleComposerPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); running ? enqueuePrompt() : void runAgent(); } }} placeholder={running ? "输入后续指令..." : awaitingClarification ? "输入序号或补充要求..." : agentMode === "plan" ? "描述需要规划的任务..." : "输入任务..."} aria-label="AI 指令" rows={2}/>
+        <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={handleImageInputChange}/>
         <div className="ai-composer-footer">
           <div className="ai-agent-mode-menu" ref={agentModeMenuRef}>
             <button ref={agentModeTriggerRef} type="button" className={`ai-agent-mode-trigger ${agentModeMenuOpen ? "open" : ""}`} disabled={running} onClick={() => { setReasoningEffortMenuOpen(false); setAgentModeMenuOpen((open) => !open); }} onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setReasoningEffortMenuOpen(false); setAgentModeMenuOpen(true); } }} title={agentMode === "plan" ? "只读分析并制定计划" : "直接执行任务"} aria-label={`智能体模式：${agentMode === "plan" ? "计划" : "智能体"}`} aria-haspopup="menu" aria-expanded={agentModeMenuOpen}>
@@ -1810,9 +1924,10 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
           </div>
           <span className="ai-composer-scope" title={`${contextName} · ${lineCount} 行代码`}><Code2 size={14}/><span>{contextName}</span><small>{lineCount} 行</small></span>
           <span className="ai-composer-footer-spacer"/>
+          <button type="button" className="ai-composer-attach" onClick={() => imageInputRef.current?.click()} disabled={running || pendingAttachments.length >= MAX_IMAGE_COUNT} title="添加图片" aria-label="添加图片"><ImagePlus size={16}/></button>
           {running
             ? <button className="stop" onClick={stopAgent} title="停止智能体" aria-label="停止智能体"><Square size={13}/></button>
-            : <button onClick={() => void runAgent()} disabled={!prompt.trim()} title="发送" aria-label="发送"><Send size={16}/></button>}
+            : <button onClick={() => void runAgent()} disabled={!canSubmitAiPrompt(prompt, pendingAttachments)} title="发送" aria-label="发送"><Send size={16}/></button>}
         </div>
       </div>
     </div>

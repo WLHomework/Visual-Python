@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
-import { defaultAiModelConfig, getAiAgentPermissionMode, getAiModelCapabilities, getAiModelConfig, getAiProviderProtocol, getAiReasoningEffort, normalizeAiModelConfig, saveAiAgentPermissionMode, saveAiModelConfig, saveAiProviderProtocol, saveAiReasoningEffort, streamAiChat, updateAiModelCapabilities } from "./aiConfig";
+import { createAiChatContentParts, defaultAiModelConfig, getAiAgentPermissionMode, getAiModelCapabilities, getAiModelConfig, getAiProviderProtocol, getAiReasoningEffort, normalizeAiModelConfig, saveAiAgentPermissionMode, saveAiModelConfig, saveAiProviderProtocol, saveAiReasoningEffort, streamAiChat, updateAiModelCapabilities } from "./aiConfig";
 
 describe("AI model configuration", () => {
   beforeEach(() => {
@@ -73,6 +73,23 @@ describe("AI model configuration", () => {
       omitToolChoice: false,
       reasoningEffort: "xhigh",
     }));
+  });
+
+  it("builds OpenAI image content parts in stable text-then-image order", () => {
+    const parts = createAiChatContentParts("修改当前工程", [{
+      id: "image-1",
+      name: "diagram.png",
+      mimeType: "image/png",
+      width: 100,
+      height: 80,
+      sourceBytes: 20,
+      dataUrl: "data:image/jpeg;base64,abc",
+      sendable: true,
+    }]);
+    expect(parts).toEqual([
+      { type: "text", text: "修改当前工程" },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64,abc", detail: "auto" } },
+    ]);
   });
 
   it("persists capability results independently for each model endpoint", () => {

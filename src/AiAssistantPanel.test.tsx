@@ -1,10 +1,25 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
+import type { AiImageAttachment } from "./aiImageAttachments";
+
+const attachment = (id: string, sendable = true): AiImageAttachment => ({ id, name: `${id}.png`, mimeType: "image/png", width: 100, height: 100, sourceBytes: 100, dataUrl: sendable ? `data:image/png;base64,${id}` : undefined, sendable });
 
 describe("AI assistant Markdown", () => {
+  it("merges file, paste, and drop attachments without exceeding the limit", () => {
+    expect(mergePendingAiAttachments([attachment("one")], [attachment("two"), attachment("three")])).toHaveLength(3);
+    expect(mergePendingAiAttachments(Array.from({ length: 5 }, (_, index) => attachment(String(index))), [attachment("six")])).toHaveLength(5);
+  });
+
+  it("allows sending text, images, or both but rejects an empty composer", () => {
+    expect(canSubmitAiPrompt("  ", [])).toBe(false);
+    expect(canSubmitAiPrompt("  ", [attachment("image")])).toBe(true);
+    expect(canSubmitAiPrompt("describe this", [])).toBe(true);
+    expect(canSubmitAiPrompt("  ", [attachment("restored", false)])).toBe(false);
+  });
+
   it("renders only the centered project-wide suggestion buttons in the welcome state", () => {
     const html = renderToStaticMarkup(<AiAssistantWelcome onSelect={() => undefined}/>);
 
@@ -426,6 +441,12 @@ describe("AI assistant Markdown", () => {
       .toBe("API Key 无效");
     expect(formatAgentRunError('AI 请求失败（HTTP 400）：{"error":{"message":"API Key 无效"}}'))
       .toBe("AI 请求失败（HTTP 400）：API Key 无效");
+  });
+
+  it("keeps provider image errors visible instead of converting them to text-only success", () => {
+    for (const message of ["image input is not supported", "malformed image data", "payload too large", "rate limit exceeded"]) {
+      expect(formatAgentRunError(`AI 请求失败（HTTP 400）：${message}`)).toContain(message);
+    }
   });
 
   it("renders successful scene validation with the same verification status as code checks", () => {
@@ -925,6 +946,20 @@ describe("AI assistant conversation persistence", () => {
   it("persists completed and queued runs but skips rapidly changing running runs", () => {
     expect(shouldPersistConversationRuns([{ status: "done" }, { status: "queued" }])).toBe(true);
     expect(shouldPersistConversationRuns([{ status: "done" }, { status: "running" }])).toBe(false);
+  });
+
+  it("persists image metadata without the original sendable payload", () => {
+    const storage = new MemoryStorage();
+    const state = conversationState({ id: "message-1", kind: "message", status: "done", title: "Done" }) as any;
+    state.conversations[0].runs[0].attachments = [attachment("private")];
+
+    expect(storeConversationState("scene-images", state, storage)).toBe(true);
+    const stored = storage.getItem("visual-python:ai-conversations:scene-images") || "";
+    expect(stored).not.toContain("data:image/png;base64,private");
+    expect(JSON.parse(stored).conversations[0].runs[0].persistedAttachments[0]).toMatchObject({ id: "private", sendable: false });
+
+    const restored = parseStoredRuns(JSON.parse(stored).conversations[0].runs);
+    expect(restored[0].attachments?.[0]).toMatchObject({ id: "private", sendable: false, dataUrl: undefined });
   });
 
   class MemoryStorage {

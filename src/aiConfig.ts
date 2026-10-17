@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { AiImageAttachment } from "./aiImageAttachments";
 
 export type AiModelConfig = {
   baseUrl: string;
@@ -12,12 +13,27 @@ export type AiProtocolPreference = "auto" | "chat-completions" | "responses";
 export type AiAgentPermissionMode = "auto" | "confirm";
 export type AiReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
+export type AiImageContentDetail = "low" | "auto" | "high";
+export type AiChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: AiImageContentDetail } };
+
 export type AiChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  contentParts?: AiChatContentPart[];
   toolCallId?: string;
   toolCalls?: AiChatToolCall[];
 };
+
+export function createAiChatContentParts(text: string, attachments: readonly AiImageAttachment[] = []): AiChatContentPart[] {
+  return [
+    { type: "text", text },
+    ...attachments
+      .filter((attachment) => attachment.sendable && Boolean(attachment.dataUrl))
+      .map((attachment) => ({ type: "image_url" as const, image_url: { url: attachment.dataUrl!, detail: "auto" as const } })),
+  ];
+}
 
 export type AiChatToolCall = {
   id: string;

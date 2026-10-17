@@ -1,4 +1,4 @@
-import type { AiChatMessage } from "../aiConfig";
+import { createAiChatContentParts, type AiChatMessage } from "../aiConfig";
 import type { AgentConversationTurn } from "./types";
 
 type AgentRequestContextInput = {
@@ -8,6 +8,7 @@ type AgentRequestContextInput = {
   snapshot: Record<string, unknown>;
   memory: string;
   blockCatalog?: string;
+  attachments?: AgentConversationTurn["attachments"];
 };
 
 export type AgentRequestContext = AgentRequestContextInput;
@@ -182,18 +183,19 @@ function snapshotText(snapshot: Record<string, unknown>): string {
 
 function historyMessages(history: AgentConversationTurn[]): AiChatMessage[] {
   // Fill from the newest turn backwards so the budget never drops the most recent context.
-  const selected: Array<{ user: string; assistant: string }> = [];
+  const selected: Array<{ user: string; assistant: string; attachments?: AgentConversationTurn["attachments"] }> = [];
   let characters = 0;
   for (let index = history.length - 1; index >= 0 && selected.length < maxContextHistoryTurns; index -= 1) {
     const user = truncate(history[index].user, maxContextHistoryMessageCharacters);
     const assistant = truncate(history[index].assistant, maxContextHistoryMessageCharacters);
     const turnCharacters = user.length + assistant.length;
     if (selected.length && characters + turnCharacters > maxContextHistoryCharacters) break;
-    selected.unshift({ user, assistant });
+    const attachments = history[index].attachments?.filter((attachment) => attachment.sendable && attachment.dataUrl);
+    selected.unshift({ user, assistant, ...(attachments?.length ? { attachments } : {}) });
     characters += turnCharacters;
   }
   return selected.flatMap((turn) => [
-    { role: "user" as const, content: turn.user },
+    { role: "user" as const, content: turn.user, ...(turn.attachments?.length ? { contentParts: createAiChatContentParts(turn.user, turn.attachments) } : {}) },
     { role: "assistant" as const, content: turn.assistant },
   ]);
 }
@@ -209,6 +211,9 @@ export function buildAgentRequestMessages(context: AgentRequestContext): AiChatM
     {
       role: "user",
       content: `用户任务：\n${context.prompt.trim()}\n\n当前工程快照：\n${snapshotText(context.snapshot)}\n\n${context.memory}`,
+      ...(context.attachments?.some((attachment) => attachment.sendable && attachment.dataUrl)
+        ? { contentParts: createAiChatContentParts(`用户任务：\n${context.prompt.trim()}\n\n当前工程快照：\n${snapshotText(context.snapshot)}\n\n${context.memory}`, context.attachments) }
+        : {}),
     },
   ];
   if (context.blockCatalog?.trim()) {

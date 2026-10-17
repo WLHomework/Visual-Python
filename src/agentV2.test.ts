@@ -104,6 +104,19 @@ describe("Visual Python Agent Core", () => {
     expect(getBlockCatalog).toHaveBeenCalledOnce();
   });
 
+  it("adds the untrusted image rule while retaining the normal tool context", async () => {
+    mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
+    await runVisualPythonAgent({
+      prompt: "检查当前工程",
+      host: createHost(),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    const messages = mocks.streamAiChat.mock.calls[0][0] as AiChatMessage[];
+    expect(messages.find((message) => message.role === "system")?.content).toContain("图片上下文规则");
+    expect(mocks.streamAiChat.mock.calls[0][2]?.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "get_context" }) })]));
+  });
+
   it("exposes only apply_block_plan as a graphical workspace mutation tool", async () => {
     mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
     await runVisualPythonAgent({

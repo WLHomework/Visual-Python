@@ -1,4 +1,5 @@
 import type { AiAgentActivity, AiConversationTurn } from "./agentV2/types";
+import type { AiImageAttachment } from "./aiImageAttachments";
 
 export type AiConversationRunForContext = {
   id: number;
@@ -8,6 +9,7 @@ export type AiConversationRunForContext = {
   result?: { summary?: string; clarification?: unknown };
   error?: string;
   activities: AiAgentActivity[];
+  attachments?: AiImageAttachment[];
 };
 
 const compact = (value: string | undefined, limit: number) => {
@@ -42,14 +44,19 @@ export function buildAiConversationHistory(runs: AiConversationRunForContext[]):
       });
       const summary = compact(run.result?.summary, 1800);
       const error = compact(run.error, 1800);
+      const attachments = (run.attachments || []).filter((attachment) => attachment.sendable && Boolean(attachment.dataUrl));
+      const imageMetadata = (run.attachments || [])
+        .map((attachment) => `${attachment.name} (${attachment.width}x${attachment.height})`)
+        .join(", ");
       const assistant = [summary ? `结果：${summary}` : "", error ? `任务失败：${error}` : "", ...evidence]
         .filter(Boolean)
         .join("\n")
         .slice(0, 7000);
       if (!assistant) return [];
       return [{
-        user: compact(run.request || run.prompt, 4000),
+        user: compact([run.request || run.prompt, imageMetadata ? `图片附件：${imageMetadata}` : ""].filter(Boolean).join("\n"), 4000),
         assistant,
+        ...(attachments.length ? { attachments } : {}),
         ...(run.result?.clarification ? { clarification: true } : {}),
       }];
     });

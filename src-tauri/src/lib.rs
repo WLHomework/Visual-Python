@@ -129,6 +129,8 @@ struct AiToolCall {
 struct AiChatMessage {
     role: String,
     content: Option<String>,
+    #[serde(default)]
+    content_parts: Option<Vec<Value>>,
     tool_call_id: Option<String>,
     tool_calls: Option<Vec<AiToolCall>>,
 }
@@ -163,6 +165,57 @@ struct AiChatStreamEvent {
     delta: String,
     tool_index: Option<usize>,
     tool_name: Option<String>,
+}
+
+const MAX_AI_IMAGE_PARTS: usize = 5;
+const MAX_AI_IMAGE_DATA_URL_CHARS: usize = 28 * 1024 * 1024;
+const MAX_AI_IMAGE_DATA_URL_TOTAL_CHARS: usize = 100 * 1024 * 1024;
+
+fn validate_ai_content_parts(parts: &[Value]) -> Result<(), String> {
+    if parts.is_empty() || parts.len() > MAX_AI_IMAGE_PARTS + 1 {
+        return Err("AI 消息内容块数量无效".into());
+    }
+    let mut image_count = 0usize;
+    let mut image_characters = 0usize;
+    for part in parts {
+        let kind = part.get("type").and_then(Value::as_str).unwrap_or_default();
+        match kind {
+            "text" => {
+                if part.get("text").and_then(Value::as_str).is_none() {
+                    return Err("AI 文本内容块无效".into());
+                }
+            }
+            "image_url" => {
+                image_count += 1;
+                if image_count > MAX_AI_IMAGE_PARTS {
+                    return Err("单条 AI 消息最多包含 5 张图片".into());
+                }
+                let image = part.get("image_url").and_then(Value::as_object).ok_or_else(|| "AI 图片内容块无效".to_string())?;
+                let url = image.get("url").and_then(Value::as_str).unwrap_or_default();
+                if !url.starts_with("data:image/png;base64,")
+                    && !url.starts_with("data:image/jpeg;base64,")
+                    && !url.starts_with("data:image/webp;base64,")
+                {
+                    return Err("AI 图片必须是 PNG、JPEG 或 WebP data URL".into());
+                }
+                if url.len() > MAX_AI_IMAGE_DATA_URL_CHARS {
+                    return Err("单张 AI 图片数据过大".into());
+                }
+                image_characters = image_characters.saturating_add(url.len());
+                if image.get("detail").is_some_and(|detail| !matches!(detail.as_str(), Some("low" | "auto" | "high"))) {
+                    return Err("AI 图片 detail 参数无效".into());
+                }
+            }
+            _ => return Err("AI 消息包含不支持的内容块".into()),
+        }
+    }
+    if image_count == 0 {
+        return Err("AI 结构化消息必须包含图片内容块".into());
+    }
+    if image_characters > MAX_AI_IMAGE_DATA_URL_TOTAL_CHARS {
+        return Err("AI 图片数据总量过大".into());
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -2747,6 +2800,9 @@ async fn perform_ai_chat_completion_attempt(
             .unwrap_or_default()
             .chars()
             .count();
+        if let Some(parts) = &message.content_parts {
+            validate_ai_content_parts(parts)?;
+        }
         let has_tool_calls = message
             .tool_calls
             .as_ref()
@@ -2830,6 +2886,9 @@ async fn perform_ai_chat_completion_attempt(
                 "role": message.role,
                 "content": message.content
             });
+            if let Some(content_parts) = &message.content_parts {
+                value["content"] = Value::Array(content_parts.clone());
+            }
             if let Some(tool_call_id) = &message.tool_call_id {
                 value["tool_call_id"] = Value::String(tool_call_id.clone());
             }
@@ -3253,6 +3312,7 @@ async fn test_ai_connection(
             vec![AiChatMessage {
                 role: "user".into(),
                 content: Some("Reply only: connection successful".into()),
+                content_parts: None,
                 tool_call_id: None,
                 tool_calls: None,
             }],
@@ -3278,6 +3338,7 @@ async fn test_ai_connection(
                     vec![AiChatMessage {
                         role: "user".into(),
                         content: Some("请仅回复：连接成功".into()),
+                        content_parts: None,
                         tool_call_id: None,
                         tool_calls: None,
                     }],
@@ -7156,6 +7217,17 @@ mod tests {
         assert!(validate_ai_model_protocol("responses").is_ok());
         assert!(validate_ai_model_protocol("chat-completions").is_ok());
         assert!(validate_ai_model_protocol("legacy").is_err());
+    }
+
+    #[test]
+    fn validates_openai_image_content_parts() {
+        let valid = vec![
+            json!({ "type": "text", "text": "inspect" }),
+            json!({ "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,abc", "detail": "auto" } }),
+        ];
+        assert!(validate_ai_content_parts(&valid).is_ok());
+        assert!(validate_ai_content_parts(&[json!({ "type": "image_url", "image_url": { "url": "https://example.com/a.png" } })]).is_err());
+        assert!(validate_ai_content_parts(&[json!({ "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,abc", "detail": "invalid" } })]).is_err());
     }
 
     #[test]

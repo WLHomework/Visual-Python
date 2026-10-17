@@ -17,6 +17,21 @@ describe("Agent context compression", () => {
     expect(first.at(-1)?.content).toContain("class Demo");
   });
 
+  it("attaches same-session images to the current user message", () => {
+    const messages = buildAgentRequestMessages(createAgentRequestContext({
+      system: "system",
+      prompt: "按图片修改工程",
+      history: [],
+      snapshot: {},
+      memory: "memory",
+      attachments: [{ id: "image-1", name: "diagram.png", mimeType: "image/png", width: 100, height: 80, sourceBytes: 20, dataUrl: "data:image/jpeg;base64,abc", sendable: true }],
+    }));
+    expect(messages.at(-1)?.contentParts).toEqual([
+      { type: "text", text: expect.stringContaining("按图片修改工程") },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64,abc", detail: "auto" } },
+    ]);
+  });
+
   it("keeps the full block catalog outside the bounded workspace snapshot", () => {
     const catalog = JSON.stringify({ blocks: "x".repeat(15_000) });
     const messages = buildAgentRequestMessages(createAgentRequestContext({

@@ -1,4 +1,5 @@
 import type { AiChatMessage, AiChatToolCall, AiChatToolDefinition, AiReasoningEffort } from "../aiConfig";
+import type { AiImageAttachment } from "../aiImageAttachments";
 import type { CodeDocument } from "../sceneDocuments";
 import type { WorkspaceMode } from "../workspaceMode";
 
@@ -67,6 +68,7 @@ export type AgentConversationTurn = {
   user: string;
   assistant: string;
   clarification?: boolean;
+  attachments?: AiImageAttachment[];
 };
 export type AiConversationTurn = AgentConversationTurn;
 
@@ -192,6 +194,7 @@ export type AgentProgress = {
 
 export type RunVisualPythonAgentArgs = {
   prompt: string;
+  attachments?: AiImageAttachment[];
   history?: AgentConversationTurn[];
   mode?: AgentMode;
   reasoningEffort?: AiReasoningEffort;

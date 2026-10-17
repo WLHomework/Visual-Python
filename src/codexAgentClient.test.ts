@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { CodexAgentClient, mapCodexNotification, type CodexAgentInvoke, type CodexDynamicTool } from "./codexAgentClient";
+import { buildCodexTurnInput, CodexAgentClient, mapCodexNotification, type CodexAgentInvoke, type CodexDynamicTool } from "./codexAgentClient";
 import { createDynamicToolsSignature, getCodexThreadWithTools, saveCodexThread } from "./codexThreadStore";
 
 describe("CodexAgentClient", () => {
+  it("builds current-turn text and image inputs without embedding images in the prompt", () => {
+    expect(buildCodexTurnInput("修改工程", [{ url: "data:image/jpeg;base64,abc", detail: "auto" }, { url: "data:image/png;base64,def" }])).toEqual([
+      { type: "text", text: "修改工程", textElements: [] },
+      { type: "image", url: "data:image/jpeg;base64,abc", detail: "auto" },
+      { type: "image", url: "data:image/png;base64,def", detail: "auto" },
+    ]);
+  });
+
   it("extracts the real provider error and HTTP status from App Server notifications", () => {
     expect(mapCodexNotification({
       method: "error",
