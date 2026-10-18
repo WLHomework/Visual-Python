@@ -1,0 +1,87 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+import type { HardwareDeviceController } from "../hardware/useHardwareDevice";
+import { useHardwareRunner, type HardwareRunnerOptions } from "./useHardwareRunner";
+
+type Runner = ReturnType<typeof useHardwareRunner>;
+
+function createRunner(overrides: { device?: Partial<HardwareDeviceController>; prepare?: () => boolean; getCode?: () => string } = {}) {
+  const device = {
+    busy: false,
+    running: false,
+    connected: true,
+    phase: "idle",
+    error: null,
+    snapshot: { portName: "COM3" },
+    run: vi.fn(async () => ({ runId: 7 })),
+    runAndWait: vi.fn(async () => ({ accepted: { runId: 7 }, outcome: null })),
+    stop: vi.fn(async () => undefined),
+    ...overrides.device,
+  } as unknown as HardwareDeviceController;
+  const options: HardwareRunnerOptions = {
+    device,
+    getCode: overrides.getCode ?? (() => "print('hi')"),
+    prepare: overrides.prepare ?? (() => true),
+  };
+  let runner!: Runner;
+  const Probe = () => { runner = useHardwareRunner(options); return null; };
+  renderToStaticMarkup(<Probe/>);
+  return { runner, device };
+}
+
+describe("useHardwareRunner", () => {
+  it("uploads the generated code to main.py after the UI is prepared", async () => {
+    const prepare = vi.fn(() => true);
+    const { runner, device } = createRunner({ prepare, getCode: () => "led.on()" });
+    await expect(runner.run()).resolves.toEqual({ runId: 7 });
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(device.run).toHaveBeenCalledWith("led.on()", "/main.py");
+  });
+
+  it("does not touch the device when validation fails", async () => {
+    const { runner, device } = createRunner({ prepare: () => false });
+    await expect(runner.run()).resolves.toBeNull();
+    expect(device.run).not.toHaveBeenCalled();
+  });
+
+  it("stops without restarting and reports the busy state", async () => {
+    const { runner, device } = createRunner({ device: { busy: true } });
+    expect(runner.isBusy()).toBe(true);
+    await runner.stop();
+    expect(device.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an agent run that is still going as started", async () => {
+    const { runner, device } = createRunner({ getCode: () => "while True: pass" });
+    const result = await runner.runForAgent();
+    expect(device.runAndWait).toHaveBeenCalledWith("while True: pass");
+    expect(result).toMatchObject({ started: true, target: "device", runId: 7 });
+    expect(result.message).toContain("仍在运行");
+  });
+
+  it("reports an agent run that finished with the device error tail", async () => {
+    const { runner } = createRunner({
+      device: { runAndWait: vi.fn(async () => ({ accepted: { runId: 3 }, outcome: { runId: 3, status: "exception" as const, streamedBytes: 12, tail: "NameError: x" } })) },
+    });
+    const result = await runner.runForAgent();
+    expect(result).toMatchObject({ started: true, runId: 3 });
+    expect(result.message).toContain("出错");
+    expect(result.message).toContain("NameError: x");
+  });
+
+  it("reports an agent run the device never accepted", async () => {
+    const { runner } = createRunner({ device: { runAndWait: vi.fn(async () => ({ accepted: null, outcome: null })), error: "串口已断开" } });
+    await expect(runner.runForAgent()).resolves.toEqual({ started: false, target: "device", message: "串口已断开" });
+
+    const fallback = createRunner({ device: { runAndWait: vi.fn(async () => ({ accepted: null, outcome: null })) } });
+    expect((await fallback.runner.runForAgent()).message).toContain("检查连接");
+  });
+
+  it("exposes the device execution state for agent tools", () => {
+    const { runner } = createRunner({ device: { running: true, phase: "running", connected: true } });
+    expect(runner.executionState()).toEqual({ deviceRunning: true, devicePhase: "running", devicePort: "COM3", deviceConnected: true });
+
+    const disconnected = createRunner({ device: { snapshot: null, connected: false } });
+    expect(disconnected.runner.executionState().devicePort).toBeNull();
+  });
+});

@@ -1,18 +1,8 @@
-import { isHardwareBoardId } from "./hardware/boardProfiles";
-import type { HardwareBoardId } from "./hardware/firmwareCatalog";
 import type { PluginProjectState } from "./plugins/api/types";
+import { isWorkbenchProfileId, type WorkbenchProfileId } from "./profiles/workbenchProfile";
 import type { ProjectResource, ProjectResourceType } from "./projectResources";
 import type { WorkspaceMode } from "./workspaceMode";
 import { validateCodeDocuments, type CodeDocument } from "./sceneDocuments";
-
-/** 工程的运行目标：本机 Python 或已连接的 MicroPython 硬件设备。 */
-export type ProjectHardwareTarget = {
-  target: "host" | "device";
-  /** 设备目标下必须选择受支持的板卡。 */
-  boardId?: HardwareBoardId;
-  /** 程序写入设备时使用的入口文件名，默认 main.py。 */
-  entryFile?: string;
-};
 
 export type ProjectFile = {
   version: 1;
@@ -26,7 +16,8 @@ export type ProjectFile = {
   workspaceMode?: WorkspaceMode;
   blockInputLayout?: "inline" | "external";
   resources?: ProjectResource[];
-  hardware?: ProjectHardwareTarget;
+  /** 工程使用的工作台界面；缺省表示纯 Python。 */
+  profile?: WorkbenchProfileId;
 };
 
 export type DraftProject = ProjectFile & { path: string | null; savedAt: number };
@@ -76,16 +67,10 @@ const parseResources = (value: unknown): ProjectResource[] | undefined => {
   });
 };
 
-const parseHardwareTarget = (value: unknown): ProjectHardwareTarget | undefined => {
+const parseProfile = (value: unknown): WorkbenchProfileId | undefined => {
   if (value === undefined) return undefined;
-  if (!isRecord(value) || (value.target !== "host" && value.target !== "device")) throw new Error("工程硬件目标无效");
-  if (value.target === "host") return { target: "host" };
-  if (!isHardwareBoardId(value.boardId)) throw new Error("工程硬件目标缺少受支持的板卡");
-  const entryFile = value.entryFile;
-  if (entryFile !== undefined && (typeof entryFile !== "string" || !/^[A-Za-z0-9_-]{1,64}\.py$/.test(entryFile))) {
-    throw new Error("工程硬件入口文件无效");
-  }
-  return { target: "device", boardId: value.boardId, ...(typeof entryFile === "string" ? { entryFile } : {}) };
+  if (!isWorkbenchProfileId(value)) throw new Error("工程使用了不支持的工作台界面或板卡");
+  return value;
 };
 
 export function validateProjectFile(value: unknown): ProjectFile {
@@ -101,7 +86,7 @@ export function validateProjectFile(value: unknown): ProjectFile {
   if (value.blockInputLayout !== undefined && !["inline", "external"].includes(String(value.blockInputLayout))) throw new Error("积木输入布局无效");
   const plugins = parsePlugins(value.plugins);
   const resources = parseResources(value.resources);
-  const hardware = parseHardwareTarget(value.hardware);
+  const profile = parseProfile(value.profile);
   return {
     version: 1,
     ...(typeof value.projectId === "string" ? { projectId: value.projectId } : {}),
@@ -114,7 +99,7 @@ export function validateProjectFile(value: unknown): ProjectFile {
     ...(value.workspaceMode ? { workspaceMode: value.workspaceMode as WorkspaceMode } : {}),
     ...(value.blockInputLayout ? { blockInputLayout: value.blockInputLayout as "inline" | "external" } : {}),
     ...(resources ? { resources } : {}),
-    ...(hardware ? { hardware } : {}),
+    ...(profile ? { profile } : {}),
   };
 }
 

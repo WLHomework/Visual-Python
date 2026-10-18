@@ -76,7 +76,8 @@ export type VisualPythonHostServices = {
   formatCurrentPythonCode: (announce?: boolean) => Promise<string | null>;
   runCode: () => Promise<HostRunResult | void>;
   stopCode: () => Promise<void>;
-  getDeviceExecutionState?: () => HostDeviceExecutionState;
+  /** 当前界面不是硬件工作台时返回 undefined，AI 工具结果里就不会出现设备字段。 */
+  getDeviceExecutionState?: () => HostDeviceExecutionState | undefined;
   stopDeviceExecution?: () => Promise<void>;
   stopPluginExecutions?: () => Promise<void>;
   getPluginExecutionState?: () => Record<string, unknown>;

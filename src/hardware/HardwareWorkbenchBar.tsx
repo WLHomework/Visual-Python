@@ -1,7 +1,7 @@
 import { Play, RefreshCw, RotateCcw, Square, Unplug } from "lucide-react";
 import type { HardwareSerialPort } from "./hardwareApi";
 import type { HardwareDeviceSnapshot } from "./hardwareDeviceApi";
-import { hardwareBoardOptions } from "./hardwareTarget";
+import { isHardwareWorkbench, listWorkbenchProfiles } from "../profiles/workbenchProfile";
 import type { HardwareBoardId } from "./firmwareCatalog";
 
 /**
@@ -34,7 +34,7 @@ export function HardwareWorkbenchBar(props: HardwareWorkbenchBarProps) {
 
   return <div className="hardware-bar" role="group" aria-label="硬件工作台">
     <select className="hardware-bar-board" value={boardId ?? ""} disabled={locked} aria-label="开发板型号" title="开发板型号" onChange={(event) => { const next = event.currentTarget.value; if (next) props.onSelectBoard(next as HardwareBoardId); }}>
-      {hardwareBoardOptions().map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+      {listWorkbenchProfiles().filter(isHardwareWorkbench).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
     </select>
     <select className="hardware-bar-port" value={portName} disabled={locked} aria-label="串口" title={portName ? `串口 ${portName}` : "选择串口"} onChange={(event) => props.onSelectPort(event.currentTarget.value)}>
       <option value="">选择串口</option>

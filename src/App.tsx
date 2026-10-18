@@ -14,13 +14,13 @@ import { AiAssistantPanel, isFileDragPayload } from "./AiAssistantPanel";
 import { AiModelSettings } from "./AiModelSettings";
 import { HardwareFirmwareWizard } from "./hardware/HardwareFirmwareWizard";
 import { collectHardwareBlockIssues, refreshHardwareBlocks } from "./hardware/hardwareBlocks";
-import { describeRunFinished, deviceEntryFileName, deviceProgressPercent, deviceRunPhaseLabel } from "./hardware/hardwareDeviceLog";
+import { deviceProgressPercent, deviceRunPhaseLabel } from "./hardware/hardwareDeviceLog";
 import { HardwareDeviceFiles } from "./hardware/HardwareDeviceFiles";
 import { HardwareWorkbenchBar } from "./hardware/HardwareWorkbenchBar";
 import { useHardwareDevice } from "./hardware/useHardwareDevice";
-import { applyHardwareRunTarget, buildTargetToolbox, defaultHardwareBoardId, hardwareBoardId, hardwareBoardLabel, hardwareBoardOptions, hardwareTargetFromProject, hardwareTargetLabels, hardwareTargetToProject, readStoredHardwareRunTarget, storeHardwareRunTarget, type HardwareRunTarget } from "./hardware/hardwareTarget";
-import { isHardwareBoardId } from "./hardware/boardProfiles";
-import type { HardwareBoardId } from "./hardware/firmwareCatalog";
+import { activateWorkbenchProfile, buildProfileToolbox } from "./profiles/profileToolbox";
+import { useHardwareRunner } from "./profiles/useHardwareRunner";
+import { getWorkbenchProfile, isHardwareWorkbench, listWorkbenchProfiles, readStoredWorkbenchProfileId, storeWorkbenchProfileId, type WorkbenchProfile, type WorkbenchProfileId } from "./profiles/workbenchProfile";
 import { createVisualPythonHostAdapter } from "./agentV2/hostAdapter";
 import type { AgentActivityEvent, AgentTokenUsage, AiAgentActivity, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
 import { resolveAgentEventText } from "./agentEvents";
@@ -141,16 +141,16 @@ const contextIssuesToProblems = (issues: WorkspaceContextIssue[]): CodeProblem[]
   message: issue.message,
   blockId: issue.blockId,
 }));
-const hardwareContextIssues = (workspace: Blockly.Workspace, target: HardwareRunTarget): WorkspaceContextIssue[] => {
-  const issues = collectHardwareBlockIssues(workspace, hardwareBoardId(target));
-  return target.target === "host"
-    ? issues.map((issue) => ({ ...issue, message: "硬件积木只能在硬件设备目标下运行：请切换运行目标，或删除这些积木。" }))
-    : issues;
+const hardwareContextIssues = (workspace: Blockly.Workspace, profile: WorkbenchProfile): WorkspaceContextIssue[] => {
+  const issues = collectHardwareBlockIssues(workspace, isHardwareWorkbench(profile) ? profile.boardId : undefined);
+  return isHardwareWorkbench(profile)
+    ? issues
+    : issues.map((issue) => ({ ...issue, message: "硬件积木只能在硬件工作台中使用：请切换到开发板界面，或删除这些积木。" }));
 };
-const validateWorkspaceIssues = (workspace: Blockly.Workspace, target: HardwareRunTarget): WorkspaceContextIssue[] => [
+const validateWorkspaceIssues = (workspace: Blockly.Workspace, profile: WorkbenchProfile): WorkspaceContextIssue[] => [
   ...validatePythonBlockContexts(workspace),
   ...pluginRegistry.validateWorkspace(workspace),
-  ...hardwareContextIssues(workspace, target),
+  ...hardwareContextIssues(workspace, profile),
 ];
 const themeOptions: Array<{ id: VisualThemeId; label: string; description: string }> = [
   { id: "visual-dark", label: "Visual Dark", description: "深色环境" },
@@ -895,8 +895,9 @@ export default function App() {
   const [sourceCodeInitialized, setSourceCodeInitialized] = useState(false);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => normalizeWorkspaceMode(localStorage.getItem("visual-python:workspace-mode")));
   const workspaceModeRef = useRef(workspaceMode);
-  const [hardwareTarget, setHardwareTarget] = useState<HardwareRunTarget>(() => readStoredHardwareRunTarget(localStorage));
-  const hardwareTargetRef = useRef(hardwareTarget);
+  const [profile, setProfile] = useState<WorkbenchProfile>(() => getWorkbenchProfile(readStoredWorkbenchProfileId(localStorage)));
+  const profileRef = useRef(profile);
+  const hardwareBoardId = isHardwareWorkbench(profile) ? profile.boardId : undefined;
   const [codeOutlineOpen, setCodeOutlineOpen] = useState(false);
   const [blockOutlineOpen, setBlockOutlineOpen] = useState(false);
   const [blockOutlineQuery, setBlockOutlineQuery] = useState("");
@@ -1218,7 +1219,7 @@ export default function App() {
 
   // 设备会话：工具栏按钮、设置面板和 AI 工具共用同一份状态，事件订阅也只建立一次。
   const hardwareDevice = useHardwareDevice({
-    boardId: hardwareBoardId(hardwareTarget),
+    boardId: hardwareBoardId,
     onOutput: enqueueOutput,
     onNotice: showAppNotice,
   });
@@ -1746,16 +1747,17 @@ export default function App() {
     if (workspace.current) applyBlockInputLayout(workspace.current, blockInputLayout);
   }, [applyBlockInputLayout, blockInputLayout]);
 
-  const applyHardwareTarget = useCallback((next: HardwareRunTarget, target?: Blockly.WorkspaceSvg | null) => {
-    hardwareTargetRef.current = next;
-    setHardwareTarget(next);
-    storeHardwareRunTarget(localStorage, next);
-    applyHardwareRunTarget(next);
+  const applyProfile = useCallback((nextId: WorkbenchProfileId, target?: Blockly.WorkspaceSvg | null) => {
+    const next = getWorkbenchProfile(nextId);
+    profileRef.current = next;
+    setProfile(next);
+    storeWorkbenchProfileId(localStorage, next.id);
+    activateWorkbenchProfile(next);
     const ws = target ?? workspace.current;
     if (!ws) return;
-    // 切回主机目标时保留积木里的引脚取值，避免在主机模式下刷新下拉而丢数据。
-    if (next.target === "device") refreshHardwareBlocks(ws);
-    const nextToolbox = buildTargetToolbox(pluginRegistry.extendToolbox(toolbox), next);
+    // 切回 Python 界面时保留积木里的引脚取值，避免在 Python 界面下刷新下拉而丢数据。
+    if (isHardwareWorkbench(next)) refreshHardwareBlocks(ws);
+    const nextToolbox = buildProfileToolbox(pluginRegistry.extendToolbox(toolbox), next);
     blockSearchDefinition.current = nextToolbox;
     blockSearchLabelCache.current.clear();
     ws.updateToolbox(nextToolbox);
@@ -1770,9 +1772,9 @@ export default function App() {
 
   useEffect(() => {
     if (!host.current) return;
-    const startupTarget = hardwareTargetRef.current;
-    applyHardwareRunTarget(startupTarget);
-    const initialToolbox = buildTargetToolbox(pluginRegistry.extendToolbox(toolbox), startupTarget);
+    const startupProfile = profileRef.current;
+    activateWorkbenchProfile(startupProfile);
+    const initialToolbox = buildProfileToolbox(pluginRegistry.extendToolbox(toolbox), startupProfile);
     blockSearchDefinition.current = initialToolbox;
     const ws = Blockly.inject(host.current, {
       toolbox: initialToolbox, renderer: "zelos", theme: visualPythonThemes[visualThemeId], trashcan: true, sounds: true, media: "blockly-media/",
@@ -1847,13 +1849,9 @@ export default function App() {
     const savedDraft = localStorage.getItem(WORKSPACE_DRAFT_STORAGE_KEY);
     let draft: DraftProject | null = null;
     try { draft = savedDraft ? parseDraftProject(savedDraft) : null; } catch { localStorage.removeItem(WORKSPACE_DRAFT_STORAGE_KEY); }
-    // 工程自带运行目标时以工程为准；载入积木前先激活板卡，否则引脚取值会失配。
+    // 草稿自带界面时以草稿为准；载入积木前先激活板卡，否则引脚取值会失配。
     loadingWorkspace.current = true;
-    if (draft?.hardware) {
-      const draftTarget = hardwareTargetFromProject(draft.hardware);
-      if (draftTarget.target === startupTarget.target && draftTarget.boardId === startupTarget.boardId) applyHardwareRunTarget(draftTarget);
-      else applyHardwareTarget(draftTarget, ws);
-    }
+    if (draft?.profile && draft.profile !== startupProfile.id) applyProfile(draft.profile, ws);
     let restoredDraft = false;
     if (draft) {
       try {
@@ -1875,7 +1873,7 @@ export default function App() {
     }
     applyBlockInputLayout(ws, blockInputLayoutRef.current);
     pruneUnusedVariables();
-    setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws, hardwareTargetRef.current)));
+    setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws, profileRef.current)));
     ws.clearUndo();
     if (draft) { const restoredProjectId = draft.projectId || createProjectId(); projectIdRef.current = restoredProjectId; setProjectId(restoredProjectId); setProjectName(draft.name); projectPathRef.current = draft.path; setProjectPath(draft.path); projectResourcesRef.current = draft.resources ?? []; setProjectResources(draft.resources ?? []); setDirty(true); }
     // 启动时清理空对话存储与长期未用的旧存储桶（保护当前会话）。
@@ -1921,7 +1919,7 @@ export default function App() {
     };
     ws.addChangeListener(update);
     const unsubscribePlugins = pluginRegistry.subscribe(() => {
-      const nextToolbox = buildTargetToolbox(pluginRegistry.extendToolbox(toolbox), hardwareTargetRef.current);
+      const nextToolbox = buildProfileToolbox(pluginRegistry.extendToolbox(toolbox), profileRef.current);
       blockSearchDefinition.current = nextToolbox;
       blockSearchLabelCache.current.clear();
       ws.updateToolbox(nextToolbox);
@@ -1970,10 +1968,10 @@ export default function App() {
     if (!ws) return;
     const frame = requestAnimationFrame(() => {
       if (workspace.current !== ws) return;
-      setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws, hardwareTargetRef.current)));
+      setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws, profileRef.current)));
     });
     return () => cancelAnimationFrame(frame);
-  }, [code, hardwareTarget, workspaceRevision]);
+  }, [code, profile, workspaceRevision]);
 
   useEffect(() => { workspaceModeRef.current = workspaceMode; }, [workspaceMode]);
   useEffect(() => { sceneDocumentsRef.current = sceneDocuments; }, [sceneDocuments]);
@@ -2081,11 +2079,11 @@ export default function App() {
     outputStickToLatestRef.current = true;
   }, [activePanel]);
 
-  // 预览与设备页签各自只属于主机/硬件模式：切模式时把控制台收回「输出」，避免停在看不见的页签上。
+  // 预览与设备页签各自只属于某些界面：切界面时把控制台收回「输出」，避免停在看不见的页签上。
   useEffect(() => {
-    if (hardwareTarget.target === "device" && activePanel === "preview") openConsolePanel("output");
-    else if (hardwareTarget.target !== "device" && activePanel === "device") openConsolePanel("output");
-  }, [activePanel, hardwareTarget.target, openConsolePanel]);
+    if (!profile.features.renderPreview && activePanel === "preview") openConsolePanel("output");
+    else if (!profile.features.devicePanel && activePanel === "device") openConsolePanel("output");
+  }, [activePanel, profile.features.devicePanel, profile.features.renderPreview, openConsolePanel]);
 
   useEffect(() => {
     const scroll = outputScrollRef.current;
@@ -3461,7 +3459,7 @@ export default function App() {
       const ws = workspace.current;
       if (!ws) throw new Error("workspace unavailable");
       const persistedDocuments = sceneDocuments.map((document) => document.id === activeSceneId ? { ...document, code: sourceCode, name: resolveCodeDocumentName(sourceCode, document.name) } : document);
-      return { version: 1, projectId: projectIdRef.current, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: activeSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current, hardware: hardwareTargetToProject(hardwareTargetRef.current) };
+      return { version: 1, projectId: projectIdRef.current, name: projectName, path: projectPath, savedAt: Date.now(), workspace: Blockly.serialization.workspaces.save(ws), plugins: pluginRegistry.createProjectState(ws), sourceCode: sourceCodeInitialized ? sourceCode : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: activeSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current, profile: profileRef.current.id };
     };
     const persistDraft = (notify: boolean): boolean => {
       let draft: DraftProject;
@@ -3488,7 +3486,7 @@ export default function App() {
     };
     autosaveTimer.current = window.setTimeout(saveDraft, 800);
     return () => { if (autosaveTimer.current) { window.clearTimeout(autosaveTimer.current); autosaveTimer.current = null; } };
-  }, [activeSceneId, blockInputLayout, dirty, hardwareTarget, projectName, projectPath, sceneDocuments, showAppNotice, sourceCode, sourceCodeInitialized, voiceoverRoles, workspaceMode, workspaceRevision]);
+  }, [activeSceneId, blockInputLayout, dirty, profile, projectName, projectPath, sceneDocuments, showAppNotice, sourceCode, sourceCodeInitialized, voiceoverRoles, workspaceMode, workspaceRevision]);
 
   const rememberRecent = useCallback((path: string, name: string) => {
     writeLastProject(localStorage, { path, name });
@@ -3840,7 +3838,7 @@ export default function App() {
     const currentSceneId = activeSceneIdRef.current;
     const savedSource = sourceOverride ?? sourceCodeRef.current;
     const persistedDocuments = sceneDocumentsRef.current.map((document) => document.id === currentSceneId ? { ...document, code: savedSource, name: resolveCodeDocumentName(savedSource, document.name) } : document);
-    const data: ProjectFile = { version: 1, projectId: projectIdRef.current, name: path.split(/[\\/]/).pop() || projectName, workspace: saveWorkspaceState(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: currentSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current, hardware: hardwareTargetToProject(hardwareTargetRef.current) };
+    const data: ProjectFile = { version: 1, projectId: projectIdRef.current, name: path.split(/[\\/]/).pop() || projectName, workspace: saveWorkspaceState(workspace.current), plugins: pluginRegistry.createProjectState(workspace.current), sourceCode: sourceCodeInitialized ? savedSource : undefined, codeDocuments: persistedDocuments.length ? persistedDocuments : undefined, activeDocumentId: currentSceneId || undefined, workspaceMode, blockInputLayout, resources: projectResourcesRef.current, profile: profileRef.current.id };
     const contents = JSON.stringify(data, null, 2);
     if (saveAs) {
       await invoke("save_project_as", { sourceProjectPath: projectPathRef.current, destinationProjectPath: path, contents });
@@ -3997,9 +3995,8 @@ export default function App() {
       cancelAutosave();
       sceneConsoleStates.current.clear();
       loadingWorkspace.current = true;
-      // 工程文件决定运行目标；载入积木前先激活板卡，保证引脚取值可解析。
-      const loadedHardwareTarget = hardwareTargetFromProject(data.hardware);
-      applyHardwareTarget(loadedHardwareTarget, workspace.current);
+      // 工程文件决定使用哪套界面（没有 profile 的旧工程就是 Python）；载入积木前先激活板卡，保证引脚取值可解析。
+      applyProfile(data.profile ?? "python", workspace.current);
       pluginRegistry.clearProjectData();
       pluginRegistry.loadProjectData(data.plugins);
       setVoiceoverRoles(getVoiceoverRoles());
@@ -4031,7 +4028,7 @@ export default function App() {
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `无法打开工程：${String(error)}\n` }]);
       if (!projectFileExists) { if (readLastProject(localStorage)?.path === path) clearLastProject(localStorage); setRecentProjects((items) => { const next = items.filter((item) => item.path !== path); localStorage.setItem("visual-python:recent", JSON.stringify(next)); return next; }); }
     }
-  }, [applyBlockInputLayout, applyHardwareTarget, cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, rememberRecent]);
+  }, [applyBlockInputLayout, applyProfile, cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, rememberRecent]);
 
   useEffect(() => {
     let disposed = false;
@@ -4102,8 +4099,8 @@ export default function App() {
     pluginRegistry.loadProjectData(example.plugins);
     setVoiceoverRoles(getVoiceoverRoles());
     loadingWorkspace.current = true;
-    // 内置示例都是本机程序：加载时回到主机目标，避免示例积木被当作硬件程序生成。
-    applyHardwareTarget({ target: "host" }, currentWorkspace);
+    // 内置示例都是 Python 程序：加载时回到 Python 界面，避免示例积木被当作硬件程序生成。
+    applyProfile("python", currentWorkspace);
     try {
       loadWorkspaceFast(currentWorkspace, migrateWorkspaceState(example.workspace));
       currentWorkspace.clearUndo();
@@ -4146,7 +4143,7 @@ export default function App() {
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
       openConsolePanel("output");
     }
-  }, [applyBlockInputLayout, applyHardwareTarget, cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, openConsolePanel]);
+  }, [applyBlockInputLayout, applyProfile, cancelAutosave, confirmProjectReplacement, invalidateAiWorkspace, openConsolePanel]);
 
   const exportPython = useCallback(async () => {
     const currentScene = sceneDocuments.find((document) => document.id === activeSceneId);
@@ -4177,7 +4174,7 @@ export default function App() {
     if (!isBlockWorkspaceMode(workspaceMode)) return true;
     const ws = workspace.current;
     if (!ws) return true;
-    const issues = validateWorkspaceIssues(ws, hardwareTargetRef.current);
+    const issues = validateWorkspaceIssues(ws, profileRef.current);
     setContextProblems(contextIssuesToProblems(issues));
     if (!issues.length) return true;
     setActivePanel("problems");
@@ -4550,13 +4547,13 @@ export default function App() {
   const manimOutputFilenamePreview = buildManimOutputFilename(projectName, manimSceneName || "MainScene", manimRenderConfig.outputFileName, new Date(), manimRenderConfig.outputType);
   const hasMultipleManimScenes = manimSceneNames.length > 1;
   useEffect(() => { if (!hasMultipleManimScenes) setManimSceneMenuOpen(false); }, [hasMultipleManimScenes]);
-  const primaryActionLabel = renderingManim ? "停止渲染" : hardwareTarget.target === "device" ? (hardwareDevice.busy ? "停止" : "运行") : running ? "停止" : manimSceneName ? manimRenderConfig.outputType === "image" ? "生成图片" : "渲染" : "运行";
-  const primaryActionTitle = renderingManim ? "停止 Manim 渲染" : hardwareTarget.target === "device" ? (hardwareDevice.busy ? "停止设备上的程序（只中断，不重启）" : `上传并运行到 ${hardwareDevice.snapshot?.portName ?? hardwareBoardLabel(hardwareTarget) ?? "开发板"}`) : running ? "停止运行" : manimSceneName ? `${manimRenderConfig.outputType === "image" ? "生成图片" : "渲染"}：${manimSceneName}` : "运行当前 Python 代码";
-  const primaryActionIcon = renderingManim || running || (hardwareTarget.target === "device" && hardwareDevice.busy) ? <Square size={14} fill="currentColor"/> : hardwareTarget.target === "device" ? <Usb size={15}/> : manimSceneName ? manimRenderConfig.outputType === "image" ? <ImageIcon size={15}/> : <Film size={15}/> : <Play size={15} fill="currentColor"/>;
-  const primaryActionClass = `run-button ${renderingManim || running || (hardwareTarget.target === "device" && hardwareDevice.busy) ? "stopping" : ""} ${manimSceneName && !running && hardwareTarget.target !== "device" ? "manim" : ""}`;
-  const devicePhaseLabel = hardwareTarget.target === "device" ? deviceRunPhaseLabel(hardwareDevice.phase) : null;
+  const primaryActionLabel = renderingManim ? "停止渲染" : running ? "停止" : manimSceneName ? manimRenderConfig.outputType === "image" ? "生成图片" : "渲染" : "运行";
+  const primaryActionTitle = renderingManim ? "停止 Manim 渲染" : running ? "停止运行" : manimSceneName ? `${manimRenderConfig.outputType === "image" ? "生成图片" : "渲染"}：${manimSceneName}` : "运行当前 Python 代码";
+  const primaryActionIcon = renderingManim || running ? <Square size={14} fill="currentColor"/> : manimSceneName ? manimRenderConfig.outputType === "image" ? <ImageIcon size={15}/> : <Film size={15}/> : <Play size={15} fill="currentColor"/>;
+  const primaryActionClass = `run-button ${renderingManim || running ? "stopping" : ""} ${manimSceneName && !running ? "manim" : ""}`;
+  const hardwareWorkbench = isHardwareWorkbench(profile);
   const deviceProgress = deviceProgressPercent(hardwareDevice.progress);
-  const hardwareDeviceStatusText = hardwareTarget.target === "device" && hardwareDevice.busy ? devicePhaseLabel ?? "正在与设备通信" : null;
+  const hardwareDeviceStatusText = hardwareWorkbench && hardwareDevice.busy ? deviceRunPhaseLabel(hardwareDevice.phase) ?? "正在与设备通信" : null;
   const manimPluginActive = pluginRecords.some((record) => record.plugin.manifest.id === "visual-python.manim" && record.state === "active");
   const codeOutline = workspaceMode === "code" ? getPythonOutline(sourceCode) : [];
   const blockOutline = useMemo(() => {
@@ -5031,30 +5028,28 @@ export default function App() {
 
   const formatResourceSize = (size: number) => size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`;
 
-  /**
-   * 设备目标的「运行」：生成当前积木的 MicroPython 代码 → 上传为 `main.py` → 校验通过后软复位执行。
-   * 上传失败时后端不会启动设备上的旧程序（阶段 5/6 的不变式），所以这里不需要额外兜底。
-   */
-  const runDeviceCode = useCallback(async () => {
-    setProblems([]);
-    setCodeRuntimeDiagnostic(null);
-    setBottomPanelOpen(true);
-    setActivePanel("output");
-    if (!validateBeforeExecution()) return null;
-    const code = isBlockWorkspaceMode(workspaceMode) && workspace.current ? generateWorkspacePython(workspace.current) : sourceCodeRef.current;
-    return hardwareDeviceRef.current.run(code, `/${deviceEntryFileName}`);
-  }, [validateBeforeExecution, workspaceMode]);
+  const hardwareRunner = useHardwareRunner({
+    device: hardwareDevice,
+    getCode: () => isBlockWorkspaceMode(workspaceModeRef.current) && workspace.current ? generateWorkspacePython(workspace.current) : sourceCodeRef.current,
+    prepare: () => {
+      setProblems([]);
+      setCodeRuntimeDiagnostic(null);
+      setBottomPanelOpen(true);
+      setActivePanel("output");
+      return validateBeforeExecution();
+    },
+  });
 
   const runPrimaryAction = useCallback(() => {
-    if (renderingManim) return void stopManimRender();
-    if (hardwareTargetRef.current.target === "device") {
-      // 设备目标下：运行中再点就是停止（和主机运行的手感一致）。
-      if (hardwareDeviceRef.current.busy) return void hardwareDeviceRef.current.stop();
-      return void runDeviceCode();
+    if (isHardwareWorkbench(profileRef.current)) {
+      // 硬件界面下：设备忙时再点就是停止（和 Python 运行的手感一致）。
+      if (hardwareRunner.isBusy()) return void hardwareRunner.stop();
+      return void hardwareRunner.run();
     }
+    if (renderingManim) return void stopManimRender();
     if (running) return void stopCode();
     return manimSceneName ? void renderManim() : void runCode();
-  }, [manimSceneName, renderManim, renderingManim, runCode, runDeviceCode, running, stopCode, stopManimRender]);
+  }, [hardwareRunner, manimSceneName, renderManim, renderingManim, runCode, running, stopCode, stopManimRender]);
 
   useEffect(() => {
     const onWorkbenchShortcut = (event: KeyboardEvent) => {
@@ -5069,9 +5064,9 @@ export default function App() {
         return;
       }
       if (action.type === "stop") {
-        // 设备工作台里停止的判断依据是「设备是否在忙」，而不是主机是否在运行。
-        if (hardwareTargetRef.current.target === "device") {
-          if (!hardwareDeviceRef.current.busy) return;
+        // 硬件界面里停止的判断依据是「设备是否在忙」，而不是本机是否在运行。
+        if (isHardwareWorkbench(profileRef.current)) {
+          if (!hardwareRunner.isBusy()) return;
         } else if (!running && !renderingManim) return;
         event.preventDefault();
         runPrimaryAction();
@@ -5083,7 +5078,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onWorkbenchShortcut, true);
     return () => window.removeEventListener("keydown", onWorkbenchShortcut, true);
-  }, [blockingAlert, changeWorkspaceMode, closePromptOpen, codeOutlineOpen, confirmationRequest, exampleMenuOpen, formulaEditorRequest, hardwareMenuOpen, helpMenuOpen, manimRenderSettingsOpen, manimSceneMenuOpen, pluginsOpen, projectMenuOpen, pythonEnvironmentMenuOpen, renderManim, renderingManim, resourcesOpen, runPrimaryAction, running, settingsOpen, shortcutMenuOpen, unsavedChangesPromptOpen, voiceCloneDialogOpen]);
+  }, [blockingAlert, changeWorkspaceMode, closePromptOpen, codeOutlineOpen, confirmationRequest, exampleMenuOpen, formulaEditorRequest, hardwareMenuOpen, hardwareRunner, helpMenuOpen, manimRenderSettingsOpen, manimSceneMenuOpen, pluginsOpen, projectMenuOpen, pythonEnvironmentMenuOpen, renderManim, renderingManim, resourcesOpen, runPrimaryAction, running, settingsOpen, shortcutMenuOpen, unsavedChangesPromptOpen, voiceCloneDialogOpen]);
 
   const sendInput = useCallback(async () => {
     const currentTask = taskId.current;
@@ -5366,23 +5361,14 @@ export default function App() {
           switchDocumentConsoleState: switchSceneConsoleState,
           formatCurrentPythonCode,
           runCode: async () => {
-            // 设备目标：AI 触发的「运行」同样是“上传并执行”，并有界等待结果（死循环不会卡住工具调用）。
-            if (hardwareTargetRef.current.target === "device") {
-              const { accepted, outcome } = await hardwareDeviceRef.current.runAndWait(
-                isBlockWorkspaceMode(workspaceModeRef.current) && workspace.current ? generateWorkspacePython(workspace.current) : sourceCodeRef.current,
-              );
-              if (!accepted) return { started: false, target: "device" as const, message: hardwareDeviceRef.current.error ?? "设备运行没有启动（请检查连接状态）。" };
-              const summary = outcome
-                ? `${describeRunFinished(outcome).message}${outcome.tail ? ` 错误输出：${outcome.tail.slice(-400)}` : ""}`
-                : "程序已上传到设备并开始运行，仍在运行中（死循环程序不会结束），设备输出见控制台与设备面板。";
-              return { started: true, target: "device" as const, runId: accepted.runId, message: summary };
-            }
+            // 硬件界面：AI 触发的「运行」同样是“上传并执行”。
+            if (isHardwareWorkbench(profileRef.current)) return hardwareRunner.runForAgent();
             await runCode();
             return { started: taskId.current !== null, target: "host" as const };
           },
           stopCode,
-          getDeviceExecutionState: () => ({ deviceRunning: hardwareDeviceRef.current.running, devicePhase: hardwareDeviceRef.current.phase, devicePort: hardwareDeviceRef.current.snapshot?.portName ?? null, deviceConnected: hardwareDeviceRef.current.connected }),
-          stopDeviceExecution: () => hardwareDeviceRef.current.stop(),
+          getDeviceExecutionState: () => isHardwareWorkbench(profileRef.current) ? hardwareRunner.executionState() : undefined,
+          stopDeviceExecution: async () => { if (isHardwareWorkbench(profileRef.current)) await hardwareRunner.stop(); },
           writeProject,
           saveProject,
           invoke,
@@ -5620,7 +5606,7 @@ export default function App() {
               return index.filter((entry) => wanted.has(entry.type)).map((entry) => ({ type: entry.type, label: entry.label, category: entry.category, state: entry.item as unknown as Record<string, unknown>, ...describeBlocklyBlockContract(entry.type, entry.item as unknown as Record<string, unknown>) }));
             },
             generateCode: generateWorkspacePython,
-            validateContexts: (candidate) => validateWorkspaceIssues(candidate, hardwareTargetRef.current),
+            validateContexts: (candidate) => validateWorkspaceIssues(candidate, profileRef.current),
             validateCode: async (candidate) => { await invoke("validate_python_code", { code: candidate, pythonPath: pythonEnvironment?.path || null }); },
             commit: (state, generatedCode) => {
               const ws = workspace.current;
@@ -5632,7 +5618,7 @@ export default function App() {
                 pushWorkspaceUndoSnapshot(ws, undoBeforeState, saveWorkspaceState(ws));
               } finally { Blockly.Events.enable(); }
               setCode(generatedCode);
-              setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws, hardwareTargetRef.current)));
+              setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws, profileRef.current)));
               setDirty(true);
               setWorkspaceRevision((revision) => revision + 1);
             },
@@ -5789,7 +5775,7 @@ export default function App() {
       try { Blockly.serialization.workspaces.load(replacement, ws); ws.clearUndo(); } finally { Blockly.Events.enable(); }
       const generatedCode = generateWorkspacePython(ws);
       setCode(generatedCode);
-      setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws, hardwareTargetRef.current)));
+      setContextProblems(contextIssuesToProblems(validateWorkspaceIssues(ws, profileRef.current)));
       setDirty(true);
       setWorkspaceRevision((revision) => revision + 1);
       return true;
@@ -6095,17 +6081,17 @@ export default function App() {
     else setResourcesOpen(true);
   };
   /**
-   * 顶部工具栏与菜单栏里的工作台切换。切到硬件工作台时顺手关掉管理中心：
-   * 那里多数页面（Manim、Python 环境）在硬件模式下不显示。
+   * 切换工作台界面。切到硬件界面时顺手关掉管理中心：
+   * 那里多数页面（Manim、Python 环境）在硬件界面下不显示。
    */
-  const switchWorkbench = (next: HardwareRunTarget) => {
-    const leavingDevice = next.target === "host" && hardwareTargetRef.current.target === "device";
-    applyHardwareTarget(next, workspace.current);
-    if (next.target === "device") closeManagementCenter();
-    // 切回本机不会断开设备，也不该悄悄停掉设备上的程序：正在运行时明确说一句。
-    else if (leavingDevice && hardwareDeviceRef.current.busy) showAppNotice("已切回本机 Python：设备上的程序仍在运行。", "info");
+  const switchProfile = (nextId: WorkbenchProfileId) => {
+    if (nextId === profileRef.current.id || running || renderingManim) return;
+    const leavingHardware = isHardwareWorkbench(profileRef.current) && !isHardwareWorkbench(getWorkbenchProfile(nextId));
+    applyProfile(nextId, workspace.current);
+    if (isHardwareWorkbench(getWorkbenchProfile(nextId))) closeManagementCenter();
+    // 切回 Python 不会断开设备，也不该悄悄停掉设备上的程序：正在运行时明确说一句。
+    else if (leavingHardware && hardwareRunner.isBusy()) showAppNotice("已切回 Python：设备上的程序仍在运行。", "info");
   };
-  const selectHardwareBoard = (boardId: HardwareBoardId) => switchWorkbench({ target: "device", boardId });
   const openManimGuide = async () => {
     setHelpMenuOpen(false);
     try {
@@ -6125,8 +6111,8 @@ export default function App() {
   const renderManagementNavigation = () => <aside className="management-navigation" aria-label="管理中心导航">
     <header><span className="management-brand"><Settings size={18}/></span><span><strong>管理中心</strong><small>Visual Python</small></span></header>
     <div className="management-navigation-scroll">
-      <section><h3>应用设置</h3><button className={settingsOpen && settingsSection === "appearance" ? "selected" : ""} onClick={() => openApplicationSettings("appearance")}><Settings size={16}/><span>外观与主题</span></button><button className={settingsOpen && settingsSection === "editor" ? "selected" : ""} onClick={() => openApplicationSettings("editor")}><Code2 size={16}/><span>代码编辑器</span></button><button className={settingsOpen && settingsSection === "python" ? "selected" : ""} onClick={() => openApplicationSettings("python")}><Braces size={16}/><span>Python 环境</span></button><button className={settingsOpen && settingsSection === "hardware" ? "selected" : ""} onClick={() => openApplicationSettings("hardware")}><Cpu size={16}/><span>硬件设备</span></button><button className={settingsOpen && settingsSection === "ai" ? "selected" : ""} onClick={() => openApplicationSettings("ai")}><Sparkles size={16}/><span>AI 模型</span></button><button className={settingsOpen && settingsSection === "behavior" ? "selected" : ""} onClick={() => openApplicationSettings("behavior")}><Power size={16}/><span>应用行为</span></button></section>
-      {manimPluginActive && hardwareTarget.target !== "device" && <section><h3>Manim</h3><button className={manimRenderSettingsOpen && manimSettingsSection === "output" ? "selected" : ""} onClick={() => openManimSettings("output")}><Film size={16}/><span>渲染与输出</span></button><button className={manimRenderSettingsOpen && manimSettingsSection === "renderer" ? "selected" : ""} onClick={() => openManimSettings("renderer")}><Play size={16}/><span>渲染器</span></button><button className={manimRenderSettingsOpen && manimSettingsSection === "voice" ? "selected" : ""} onClick={() => openManimSettings("voice")}><Volume2 size={16}/><span>配音</span></button><button className={manimRenderSettingsOpen && manimSettingsSection === "storage" ? "selected" : ""} onClick={() => openManimSettings("storage")}><FolderOpen size={16}/><span>存储</span></button></section>}
+      <section><h3>应用设置</h3><button className={settingsOpen && settingsSection === "appearance" ? "selected" : ""} onClick={() => openApplicationSettings("appearance")}><Settings size={16}/><span>外观与主题</span></button><button className={settingsOpen && settingsSection === "editor" ? "selected" : ""} onClick={() => openApplicationSettings("editor")}><Code2 size={16}/><span>代码编辑器</span></button>{profile.features.pythonEnvironment && <button className={settingsOpen && settingsSection === "python" ? "selected" : ""} onClick={() => openApplicationSettings("python")}><Braces size={16}/><span>Python 环境</span></button>}{profile.features.devicePanel && <button className={settingsOpen && settingsSection === "hardware" ? "selected" : ""} onClick={() => openApplicationSettings("hardware")}><Cpu size={16}/><span>硬件设备</span></button>}<button className={settingsOpen && settingsSection === "ai" ? "selected" : ""} onClick={() => openApplicationSettings("ai")}><Sparkles size={16}/><span>AI 模型</span></button><button className={settingsOpen && settingsSection === "behavior" ? "selected" : ""} onClick={() => openApplicationSettings("behavior")}><Power size={16}/><span>应用行为</span></button></section>
+      {manimPluginActive && profile.features.manim && <section><h3>Manim</h3><button className={manimRenderSettingsOpen && manimSettingsSection === "output" ? "selected" : ""} onClick={() => openManimSettings("output")}><Film size={16}/><span>渲染与输出</span></button><button className={manimRenderSettingsOpen && manimSettingsSection === "renderer" ? "selected" : ""} onClick={() => openManimSettings("renderer")}><Play size={16}/><span>渲染器</span></button><button className={manimRenderSettingsOpen && manimSettingsSection === "voice" ? "selected" : ""} onClick={() => openManimSettings("voice")}><Volume2 size={16}/><span>配音</span></button><button className={manimRenderSettingsOpen && manimSettingsSection === "storage" ? "selected" : ""} onClick={() => openManimSettings("storage")}><FolderOpen size={16}/><span>存储</span></button></section>}
       <section><h3>管理</h3><button className={pluginsOpen ? "selected" : ""} onClick={() => openManagementPage("plugins")}><Plug size={16}/><span>插件</span></button><button className={resourcesOpen ? "selected" : ""} onClick={() => openManagementPage("resources")}><Box size={16}/><span>工程资源</span>{missingProjectResources.length > 0 && <em>{missingProjectResources.length}</em>}</button></section>
     </div>
     <footer><button onClick={closeManagementCenter}><ArrowLeft size={16}/><span>返回编辑器</span></button></footer>
@@ -6154,20 +6140,21 @@ export default function App() {
           <button role="menuitem" disabled={workspaceMode !== "code"} onClick={() => runCodeEditorAction("editor.action.gotoLine")}><ListOrdered size={15}/><span>跳转到行</span><kbd>Ctrl+G</kbd></button>
         </div>}
       </div><div className="project-menu-wrap">
-        <button className="project-menu-trigger" aria-expanded={hardwareMenuOpen} onClick={() => { setHardwareMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); }}>硬件 <ChevronDown size={13}/></button>
-        {hardwareMenuOpen && <div className="project-menu hardware-menu" role="menu" aria-label="硬件工作台">
-          <div className="hardware-menu-label">运行目标</div>
-          <button role="menuitemradio" aria-checked={hardwareTarget.target === "host"} onClick={() => { setHardwareMenuOpen(false); switchWorkbench({ target: "host" }); }}><Braces size={15}/><span>本机 Python</span>{hardwareTarget.target === "host" && <Check size={13} className="hardware-menu-check"/>}</button>
-          <button role="menuitemradio" aria-checked={hardwareTarget.target === "device"} onClick={() => { setHardwareMenuOpen(false); switchWorkbench({ target: "device", boardId: hardwareTarget.boardId ?? defaultHardwareBoardId }); }}><Cpu size={15}/><span>硬件工作台（MicroPython）</span>{hardwareTarget.target === "device" && <Check size={13} className="hardware-menu-check"/>}</button>
-          {hardwareBoardOptions().map((option) => { const selected = hardwareTarget.target === "device" && hardwareTarget.boardId === option.id; return <button key={option.id} role="menuitemradio" aria-checked={selected} onClick={() => { setHardwareMenuOpen(false); selectHardwareBoard(option.id); }}><Cpu size={15}/><span>{option.label}</span>{selected && <Check size={13} className="hardware-menu-check"/>}</button>; })}
-          <button role="menuitem" onClick={() => { setHardwareMenuOpen(false); void hardwareDevice.refreshPorts(); }}><RefreshCw size={15}/><span>刷新串口</span></button>
-          <button role="menuitem" onClick={() => { setHardwareMenuOpen(false); openApplicationSettings("hardware"); }}><Download size={15}/><span>固件刷写与设置</span></button>
-          {hardwareTarget.target === "device" && <button role="menuitem" disabled={!hardwareDevice.connected || hardwareDevice.busy} onClick={() => { setHardwareMenuOpen(false); void hardwareDevice.reset(); }}><RotateCcw size={15}/><span>重置设备</span></button>}
+        <button className="project-menu-trigger" aria-expanded={hardwareMenuOpen} onClick={() => { setHardwareMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); }}>工作台 <ChevronDown size={13}/></button>
+        {hardwareMenuOpen && <div className="project-menu hardware-menu" role="menu" aria-label="工作台界面">
+          <div className="hardware-menu-label">界面</div>
+          {listWorkbenchProfiles().map((option) => { const selected = option.id === profile.id; return <button key={option.id} role="menuitemradio" aria-checked={selected} disabled={running || renderingManim} onClick={() => { setHardwareMenuOpen(false); switchProfile(option.id); }}>{isHardwareWorkbench(option) ? <Cpu size={15}/> : <Braces size={15}/>}<span>{option.label}</span>{selected && <Check size={13} className="hardware-menu-check"/>}</button>; })}
+          {hardwareWorkbench && <>
+            <div className="hardware-menu-label">设备</div>
+            <button role="menuitem" onClick={() => { setHardwareMenuOpen(false); void hardwareDevice.refreshPorts(); }}><RefreshCw size={15}/><span>刷新串口</span></button>
+            <button role="menuitem" onClick={() => { setHardwareMenuOpen(false); openApplicationSettings("hardware"); }}><Download size={15}/><span>固件刷写</span></button>
+            <button role="menuitem" disabled={!hardwareDevice.connected || hardwareDevice.busy} onClick={() => { setHardwareMenuOpen(false); void hardwareDevice.reset(); }}><RotateCcw size={15}/><span>重置设备</span></button>
+          </>}
         </div>}
       </div><div className="project-menu-wrap">
         <button className="project-menu-trigger" aria-expanded={helpMenuOpen} onClick={() => { setHelpMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setShortcutMenuOpen(false); }}>帮助 <ChevronDown size={13}/></button>
         {helpMenuOpen && <div className="project-menu help-menu" role="menu" aria-label="帮助">
-          {hardwareTarget.target !== "device" && <button role="menuitem" onClick={() => void openManimGuide()}><BookOpen size={15}/><span>Manim 使用说明</span><ExternalLink size={13}/></button>}
+          {profile.features.manim && <button role="menuitem" onClick={() => void openManimGuide()}><BookOpen size={15}/><span>Manim 使用说明</span><ExternalLink size={13}/></button>}
           <button role="menuitem" onClick={() => void openPluginDevelopmentGuide()}><Plug size={15}/><span>插件开发文档</span><ExternalLink size={13}/></button>
         </div>}
       </div></div></div>
@@ -6179,33 +6166,27 @@ export default function App() {
           <button className={workspaceMode === "code" ? "selected" : ""} aria-pressed={workspaceMode === "code"} aria-label="代码模式" title="代码" disabled={running || renderingManim} onClick={() => changeWorkspaceMode("code")}><Code2 size={15}/></button>
         </div>
         <div className="history-controls" role="group" aria-label="编辑历史"><button className="icon-button" title="撤销（Ctrl+Z）" disabled={running || renderingManim} onClick={() => workspaceMode === "code" ? codeEditor.current?.trigger("toolbar", "undo", null) : workspace.current?.undo(false)}><Undo2 size={16}/></button><button className="icon-button" title="重做（Ctrl+Y）" disabled={running || renderingManim} onClick={() => workspaceMode === "code" ? codeEditor.current?.trigger("toolbar", "redo", null) : workspace.current?.undo(true)}><Redo2 size={16}/></button></div>
-        {hardwareTarget.target === "device"
-          ? <>
-            <HardwareWorkbenchBar
-              boardId={hardwareBoardId(hardwareTarget)}
-              ports={hardwareDevice.ports}
-              portName={hardwareDevice.portName}
-              device={hardwareDevice.snapshot}
-              busy={hardwareDevice.busy}
-              onSelectBoard={selectHardwareBoard}
-              onSelectPort={hardwareDevice.selectPort}
-              onRefreshPorts={() => void hardwareDevice.refreshPorts()}
-              onConnect={() => void hardwareDevice.connect()}
-              onDisconnect={() => void hardwareDevice.disconnect()}
-              onRun={() => void runDeviceCode()}
-              onStop={() => void hardwareDevice.stop()}
-              onReset={() => void hardwareDevice.reset()}
-            />
-            <button className="icon-button hardware-workbench-switch" title="返回本机 Python" aria-label="返回本机 Python" onClick={() => switchWorkbench({ target: "host" })}><Braces size={16}/></button>
-          </>
-          : <>
-            {hasMultipleManimScenes && !renderingManim && !running ? <div className="manim-run-split" ref={manimSceneMenuRef}>
-              <button className={`${primaryActionClass} manim-run-main`} onClick={runPrimaryAction} title={primaryActionTitle}>{primaryActionIcon}<span>渲染 {manimSceneName}</span></button>
-              <button className="manim-run-menu-trigger" aria-expanded={manimSceneMenuOpen} onClick={() => setManimSceneMenuOpen((open) => !open)} title="选择 Manim 场景"><ChevronDown size={13}/></button>
-              {manimSceneMenuOpen && <div className="manim-scene-menu">{manimSceneNames.map((sceneName) => <button key={sceneName} className={sceneName === manimSceneName ? "selected" : ""} onClick={() => { updateManimRenderConfig({ selectedScene: sceneName }); setManimSceneMenuOpen(false); }}><span>{sceneName}</span>{sceneName === manimSceneName && <Check size={13}/>}</button>)}</div>}
-            </div> : <button className={primaryActionClass} onClick={runPrimaryAction} title={primaryActionTitle}>{primaryActionIcon}{primaryActionLabel}</button>}
-            <button className="hardware-workbench-enter" title="硬件工作台：给 ESP32 / ESP8266 编写 MicroPython 程序" onClick={() => switchWorkbench({ target: "device", boardId: hardwareTarget.boardId ?? defaultHardwareBoardId })}><Cpu size={15}/><span>硬件</span></button>
-          </>}
+        {hardwareBoardId
+          ? <HardwareWorkbenchBar
+            boardId={hardwareBoardId}
+            ports={hardwareDevice.ports}
+            portName={hardwareDevice.portName}
+            device={hardwareDevice.snapshot}
+            busy={hardwareDevice.busy}
+            onSelectBoard={switchProfile}
+            onSelectPort={hardwareDevice.selectPort}
+            onRefreshPorts={() => void hardwareDevice.refreshPorts()}
+            onConnect={() => void hardwareDevice.connect()}
+            onDisconnect={() => void hardwareDevice.disconnect()}
+            onRun={() => void hardwareRunner.run()}
+            onStop={() => void hardwareRunner.stop()}
+            onReset={() => void hardwareDevice.reset()}
+          />
+          : hasMultipleManimScenes && !renderingManim && !running ? <div className="manim-run-split" ref={manimSceneMenuRef}>
+            <button className={`${primaryActionClass} manim-run-main`} onClick={runPrimaryAction} title={primaryActionTitle}>{primaryActionIcon}<span>渲染 {manimSceneName}</span></button>
+            <button className="manim-run-menu-trigger" aria-expanded={manimSceneMenuOpen} onClick={() => setManimSceneMenuOpen((open) => !open)} title="选择 Manim 场景"><ChevronDown size={13}/></button>
+            {manimSceneMenuOpen && <div className="manim-scene-menu">{manimSceneNames.map((sceneName) => <button key={sceneName} className={sceneName === manimSceneName ? "selected" : ""} onClick={() => { updateManimRenderConfig({ selectedScene: sceneName }); setManimSceneMenuOpen(false); }}><span>{sceneName}</span>{sceneName === manimSceneName && <Check size={13}/>}</button>)}</div>}
+          </div> : <button className={primaryActionClass} onClick={runPrimaryAction} title={primaryActionTitle}>{primaryActionIcon}{primaryActionLabel}</button>}
         <span className="toolbar-divider window-divider"/>
         <div className="window-controls">
           <button className="window-control" title="最小化" onClick={() => void appWindow.minimize()}><Minus size={16}/></button>
@@ -6261,10 +6242,10 @@ export default function App() {
         </div>
         <div className={`console-resizer ${!effectiveBottomPanelOpen ? "collapsed" : ""}`} onPointerDown={startBottomPanelResize} role="separator" aria-label="调整输出面板高度" aria-orientation="horizontal" aria-valuemin={160} aria-valuemax={600} aria-valuenow={bottomPanelHeight}/>
         <div ref={consolePanelRef} className={`console-panel ${effectiveBottomPanelOpen ? "" : "collapsed"}`} onContextMenu={openConsoleContextMenu}>
-          <div className="console-tabs"><button className={activePanel === "output" ? "active" : ""} onClick={() => openConsolePanel("output")}><Terminal size={13}/> 输出</button><button className={activePanel === "problems" ? "active" : ""} onClick={() => openConsolePanel("problems")}>问题 <span className="count">{displayedProblems.length}</span></button>{hardwareTarget.target === "device" && <button className={activePanel === "device" ? "active" : ""} onClick={() => openConsolePanel("device")}><Usb size={13}/> 设备</button>}{hardwareTarget.target !== "device" && <button className={activePanel === "preview" ? "active" : ""} onClick={() => openConsolePanel("preview")}>{manimRenderOutput?.type === "image" ? <ImageIcon size={13}/> : <Film size={13}/>} 预览</button>}<span className="console-spacer"/><button className="clear-output" onClick={clearConsole} title="清空输出" aria-label="清空输出"><Trash2 size={13}/></button><button className="panel-collapse" onClick={() => setBottomPanelOpen((open) => !open)} title={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"} aria-label={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"}>{effectiveBottomPanelOpen ? <PanelBottomClose size={14}/> : <PanelBottomOpen size={14}/>}</button></div>
+          <div className="console-tabs"><button className={activePanel === "output" ? "active" : ""} onClick={() => openConsolePanel("output")}><Terminal size={13}/> 输出</button><button className={activePanel === "problems" ? "active" : ""} onClick={() => openConsolePanel("problems")}>问题 <span className="count">{displayedProblems.length}</span></button>{profile.features.devicePanel && <button className={activePanel === "device" ? "active" : ""} onClick={() => openConsolePanel("device")}><Usb size={13}/> 设备</button>}{profile.features.renderPreview && <button className={activePanel === "preview" ? "active" : ""} onClick={() => openConsolePanel("preview")}>{manimRenderOutput?.type === "image" ? <ImageIcon size={13}/> : <Film size={13}/>} 预览</button>}<span className="console-spacer"/><button className="clear-output" onClick={clearConsole} title="清空输出" aria-label="清空输出"><Trash2 size={13}/></button><button className="panel-collapse" onClick={() => setBottomPanelOpen((open) => !open)} title={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"} aria-label={effectiveBottomPanelOpen ? "折叠输出面板" : "展开输出面板"}>{effectiveBottomPanelOpen ? <PanelBottomClose size={14}/> : <PanelBottomOpen size={14}/>}</button></div>
           <div className={`console-content ${renderingManim && manimRenderProgress ? "has-manim-render-status" : ""} ${hardwareDeviceStatusText ? "has-hardware-device-status" : ""}`}>
             {hardwareDeviceStatusText && <div className={`hardware-device-console-status phase-${hardwareDevice.phase}`} role="status">
-              <div className="hardware-device-console-status-text"><Usb size={13}/><strong>{hardwareDevice.snapshot?.portName ?? hardwareBoardLabel(hardwareTarget) ?? "开发板"}</strong><span>{hardwareDeviceStatusText}</span></div>
+              <div className="hardware-device-console-status-text"><Usb size={13}/><strong>{hardwareDevice.snapshot?.portName ?? profile.label}</strong><span>{hardwareDeviceStatusText}</span></div>
               {deviceProgress !== undefined && <div className="hardware-device-console-track"><span style={{ width: `${deviceProgress}%` }}/></div>}
             </div>}
             {renderingManim && manimRenderProgress && <div className={`manim-render-status phase-${manimRenderProgress.phase}`} role="progressbar" aria-label={`${manimRenderProgress.scene} ${manimRenderProgress.label}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={manimRenderProgress.percent}>
@@ -6282,7 +6263,7 @@ export default function App() {
         <AiAssistantPanel key={aiConversationScope} conversationScope={aiConversationScope} conversationMigrationScopes={aiConversationMigrationScopes} workspaceEpoch={aiWorkspaceEpoch} lineCount={activeCode ? activeCode.split("\n").length : 0} contextName={workspaceMode === "code" ? sceneDocuments.find((document) => document.id === activeSceneId)?.name || "当前文档" : workspaceMode === "visual" ? "图形化工作区" : "图形化与代码"} onOpenSettings={() => openApplicationSettings("ai")} onClose={() => setAiAssistantOpen(false)} onRunAgent={runAiCodeAgentTask} onRevealCodeChange={revealAiCodeChange} onRevealProblem={revealAiProblem} onUndoTaskChange={(change) => applyAiTaskSnapshot(change, "undo")} onApplyTaskChange={(change) => applyAiTaskSnapshot(change, "apply")} onClearConversationConfirm={() => requestConfirmation({ title: "清空当前 AI 对话？", message: "当前对话中的全部消息和任务记录都将被永久删除。", confirmLabel: "清空对话", tone: "danger" })}/>
       </aside>
     </section>
-    <footer className="statusbar" onContextMenu={(event) => event.preventDefault()}><div className="python-environment-switcher" ref={pythonEnvironmentMenuRef}><button className="environment-status" aria-haspopup="menu" aria-expanded={pythonEnvironmentMenuOpen} disabled={running || renderingManim} onClick={() => { const next = !pythonEnvironmentMenuOpen; setPythonEnvironmentMenuOpen(next); if (next) void detectPythonEnvironments(); }}><span>{pythonEnvironment ? `Python ${pythonEnvironment.version}` : "未选择 Python"}</span></button>{pythonEnvironmentMenuOpen && <div className="python-environment-menu" role="menu" aria-label="切换 Python 解释器"><header><span><strong>Python 解释器</strong><small>{supportedPythonRangeLabel}</small></span><button className="python-environment-refresh" onClick={() => void detectPythonEnvironments()} disabled={detectingPython} title="重新检测" aria-label="重新检测 Python 解释器"><RefreshCw size={13} className={detectingPython ? "spin" : ""}/></button></header><div className="python-environment-options">{pythonEnvironments.length ? pythonEnvironments.map((environment) => { const selected = pythonEnvironment?.path.toLowerCase() === environment.path.toLowerCase(); return <button key={environment.path} className={`python-environment-option ${selected ? "selected" : ""}`} role="menuitemradio" aria-checked={selected} title={environment.path} onClick={() => selectPythonEnvironment(environment)}><span className="python-environment-option-check">{selected && <Check size={12}/>}</span><span><strong>Python {environment.version}</strong><small>{environment.implementation}{environment.virtual_env ? " · 虚拟环境" : ""}</small><code>{environment.path}</code></span></button>; }) : <div className="python-environment-empty"><Braces size={18}/><span>{detectingPython ? "正在检测 Python..." : `未检测到${supportedPythonRangeLabel}`}</span></div>}</div></div>}</div><span className="status-spacer"/>{hardwareTarget.target === "device" && <button className="hardware-target-chip" title="切换运行目标或开发板、连接设备" onClick={() => openApplicationSettings("hardware")}><Cpu size={12}/><span>MicroPython · {hardwareBoardLabel(hardwareTarget)}</span><em>{hardwareDevice.connected ? `${hardwareDevice.snapshot?.portName} 已连接` : "未连接"}</em></button>}{workspaceMode === "code" && <div className="editor-status-items"><button onClick={() => runCodeEditorAction("editor.action.gotoLine")} title="跳转到行">行 {codeCursorPosition.lineNumber}，列 {codeCursorPosition.column}</button><span title="Python 缩进宽度">空格: {codeIndentSize}</span><span title="文件编码">UTF-8</span></div>}<span>{running ? "正在运行" : renderingManim ? "正在渲染" : hardwareTarget.target === "device" ? hardwareDevice.running ? "设备运行中" : hardwareDevice.connected ? "设备已连接" : "就绪" : "就绪"}</span></footer>
+    <footer className="statusbar" onContextMenu={(event) => event.preventDefault()}>{profile.features.pythonEnvironment && <div className="python-environment-switcher" ref={pythonEnvironmentMenuRef}><button className="environment-status" aria-haspopup="menu" aria-expanded={pythonEnvironmentMenuOpen} disabled={running || renderingManim} onClick={() => { const next = !pythonEnvironmentMenuOpen; setPythonEnvironmentMenuOpen(next); if (next) void detectPythonEnvironments(); }}><span>{pythonEnvironment ? `Python ${pythonEnvironment.version}` : "未选择 Python"}</span></button>{pythonEnvironmentMenuOpen && <div className="python-environment-menu" role="menu" aria-label="切换 Python 解释器"><header><span><strong>Python 解释器</strong><small>{supportedPythonRangeLabel}</small></span><button className="python-environment-refresh" onClick={() => void detectPythonEnvironments()} disabled={detectingPython} title="重新检测" aria-label="重新检测 Python 解释器"><RefreshCw size={13} className={detectingPython ? "spin" : ""}/></button></header><div className="python-environment-options">{pythonEnvironments.length ? pythonEnvironments.map((environment) => { const selected = pythonEnvironment?.path.toLowerCase() === environment.path.toLowerCase(); return <button key={environment.path} className={`python-environment-option ${selected ? "selected" : ""}`} role="menuitemradio" aria-checked={selected} title={environment.path} onClick={() => selectPythonEnvironment(environment)}><span className="python-environment-option-check">{selected && <Check size={12}/>}</span><span><strong>Python {environment.version}</strong><small>{environment.implementation}{environment.virtual_env ? " · 虚拟环境" : ""}</small><code>{environment.path}</code></span></button>; }) : <div className="python-environment-empty"><Braces size={18}/><span>{detectingPython ? "正在检测 Python..." : `未检测到${supportedPythonRangeLabel}`}</span></div>}</div></div>}</div>}<span className="status-spacer"/>{hardwareWorkbench && <button className="hardware-target-chip" title="开发板连接与固件刷写" onClick={() => openApplicationSettings("hardware")}><Cpu size={12}/><span>MicroPython · {profile.label}</span><em>{hardwareDevice.connected ? `${hardwareDevice.snapshot?.portName} 已连接` : "未连接"}</em></button>}{workspaceMode === "code" && <div className="editor-status-items"><button onClick={() => runCodeEditorAction("editor.action.gotoLine")} title="跳转到行">行 {codeCursorPosition.lineNumber}，列 {codeCursorPosition.column}</button><span title="Python 缩进宽度">空格: {codeIndentSize}</span><span title="文件编码">UTF-8</span></div>}<span>{running ? "正在运行" : renderingManim ? "正在渲染" : hardwareWorkbench ? hardwareDevice.running ? "设备运行中" : hardwareDevice.connected ? "设备已连接" : "就绪" : "就绪"}</span></footer>
     {codeEditorContextMenu && <div ref={codeEditorContextMenuRef} className="console-context-menu code-editor-context-menu" role="menu" aria-label="代码编辑操作" style={{ left: codeEditorContextMenu.x, top: codeEditorContextMenu.y }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={handleCodeEditorContextMenuKeyDown}>
       <button role="menuitem" onClick={() => runCodeEditorContextAction(() => codeEditor.current?.trigger("context-menu", "undo", null))}><Undo2 size={15}/><span>撤销</span><kbd>Ctrl+Z</kbd></button>
       <button role="menuitem" onClick={() => runCodeEditorContextAction(() => codeEditor.current?.trigger("context-menu", "redo", null))}><Redo2 size={15}/><span>重做</span><kbd>Ctrl+Y</kbd></button>
@@ -6314,7 +6295,7 @@ export default function App() {
       <button role="menuitem" onClick={() => runConsoleContextAction(() => setBottomPanelOpen(false))}><PanelBottomClose size={15}/><span>折叠面板</span></button>
     </div>}
     {formulaEditorRequest && <Suspense fallback={<div className="formula-editor-backdrop"><div className="formula-editor-loading"><Braces size={22}/><span>正在准备公式编辑器...</span></div></div>}><FormulaEditorDialog request={formulaEditorRequest} onClose={() => setFormulaEditorRequest(null)}/></Suspense>}
-    {manimRenderSettingsOpen && hardwareTarget.target !== "device" && <div className="settings-backdrop management-center">{renderManagementNavigation()}<section className="settings-dialog manim-render-settings-dialog management-page" role="region" aria-label="Manim 渲染配置">
+    {manimRenderSettingsOpen && profile.features.manim && <div className="settings-backdrop management-center">{renderManagementNavigation()}<section className="settings-dialog manim-render-settings-dialog management-page" role="region" aria-label="Manim 渲染配置">
       <header><div><span className="settings-icon manim-settings-icon"><Film size={18}/></span><div><h2>Manim 渲染配置</h2><p>常用偏好自动保存，工程配置优先</p></div></div><button className="dialog-close" onClick={() => setManimRenderSettingsOpen(false)} title="关闭"><X size={18}/></button></header>
       <div className="manim-settings-shell"><nav className="settings-navigation manim-settings-navigation" aria-label="Manim 渲染配置分类">{([
         { id: "output", label: "输出", detail: "类型与尺寸", icon: manimRenderConfig.outputType === "image" ? <ImageIcon size={18}/> : <Film size={18}/> },
@@ -6474,10 +6455,10 @@ export default function App() {
         { id: "appearance", label: "外观", detail: "主题与界面", icon: <Columns2 size={18}/> },
         { id: "editor", label: "代码编辑", detail: "字号与格式化", icon: <Code2 size={18}/> },
         { id: "python", label: "Python 环境", detail: "解释器选择", icon: <Braces size={18}/> },
-        { id: "hardware", label: "硬件设备", detail: "运行目标与固件", icon: <Cpu size={18}/> },
+        { id: "hardware", label: "硬件设备", detail: "开发板固件", icon: <Cpu size={18}/> },
         { id: "ai", label: "AI 模型", detail: "接口与模型", icon: <Sparkles size={18}/> },
         { id: "behavior", label: "应用行为", detail: "关闭与恢复", icon: <Power size={18}/> },
-      ] as Array<{ id: SettingsSection; label: string; detail: string; icon: ReactNode }>).map((item) => <button key={item.id} className={settingsSection === item.id ? "selected" : ""} aria-current={settingsSection === item.id ? "page" : undefined} onClick={() => setSettingsSection(item.id)}><span>{item.icon}</span><span><strong>{item.label}</strong><small>{item.detail}</small></span><ChevronRight size={16}/></button>)}</nav><div className="settings-pane">
+      ] as Array<{ id: SettingsSection; label: string; detail: string; icon: ReactNode }>).filter((item) => (item.id !== "python" || profile.features.pythonEnvironment) && (item.id !== "hardware" || profile.features.devicePanel)).map((item) => <button key={item.id} className={settingsSection === item.id ? "selected" : ""} aria-current={settingsSection === item.id ? "page" : undefined} onClick={() => setSettingsSection(item.id)}><span>{item.icon}</span><span><strong>{item.label}</strong><small>{item.detail}</small></span><ChevronRight size={16}/></button>)}</nav><div className="settings-pane">
       {settingsSection === "appearance" && <section className="theme-section"><div className="settings-pane-header"><h3>外观</h3><p>选择适合当前工作环境的界面主题。</p></div><div className="theme-picker">{themeOptions.map((theme) => <button key={theme.id} className={visualThemeId === theme.id ? "selected" : ""} onClick={() => setVisualThemeId(theme.id)}><span className={`theme-swatch swatch-${theme.id}`}/><span><strong>{theme.label}</strong><small>{theme.description}</small></span>{visualThemeId === theme.id && <Check size={16}/>}</button>)}</div></section>}
       {settingsSection === "editor" && <section className="code-preferences-section"><div className="settings-pane-header"><h3>代码编辑</h3><p>调整纯代码模式的阅读、缩进和保存体验。</p></div><div className="code-preferences-grid">
         <div className="code-preference-row"><div><strong>代码字体</strong><small>选择 Python 代码编辑区使用的等宽字体</small></div><label className="editor-font-family-control"><select value={editorFontId} onChange={(event) => applyEditorFont(event.currentTarget.value)} aria-label="代码字体" style={{ fontFamily: editorFontFamily }}>{editorFontOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select><ChevronDown size={15}/></label></div>
@@ -6485,26 +6466,13 @@ export default function App() {
         <div className="code-preference-row"><div><strong>缩进宽度</strong><small>始终使用空格进行 Python 缩进</small></div><div className="code-preference-segmented" role="group" aria-label="Python 缩进宽度">{editorIndentSizes.map((size) => <button key={size} className={editorIndentSize === size ? "selected" : ""} aria-pressed={editorIndentSize === size} onClick={() => applyEditorIndentSize(size)}>{size}</button>)}</div></div>
         <div className="code-preference-row"><div><strong>保存时自动格式化</strong><small>使用 Ruff 整理源码后再保存工程</small></div><button className={`plugin-toggle ${autoFormatOnSave ? "enabled" : ""}`} role="switch" aria-checked={autoFormatOnSave} aria-label="保存时自动格式化 Python" onClick={() => setAutoFormatOnSave((enabled) => !enabled)}><span/></button></div>
       </div></section>}
-      {settingsSection === "hardware" && <section className="hardware-target-section">
-        <div className="settings-pane-header"><h3>运行目标与固件</h3><p>程序在本机运行，还是写入开发板。</p></div>
-        <div className="hardware-target-options" role="group" aria-label="运行目标">
-          {(["host", "device"] as const).map((target) => <button key={target} className={hardwareTarget.target === target ? "selected" : ""} aria-pressed={hardwareTarget.target === target} onClick={() => applyHardwareTarget(target === "device" ? { target: "device", boardId: hardwareTarget.boardId ?? defaultHardwareBoardId } : { target: "host" })}>
-            <strong>{hardwareTargetLabels[target]}</strong>
-            <small>{target === "host" ? "使用已选 Python 解释器运行，积木与之前完全一致" : "程序写入开发板 main.py 并立即运行，断电重上电后自动重跑"}</small>
-          </button>)}
-        </div>
-        {hardwareTarget.target === "device" && <div className="hardware-board-picker">
-          <label htmlFor="hardware-board-select">开发板型号</label>
-          <select id="hardware-board-select" value={hardwareTarget.boardId ?? defaultHardwareBoardId} onChange={(event) => { const nextBoard = event.currentTarget.value; if (isHardwareBoardId(nextBoard)) applyHardwareTarget({ target: "device", boardId: nextBoard }); }}>
-            {hardwareBoardOptions().map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-          </select>
-          <small>不同板卡的引脚与模拟输入方式不同，切换后积木上的引脚会自动调整。</small>
-        </div>}
+      {settingsSection === "hardware" && profile.features.devicePanel && <section className="hardware-target-section">
+        <div className="settings-pane-header"><h3>开发板固件</h3><p>为 {profile.label} 刷写 MicroPython 固件。程序运行、连接和串口在顶部工具栏操作。</p></div>
         <HardwareFirmwareWizard/>
       </section>}
       {settingsSection === "ai" && <AiModelSettings/>}
       {settingsSection === "behavior" && <section className="close-behavior-section"><div className="settings-pane-header"><h3>应用行为</h3><p>设置点击窗口关闭按钮时执行的操作，以及启动时的恢复方式。</p></div><div className="close-behavior-options"><button className={closeBehavior === "ask" ? "selected" : ""} onClick={() => updateCloseBehavior("ask")}><strong>每次询问</strong><small>关闭时显示选择界面</small></button><button className={closeBehavior === "tray" ? "selected" : ""} onClick={() => updateCloseBehavior("tray")}><strong>最小化到托盘</strong><small>应用继续在后台运行</small></button><button className={closeBehavior === "exit" ? "selected" : ""} onClick={() => updateCloseBehavior("exit")}><strong>退出应用</strong><small>完全结束 Visual Python</small></button></div><div className="behavior-restore-row"><div><strong>启动时恢复上次工程</strong><small>{restoreLastProject ? "自动打开上次使用的工程文件；未保存的改动始终以草稿恢复" : "从未命名工程开始；未保存的改动仍会以草稿恢复"}</small></div><button className={`plugin-toggle ${restoreLastProject ? "enabled" : ""}`} role="switch" aria-checked={restoreLastProject} aria-label="启动时恢复上次打开的工程" onClick={() => updateRestoreLastProject(!restoreLastProject)}><span/></button></div></section>}
-      {settingsSection === "python" && <section className="python-settings-section">
+      {settingsSection === "python" && profile.features.pythonEnvironment && <section className="python-settings-section">
         <div className="python-settings-header"><div className="settings-pane-header"><h3>Python 环境</h3><p>选择运行当前工程使用的解释器，仅显示 {supportedPythonRangeLabel}。</p></div><div className="settings-actions"><button onClick={() => void detectPythonEnvironments()} disabled={detectingPython}><RefreshCw size={15} className={detectingPython ? "spin" : ""}/>{detectingPython ? "检测中" : "重新检测"}</button><button onClick={() => void choosePythonExecutable()}><FolderOpen size={15}/>选择解释器</button></div></div>
         <div className="environment-list">{pythonEnvironments.length ? pythonEnvironments.map((environment) => {
           const selected = pythonEnvironment?.path.toLowerCase() === environment.path.toLowerCase();
