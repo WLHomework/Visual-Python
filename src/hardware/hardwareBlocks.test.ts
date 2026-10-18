@@ -4,6 +4,7 @@ import "blockly/blocks";
 import { pythonGenerator } from "blockly/python";
 import {
   collectHardwareBlockIssues,
+  countIncompatiblePins,
   hardwareToolboxCategory,
   hardwareToolboxContents,
   refreshHardwareBlocks,
@@ -162,6 +163,31 @@ describe("hardware block validation", () => {
     )], "esp32-wroom");
     expect(collectHardwareBlockIssues(valid, "esp32-wroom")).toEqual([]);
     valid.dispose();
+  });
+});
+
+describe("hardware pin compatibility count", () => {
+  it("counts only the hardware blocks whose pin the target board does not offer", () => {
+    const workspace = loadWorkspace([chain(
+      { type: "hardware_pin_write", fields: { PIN: "23", LEVEL: "1" } },
+      { type: "hardware_pin_write", fields: { PIN: "2", LEVEL: "0" } },
+      { type: "controls_if" },
+    )], "esp32-wroom");
+
+    expect(countIncompatiblePins(workspace, "esp8266-esp12e")).toBe(1);
+    expect(countIncompatiblePins(workspace, "esp32-wroom")).toBe(0);
+    workspace.dispose();
+  });
+
+  it("counts analog pins that only exist on the current board", () => {
+    const analog = loadWorkspace([{ type: "hardware_analog_read", fields: { PIN: "34" } }], "esp32-wroom");
+    expect(countIncompatiblePins(analog, "esp8266-esp12e")).toBe(1);
+    expect(countIncompatiblePins(analog, "esp32-wroom")).toBe(0);
+    analog.dispose();
+
+    const adc0 = loadWorkspace([{ type: "hardware_analog_read", fields: { PIN: "A0" } }], "esp8266-esp12e");
+    expect(countIncompatiblePins(adc0, "esp32-wroom")).toBe(1);
+    adc0.dispose();
   });
 });
 

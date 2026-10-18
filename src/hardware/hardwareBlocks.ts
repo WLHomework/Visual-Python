@@ -94,6 +94,20 @@ export function refreshHardwareBlocks(workspace: Blockly.Workspace): number {
   return updated;
 }
 
+/** 换板卡后会被改成默认引脚的积木个数；用于切换前的确认提示。 */
+export function countIncompatiblePins(workspace: Blockly.Workspace | null | undefined, boardId: HardwareBoardId): number {
+  const profile = getBoardProfile(boardId);
+  if (!workspace || !profile) return 0;
+  let count = 0;
+  for (const block of workspace.getAllBlocks(false)) {
+    const use = pinUseByBlockType[block.type];
+    if (!use) continue;
+    const pinId = String(block.getFieldValue("PIN") ?? "");
+    if (!boardPinChoices(profile, use).some((pin) => pin.id === pinId)) count += 1;
+  }
+  return count;
+}
+
 interface HardwareGeneratorInternals {
   definitions_: Record<string, string>;
   INDENT: string;

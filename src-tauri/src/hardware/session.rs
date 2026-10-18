@@ -206,6 +206,30 @@ impl HardwareState {
         lock(&self.session).is_some()
     }
 
+    /// 检查某个串口是否被设备会话占用。刷写固件会自己打开串口（esptool），而会话已经独占
+    /// 它：直接刷只会拿到「拒绝访问」这类系统错误，所以调用方先用这里给出可读的 `busy`。
+    ///
+    /// 用 `try_lock` 而不是等待：正在运行的作业可能永远不会结束，刷写不该排队等它。
+    pub fn ensure_port_free(&self, port_name: &str) -> Result<(), HardwareError> {
+        let guard = match self.session.try_lock() {
+            Ok(guard) => guard,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                return Err(HardwareError::busy(
+                    "设备正在运行程序，请先断开设备再刷写固件",
+                ))
+            }
+        };
+        match guard.as_ref() {
+            Some(session) if session.port_name == port_name => Err(HardwareError::busy(format!(
+                "{} 已被设备连接占用，请先断开设备再刷写固件",
+                session.port_name
+            ))),
+            // 其它串口是另一块开发板：刷写它不影响当前连接。
+            _ => Ok(()),
+        }
+    }
+
     /// 借用会话做一次短操作（文件列表/读取/删除/上传）。
     /// 运行期间设备被独占：立即返回 `Busy`，不排队。
     pub fn with_device<T>(
@@ -664,6 +688,54 @@ mod tests {
         assert!(events.lines().contains(&"state:-".to_string()));
         // 已经断开后再断开：不算错误，只是没有会话。
         assert!(!disconnect(&state, &events).expect("second disconnect"));
+    }
+
+    #[test]
+    fn flashing_is_rejected_while_the_session_holds_the_same_port() {
+        let state = HardwareState::default();
+        let events = RecordingEvents::default();
+        let (session, _device) = shared_session(|_| {});
+        connect(&state, &events, session).expect("connect");
+
+        let error = state
+            .ensure_port_free("SIM3")
+            .expect_err("同一串口已被会话占用");
+        assert_eq!(error.kind(), HardwareErrorKind::Busy);
+        assert!(error.detail().contains("先断开设备"));
+
+        // 另一块开发板（另一个串口）不受影响：刷写它不需要断开当前连接。
+        assert!(state.ensure_port_free("SIM4").is_ok());
+
+        assert!(disconnect(&state, &events).expect("disconnect"));
+        assert!(state.ensure_port_free("SIM3").is_ok());
+    }
+
+    #[test]
+    fn flashing_is_rejected_while_a_run_keeps_the_session_busy() {
+        let state = Arc::new(HardwareState::default());
+        let events = Arc::new(RecordingEvents::default());
+        let (session, _device) = shared_session(endless_program());
+        connect(&state, &events, session).expect("connect");
+
+        let runner_state = Arc::clone(&state);
+        let runner_events = Arc::clone(&events);
+        let runner = std::thread::spawn(move || {
+            perform_run(&runner_state, runner_events.as_ref(), RunRequest::Replay)
+        });
+        assert!(events.wait_for("blink", Duration::from_secs(2)));
+
+        // 会话被运行作业独占：刷写不能排队等它，立刻返回 busy。
+        let error = state.ensure_port_free("SIM3").expect_err("运行中不能刷写");
+        assert_eq!(error.kind(), HardwareErrorKind::Busy);
+        assert!(error.detail().contains("正在运行程序"));
+
+        assert!(state.request_stop());
+        let job = runner.join().expect("join").expect("run result");
+        assert_eq!(job.outcome.status, RunStatus::Interrupted);
+
+        // 程序停了，但会话还占着串口：仍然拒绝，只是原因变成“串口已被连接占用”。
+        let error = state.ensure_port_free("SIM3").expect_err("会话仍占着串口");
+        assert!(error.detail().contains("已被设备连接占用"));
     }
 
     #[test]

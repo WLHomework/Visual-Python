@@ -1,9 +1,11 @@
+use crate::hardware::commands::HardwareCommandError;
+use crate::hardware::session::HardwareState;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -208,30 +210,61 @@ pub async fn hardware_download_firmware(
     })
 }
 
+/// 刷写前的准备结果：这些步骤都不碰串口、也不启动 esptool，所以能脱离 Tauri 单独测试。
+#[derive(Debug)]
+struct PreparedFlash {
+    image: FirmwareImage,
+    path: PathBuf,
+}
+
+/// 检查刷写前提：已确认覆盖、板卡受支持、串口没被设备连接占用、本地已有通过校验的固件。
+fn prepare_flash(
+    state: &HardwareState,
+    cache_root: &Path,
+    board_id: &str,
+    port_name: &str,
+    confirmed: bool,
+) -> Result<PreparedFlash, HardwareCommandError> {
+    if !confirmed {
+        return Err(HardwareCommandError {
+            code: "invalid",
+            message: "刷写固件前必须确认会覆盖设备 Flash".to_string(),
+        });
+    }
+    let image = firmware_image_for_board(board_id).ok_or_else(|| HardwareCommandError {
+        code: "invalid",
+        message: format!("不支持的板卡：{board_id}"),
+    })?;
+    // 设备连接占着串口时 esptool 只会报系统层错误：这里先给出稳定的 `busy`。
+    state.ensure_port_free(port_name)?;
+    let path = cached_firmware_path(cache_root, &image);
+    let bytes = fs::read(&path).map_err(|error| {
+        HardwareCommandError::internal(format!("读取固件缓存失败，请先下载固件：{error}"))
+    })?;
+    verify_firmware_bytes(&bytes, &image).map_err(HardwareCommandError::internal)?;
+    Ok(PreparedFlash { image, path })
+}
+
 #[tauri::command]
 pub async fn hardware_flash_firmware(
     app: AppHandle,
+    state: State<'_, HardwareState>,
     board_id: String,
     port_name: String,
     confirmed: bool,
-) -> Result<FirmwareFlashResult, String> {
-    if !confirmed {
-        return Err("刷写固件前必须确认会覆盖设备 Flash".to_string());
-    }
-    let image =
-        firmware_image_for_board(&board_id).ok_or_else(|| format!("不支持的板卡：{board_id}"))?;
+) -> Result<FirmwareFlashResult, HardwareCommandError> {
     let cache_root = app
         .path()
         .app_cache_dir()
-        .map_err(|error| format!("无法确定固件缓存目录：{error}"))?
+        .map_err(|error| HardwareCommandError::internal(format!("无法确定固件缓存目录：{error}")))?
         .join("hardware-firmware");
-    let firmware_path = cached_firmware_path(&cache_root, &image);
-    let bytes = fs::read(&firmware_path)
-        .map_err(|error| format!("读取固件缓存失败，请先下载固件：{error}"))?;
-    verify_firmware_bytes(&bytes, &image)?;
+    let PreparedFlash {
+        image,
+        path: firmware_path,
+    } = prepare_flash(&state, &cache_root, &board_id, &port_name, confirmed)?;
     let tool_path = esptools::Tool::EspTool
         .mount()
-        .map_err(|error| format!("准备 esptool 失败：{error}"))?
+        .map_err(|error| HardwareCommandError::internal(format!("准备 esptool 失败：{error}")))?
         .path();
     let app_for_progress = app.clone();
     let port_for_result = port_name.clone();
@@ -256,12 +289,14 @@ pub async fn hardware_flash_firmware(
             &tool_path,
             flash_command_args(&image_for_flash, &port_for_result, "erase-flash"),
             "擦除 Flash",
-        )?;
+        )
+        .map_err(HardwareCommandError::internal)?;
         emit_progress("擦除完成", 35);
         let mut write_args = flash_command_args(&image_for_flash, &port_for_result, "write-flash");
         write_args.push(format!("0x{:x}", image_for_flash.flash_offset));
         write_args.push(firmware_path_for_flash.to_string_lossy().into_owned());
-        run_esptool_command(&tool_path, write_args, "写入 MicroPython 固件")?;
+        run_esptool_command(&tool_path, write_args, "写入 MicroPython 固件")
+            .map_err(HardwareCommandError::internal)?;
         emit_progress("刷写完成", 100);
         Ok(FirmwareFlashResult {
             board_id: board_for_result,
@@ -270,7 +305,7 @@ pub async fn hardware_flash_firmware(
         })
     })
     .await
-    .map_err(|error| format!("刷写任务异常退出：{error}"))?
+    .map_err(|error| HardwareCommandError::internal(format!("刷写任务异常退出：{error}")))?
 }
 
 fn run_esptool_command(tool_path: &Path, args: Vec<String>, stage: &str) -> Result<(), String> {
@@ -291,6 +326,8 @@ fn run_esptool_command(tool_path: &Path, args: Vec<String>, stage: &str) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::session::DeviceSession;
+    use crate::hardware::simulated::SimulatedDevice;
 
     #[test]
     fn exposes_only_the_first_stage_board_families() {
@@ -398,5 +435,56 @@ mod tests {
             .map(String::from)
             .collect::<Vec<_>>()
         );
+    }
+
+    /// 用模拟设备建立一条会话：刷写互斥检查靠它证明「串口已被占用」。
+    fn connected_state(port_name: &str) -> HardwareState {
+        let state = HardwareState::default();
+        let session = DeviceSession::handshake(
+            Box::new(SimulatedDevice::default()),
+            "esp32-wroom",
+            port_name,
+        )
+        .expect("handshake");
+        state.connect(session).expect("connect");
+        state
+    }
+
+    #[test]
+    fn refuses_to_flash_a_port_held_by_a_device_connection() {
+        let state = connected_state("SIM3");
+        // 走到这里就说明没有启动 esptool：检查在它之前。
+        let error =
+            prepare_flash(&state, Path::new("C:/cache"), "esp32-wroom", "SIM3", true).unwrap_err();
+
+        assert_eq!(error.code, "busy");
+        assert!(error.message.contains("先断开设备"));
+    }
+
+    #[test]
+    fn another_port_is_not_blocked_by_the_connection() {
+        let state = connected_state("SIM3");
+        let error =
+            prepare_flash(&state, Path::new("C:/cache"), "esp32-wroom", "SIM4", true).unwrap_err();
+
+        // 只卡在「固件还没下载」：说明互斥检查放行了另一块开发板的串口。
+        assert_ne!(error.code, "busy");
+        assert!(error.message.contains("读取固件缓存失败"));
+    }
+
+    #[test]
+    fn flashing_checks_confirmation_and_the_board_before_touching_the_port() {
+        let state = HardwareState::default();
+        let cache = Path::new("C:/cache");
+
+        assert_eq!(
+            prepare_flash(&state, cache, "esp32-wroom", "COM3", false)
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        let unknown = prepare_flash(&state, cache, "esp32-s3", "COM3", true).unwrap_err();
+        assert_eq!(unknown.code, "invalid");
+        assert!(unknown.message.contains("不支持的板卡"));
     }
 }

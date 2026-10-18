@@ -46,7 +46,8 @@ impl From<HardwareError> for HardwareCommandError {
 }
 
 impl HardwareCommandError {
-    fn internal(message: impl Into<String>) -> Self {
+    /// 内部错误（文件、线程、系统调用等）：前端只显示消息，不据此做分支。
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self {
             code: "internal",
             message: message.into(),

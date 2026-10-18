@@ -27,13 +27,19 @@ describe("workbench profiles", () => {
 
   it("keeps the python and hardware interfaces independent through feature flags", () => {
     const python = getWorkbenchProfile("python");
-    expect(python.features).toMatchObject({ manim: true, pythonEnvironment: true, renderPreview: true, devicePanel: false, stdin: true });
+    expect(python.features).toMatchObject({ manim: true, pythonEnvironment: true, renderPreview: true, devicePanel: false, stdin: true, projectResources: true, multipleDocuments: true });
     expect(isHardwareWorkbench(python)).toBe(false);
 
     const hardware = getWorkbenchProfile("esp32-wroom");
-    expect(hardware.features).toMatchObject({ manim: false, pythonEnvironment: false, renderPreview: false, devicePanel: true, stdin: false });
+    expect(hardware.features).toMatchObject({ manim: false, pythonEnvironment: false, renderPreview: false, devicePanel: true, stdin: false, projectResources: false, multipleDocuments: false });
     expect(isHardwareWorkbench(hardware)).toBe(true);
     expect(hardware.boardId).toBe("esp32-wroom");
+  });
+
+  it("describes every profile for the new project dialog", () => {
+    for (const profile of listWorkbenchProfiles()) {
+      expect(profile.description.trim().length).toBeGreaterThan(0);
+    }
   });
 
   it("normalizes unknown ids to python", () => {

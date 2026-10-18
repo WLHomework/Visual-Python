@@ -18,12 +18,18 @@ export type WorkbenchFeatures = {
   devicePanel: boolean;
   /** 向运行中的程序发送标准输入。 */
   stdin: boolean;
+  /** 工程资源（音频等随工程保存的文件）。 */
+  projectResources: boolean;
+  /** 代码模式下可以建多个文档；硬件工程只有设备上的 main.py 一个。 */
+  multipleDocuments: boolean;
 };
 
 export type WorkbenchProfile = {
   id: WorkbenchProfileId;
   kind: WorkbenchKind;
   label: string;
+  /** 新建工程对话框里的一句话说明。 */
+  description: string;
   boardId?: HardwareBoardId;
   features: WorkbenchFeatures;
 };
@@ -35,15 +41,17 @@ const pythonProfile: WorkbenchProfile = {
   id: "python",
   kind: "python",
   label: "Python",
-  features: { manim: true, pythonEnvironment: true, renderPreview: true, devicePanel: false, stdin: true },
+  description: "在本机运行，支持 Manim 动画与全部内置积木",
+  features: { manim: true, pythonEnvironment: true, renderPreview: true, devicePanel: false, stdin: true, projectResources: true, multipleDocuments: true },
 };
 
 const hardwareProfile = (boardId: HardwareBoardId): WorkbenchProfile => ({
   id: boardId,
   kind: "micropython",
   label: getBoardProfile(boardId)?.displayName ?? boardId,
+  description: "通过 USB 串口上传到开发板运行（MicroPython）",
   boardId,
-  features: { manim: false, pythonEnvironment: false, renderPreview: false, devicePanel: true, stdin: false },
+  features: { manim: false, pythonEnvironment: false, renderPreview: false, devicePanel: true, stdin: false, projectResources: false, multipleDocuments: false },
 });
 
 const profiles: readonly WorkbenchProfile[] = [pythonProfile, ...supportedHardwareBoards.map(hardwareProfile)];

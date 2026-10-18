@@ -33,6 +33,12 @@ describe("project file validation", () => {
     expect(() => parseDraftProject(JSON.stringify({ ...validProject, path: [], savedAt: "now" }))).toThrow("草稿");
   });
 
+  it("keeps the workbench profile in persisted drafts", () => {
+    const draft = parseDraftProject(JSON.stringify({ ...validProject, path: null, savedAt: 10, profile: "esp8266-esp12e" }));
+    expect(draft.profile).toBe("esp8266-esp12e");
+    expect(parseDraftProject(JSON.stringify({ ...validProject, path: null, savedAt: 10 })).profile).toBeUndefined();
+  });
+
   it("accepts independent code documents and validates the active document", () => {
     const codeDocuments = [{ id: "document-main", name: "main", code: "print('hello')" }];
     expect(validateProjectFile({ ...validProject, codeDocuments, activeDocumentId: "document-main" }).codeDocuments).toEqual(codeDocuments);
