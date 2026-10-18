@@ -21,6 +21,8 @@ export const visualPythonTools: AiChatToolDefinition[] = [
   tool("get_context", "读取当前工程、文档、工作区、运行状态和环境摘要。修改前或状态不确定时使用。", objectSchema({ includeResources: { type: "boolean" } })),
   tool("get_diagnostics", "按需读取当前输出和问题面板中的最新诊断。插件安装、加载、运行或渲染失败后，在再次修改前使用。", objectSchema({ includeOutput: { type: "boolean" }, includeProblems: { type: "boolean" }, limit: { type: "integer", minimum: 1, maximum: 200 } })),
   tool("list_documents", "列出工程中的代码文档及当前文档。普通 Python 和插件文档都使用此工具。", objectSchema()),
+  tool("list_device_files", "列出已连接 MicroPython 开发板当前目录中的文件元数据。只读，不会修改设备。", objectSchema()),
+  tool("read_device_file", "读取已连接 MicroPython 开发板上的一个文件。文本文件返回 UTF-8 文本，二进制文件返回 base64；只读。", objectSchema({ path: text }, ["path"])),
   tool("get_document", "读取指定代码文档的完整源码。", objectSchema({ documentId: text }, ["documentId"])),
   tool("switch_document", "切换当前编辑的代码文档。", objectSchema({ documentId: text }, ["documentId"])),
   tool("create_document", "创建一个空白、独立的普通 Python 代码文档。插件专用文档应使用对应插件提供的创建工具。", objectSchema({ name: text }, [])),
@@ -47,6 +49,8 @@ export const visualPythonTools: AiChatToolDefinition[] = [
 const labels: Record<string, string> = {
   ask_user: "询问用户",
   get_context: "读取当前工程",
+  list_device_files: "列出设备文件",
+  read_device_file: "读取设备文件",
   get_diagnostics: "读取输出与问题",
   list_documents: "查看代码文档",
   get_document: "读取代码文档",
@@ -74,7 +78,7 @@ const labels: Record<string, string> = {
 
 const readOnlyTools = new Set([
   "get_context", "get_diagnostics", "list_documents", "get_document", "list_resources", "get_resource", "check_resources",
-  "check_dependencies", "inspect_python_structure", "check_code", "inspect_plugin_api", "list_installed_plugins", "read_plugin_draft_file", "validate_plugin_draft",
+  "check_dependencies", "inspect_python_structure", "check_code", "inspect_plugin_api", "list_installed_plugins", "read_plugin_draft_file", "validate_plugin_draft", "list_device_files", "read_device_file",
 ]);
 
 const stateChangingTools = new Set([
@@ -94,6 +98,8 @@ const pythonOnlyTools = new Set([
   "check_dependencies", "install_dependencies", "list_resources", "get_resource", "check_resources",
 ]);
 
+const micropythonOnlyTools = new Set(["list_device_files", "read_device_file"]);
+
 const mutationTools = new Set([
   "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import",
   "format_code", "undo_code", "redo_code",
@@ -106,6 +112,7 @@ export const coreAgentTools: AgentTool[] = [...visualPythonTools.map((definition
     label: labels[name] || name,
     ...(codeOnlyTools.has(name) ? { workspaceModes: ["code" as const] } : {}),
     ...(pythonOnlyTools.has(name) ? { workbenchKinds: ["python" as const] } : {}),
+    ...(micropythonOnlyTools.has(name) ? { workbenchKinds: ["micropython" as const] } : {}),
     readOnly: readOnlyTools.has(name),
     changesState: stateChangingTools.has(name),
     requiresPermission: requiresPermission(name),

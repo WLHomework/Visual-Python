@@ -9,6 +9,7 @@ import { missingPluginDraftError, pluginAuthoringContract, pluginDraftSummary, v
 import { readPluginGuide } from "./pluginGuide";
 import { parsePluginPlanOperations, pluginIrSummary, PluginIrError } from "./pluginIr";
 import type { AgentCapability, AgentHost, AiCodeEdit } from "./types";
+import { decodeBase64, type HardwareDeviceFile, type HardwareReadFileResult } from "../hardware/hardwareDeviceApi";
 
 type Ref<T> = { current: T };
 type StateSetter<T> = (value: T | ((current: T) => T)) => void;
@@ -85,6 +86,8 @@ export type VisualPythonHostServices = {
   stopCode: () => Promise<void>;
   /** 当前界面不是硬件工作台时返回 undefined，AI 工具结果里就不会出现设备字段。 */
   getDeviceExecutionState?: () => HostDeviceExecutionState | undefined;
+  listDeviceFiles?: () => { path: string; files: HardwareDeviceFile[] };
+  readDeviceFile?: (path: string) => Promise<HardwareReadFileResult | null>;
   stopDeviceExecution?: () => Promise<void>;
   stopPluginExecutions?: () => Promise<void>;
   getPluginExecutionState?: () => Record<string, unknown>;
@@ -192,6 +195,21 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
   const pluginValidationContext = () => ({
     availableCapabilities: getAgentCapabilities().map((capability) => ({ id: capability.id, ...capability.codegen })),
   });
+
+  const requireConnectedDevice = () => {
+    if (!services.getDeviceExecutionState?.()?.deviceConnected) throw new Error("请先连接 MicroPython 开发板，再读取设备文件");
+  };
+
+  const decodeDeviceFileContent = (result: HardwareReadFileResult) => {
+    const bytes = decodeBase64(result.base64);
+    try {
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      if (!text.includes("\u0000")) return { encoding: "utf-8" as const, text };
+    } catch {
+      // Binary device files are returned as base64 below.
+    }
+    return { encoding: "base64" as const, base64: result.base64 };
+  };
 
   return async (name, args, signal) => {
     if (signal.aborted) throw new Error("已停止生成");
@@ -425,6 +443,20 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
         documents: services.documentsRef.current.map(({ id, name: documentName, code }) => ({ id, name: documentName, lineCount: code ? code.split("\n").length : 0, active: id === services.activeDocumentIdRef.current })),
         ...(args.includeResources === true ? { resources: services.projectResourcesRef.current.map(({ id, type, path, originalName, size }) => ({ id, type, path, originalName, size })) } : {}),
       };
+    }
+    if (name === "list_device_files") {
+      requireConnectedDevice();
+      if (!services.listDeviceFiles) throw new Error("设备文件列表服务尚未就绪");
+      const { path, files } = services.listDeviceFiles();
+      return { path, files: files.map(({ name: fileName, size, isDirectory }) => ({ name: fileName, size, isDirectory })) };
+    }
+    if (name === "read_device_file") {
+      requireConnectedDevice();
+      if (!services.readDeviceFile) throw new Error("设备文件读取服务尚未就绪");
+      const path = checkedString(args, "path");
+      const result = await services.readDeviceFile(path);
+      if (!result) throw new Error(`读取设备文件失败：${path}`);
+      return { path: result.path, size: result.size, sha256: result.sha256, ...decodeDeviceFileContent(result) };
     }
     if (name === "get_diagnostics") {
       const limit = Math.max(1, Math.min(200, Math.round(typeof args.limit === "number" ? args.limit : 80)));

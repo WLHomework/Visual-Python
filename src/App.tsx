@@ -5381,6 +5381,8 @@ export default function App() {
           },
           stopCode,
           getDeviceExecutionState: () => isHardwareWorkbench(profileRef.current) ? hardwareRunner.executionState() : undefined,
+          listDeviceFiles: () => ({ path: hardwareDeviceRef.current.filesPath, files: hardwareDeviceRef.current.files }),
+          readDeviceFile: (path) => hardwareDeviceRef.current.readFile(path),
           stopDeviceExecution: async () => { if (isHardwareWorkbench(profileRef.current)) await hardwareRunner.stop(); },
           writeProject,
           saveProject,

@@ -229,6 +229,64 @@ describe("Visual Python tool applicability", () => {
     });
   });
 
+  it("rejects device file tools while the board is disconnected", async () => {
+    const services = createServices("print('hello')");
+    services.getDeviceExecutionState = () => ({ deviceRunning: false, devicePhase: "idle", devicePort: null, deviceConnected: false });
+    services.listDeviceFiles = vi.fn();
+    const executeTool = createVisualPythonToolExecutor(services);
+
+    await expect(executeTool("list_device_files", {}, new AbortController().signal)).rejects.toThrow("MicroPython");
+    expect(services.listDeviceFiles).not.toHaveBeenCalled();
+  });
+
+  it("lists device file metadata without exposing file contents", async () => {
+    const services = createServices("print('hello')");
+    services.getDeviceExecutionState = () => ({ deviceRunning: false, devicePhase: "idle", devicePort: "COM3", deviceConnected: true });
+    services.listDeviceFiles = vi.fn().mockReturnValue({
+      path: "/",
+      files: [
+        { name: "main.py", size: 12, isDirectory: false },
+        { name: "lib", size: 0, isDirectory: true },
+      ],
+    });
+    const executeTool = createVisualPythonToolExecutor(services);
+
+    await expect(executeTool("list_device_files", {}, new AbortController().signal)).resolves.toEqual({
+      path: "/",
+      files: [
+        { name: "main.py", size: 12, isDirectory: false },
+        { name: "lib", size: 0, isDirectory: true },
+      ],
+    });
+    expect(services.listDeviceFiles).toHaveBeenCalledWith();
+  });
+
+  it("returns UTF-8 text for source files and base64 for binary files", async () => {
+    const services = createServices("print('hello')");
+    services.getDeviceExecutionState = () => ({ deviceRunning: false, devicePhase: "idle", devicePort: "COM3", deviceConnected: true });
+    services.readDeviceFile = vi.fn()
+      .mockResolvedValueOnce({ path: "/main.py", size: 13, sha256: "text-hash", base64: "cHJpbnQoJ2hlbGxvJyk=" })
+      .mockResolvedValueOnce({ path: "/image.bin", size: 3, sha256: "binary-hash", base64: "/wBB" });
+    const executeTool = createVisualPythonToolExecutor(services);
+
+    await expect(executeTool("read_device_file", { path: "/main.py" }, new AbortController().signal)).resolves.toEqual({
+      path: "/main.py",
+      size: 13,
+      sha256: "text-hash",
+      encoding: "utf-8",
+      text: "print('hello')",
+    });
+    await expect(executeTool("read_device_file", { path: "/image.bin" }, new AbortController().signal)).resolves.toEqual({
+      path: "/image.bin",
+      size: 3,
+      sha256: "binary-hash",
+      encoding: "base64",
+      base64: "/wBB",
+    });
+    expect(services.readDeviceFile).toHaveBeenNthCalledWith(1, "/main.py");
+    expect(services.readDeviceFile).toHaveBeenNthCalledWith(2, "/image.bin");
+  });
+
   it("can read only the requested diagnostics channel", async () => {
     const services = createServices("print('hello')");
     services.outputRef = { current: [{ id: 1, stream: "stderr", data: "failed\n" }] } as any;

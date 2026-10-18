@@ -159,6 +159,20 @@ describe("Visual Python Agent Core", () => {
     expect(names).not.toContain("list_resources");
     expect(names).not.toContain("render_manim");
     expect(names).toContain("get_context");
+    expect(names).toContain("list_device_files");
+    expect(names).toContain("read_device_file");
+
+    mocks.streamAiChat.mockReset();
+    mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
+    await runVisualPythonAgent({
+      prompt: "读取当前工程",
+      host: createHost({ getSnapshot: () => ({ workspaceMode: "code", workbench: { id: "python", label: "Python", kind: "python" } }) }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    const pythonNames = ((mocks.streamAiChat.mock.calls[0][2]?.tools || []) as Array<{ function: { name: string } }>).map((tool) => tool.function.name);
+    expect(pythonNames).not.toContain("list_device_files");
+    expect(pythonNames).not.toContain("read_device_file");
   });
 
   it("uses the host-provided current block catalog for graphical requests", async () => {
