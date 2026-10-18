@@ -90,6 +90,10 @@ const codeOnlyTools = new Set([
   "check_code", "format_code",
 ]);
 
+const pythonOnlyTools = new Set([
+  "check_dependencies", "install_dependencies", "list_resources", "get_resource", "check_resources",
+]);
+
 const mutationTools = new Set([
   "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import",
   "format_code", "undo_code", "redo_code",
@@ -101,6 +105,7 @@ export const coreAgentTools: AgentTool[] = [...visualPythonTools.map((definition
     definition,
     label: labels[name] || name,
     ...(codeOnlyTools.has(name) ? { workspaceModes: ["code" as const] } : {}),
+    ...(pythonOnlyTools.has(name) ? { workbenchKinds: ["python" as const] } : {}),
     readOnly: readOnlyTools.has(name),
     changesState: stateChangingTools.has(name),
     requiresPermission: requiresPermission(name),

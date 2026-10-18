@@ -2,6 +2,7 @@ import type { AiChatMessage, AiChatToolCall, AiChatToolDefinition, AiReasoningEf
 import type { AiImageAttachment } from "../aiImageAttachments";
 import type { CodeDocument } from "../sceneDocuments";
 import type { WorkspaceMode } from "../workspaceMode";
+import type { WorkbenchKind } from "../profiles/workbenchProfile";
 
 export type AgentMode = "agent" | "plan";
 export type AiAgentMode = AgentMode;
@@ -146,6 +147,7 @@ export type AgentTool = {
   definition: AiChatToolDefinition;
   label: string;
   workspaceModes?: WorkspaceMode[];
+  workbenchKinds?: WorkbenchKind[];
   readOnly?: boolean;
   changesState?: boolean;
   requiresPermission?: boolean;

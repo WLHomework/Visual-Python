@@ -85,6 +85,7 @@
     ],
     "resources": {
       "resources/language-server/": "language-server/",
+      "../src/hardware/device-libraries/": "hardware-libraries/",
       "../docs/manim-plugin/": "docs/manim-plugin/",
       "../docs/plugin-development/": "docs/plugin-development/"
     },

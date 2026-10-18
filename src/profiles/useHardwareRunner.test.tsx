@@ -15,6 +15,7 @@ function createRunner(overrides: { device?: Partial<HardwareDeviceController>; p
     snapshot: { portName: "COM3" },
     run: vi.fn(async () => ({ runId: 7 })),
     runAndWait: vi.fn(async () => ({ accepted: { runId: 7 }, outcome: null })),
+    uploadFile: vi.fn(async () => ({ path: "/lib/ssd1306.py", size: 100, sha256: "a".repeat(64), verifiedSize: true, verifiedHash: true })),
     stop: vi.fn(async () => undefined),
     ...overrides.device,
   } as unknown as HardwareDeviceController;
@@ -36,6 +37,24 @@ describe("useHardwareRunner", () => {
     await expect(runner.run()).resolves.toEqual({ runId: 7 });
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(device.run).toHaveBeenCalledWith("led.on()", "/main.py");
+  });
+
+  it("uploads required device libraries before running code that imports them", async () => {
+    const { runner, device } = createRunner({ getCode: () => "import ssd1306\n" });
+    await expect(runner.run()).resolves.toEqual({ runId: 7 });
+    expect(device.uploadFile).toHaveBeenCalledTimes(1);
+    expect(device.uploadFile).toHaveBeenCalledWith("/lib/ssd1306.py", expect.any(Uint8Array));
+    expect(device.run).toHaveBeenCalledWith("import ssd1306\n", "/main.py");
+  });
+
+  it("does not run when a required device library upload fails", async () => {
+    const { runner, device } = createRunner({
+      getCode: () => "import ssd1306\n",
+      device: { uploadFile: vi.fn(async () => null) },
+    });
+    await expect(runner.run()).resolves.toBeNull();
+    expect(device.uploadFile).toHaveBeenCalledTimes(1);
+    expect(device.run).not.toHaveBeenCalled();
   });
 
   it("does not touch the device when validation fails", async () => {

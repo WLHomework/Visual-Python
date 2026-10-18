@@ -219,6 +219,16 @@ describe("Visual Python tool applicability", () => {
     });
   });
 
+  it("includes the active workbench profile in context", async () => {
+    const services = createServices("print('hello')");
+    services.getWorkbench = () => ({ id: "esp32-wroom", label: "ESP32 WROOM", kind: "micropython", boardId: "esp32-wroom" });
+    const executeTool = createVisualPythonToolExecutor(services);
+
+    await expect(executeTool("get_context", {}, new AbortController().signal)).resolves.toMatchObject({
+      workbench: { id: "esp32-wroom", label: "ESP32 WROOM", kind: "micropython", boardId: "esp32-wroom" },
+    });
+  });
+
   it("can read only the requested diagnostics channel", async () => {
     const services = createServices("print('hello')");
     services.outputRef = { current: [{ id: 1, stream: "stderr", data: "failed\n" }] } as any;

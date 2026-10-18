@@ -49,4 +49,33 @@ describe("profile toolbox", () => {
     activateWorkbenchProfile(getWorkbenchProfile("python"));
     expect(getActiveHardwareBoard()).toBeUndefined();
   });
+
+  it("removes Python-only filesystem, input, module and async blocks on hardware profiles", () => {
+    const toolbox = buildProfileToolbox(
+      {
+        kind: "categoryToolbox",
+        contents: [
+          {
+            kind: "category",
+            name: "输入输出",
+            contents: [
+              { kind: "block", type: "python_print" },
+              { kind: "block", type: "python_input" },
+            ],
+          },
+          { kind: "category", name: "文件", contents: [{ kind: "block", type: "python_file_read_text" }] },
+          { kind: "category", name: "标准库", contents: [{ kind: "block", type: "python_json_loads" }, { kind: "block", type: "python_datetime_now" }] },
+          { kind: "category", name: "异步", contents: [{ kind: "block", type: "python_asyncio_run" }] },
+        ],
+      } as unknown as Blockly.utils.toolbox.ToolboxDefinition,
+      getWorkbenchProfile("esp32-wroom"),
+    );
+    const categories = (toolbox as unknown as { contents: Array<{ name?: string; contents?: Array<{ type?: string }> }> }).contents;
+    const io = categories.find((item) => item.name === "输入输出");
+    const standard = categories.find((item) => item.name === "标准库");
+    expect(io?.contents?.map((item) => item.type)).toEqual(["python_print"]);
+    expect(standard?.contents?.map((item) => item.type)).toEqual(["python_json_loads"]);
+    expect(categories.some((item) => item.name === "文件")).toBe(false);
+    expect(categories.some((item) => item.name === "异步")).toBe(false);
+  });
 });

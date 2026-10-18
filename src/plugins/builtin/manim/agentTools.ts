@@ -14,7 +14,7 @@ const tool = (name: string, description: string, properties: Record<string, unkn
 
 const runCapability = (name: string) => (args: Record<string, unknown>, runtime: PluginAgentRuntime, signal: AbortSignal) => runtime.executeCapability(name, args, signal);
 
-export const manimAgentTools: PluginAgentTool[] = [
+const manimAgentToolDefinitions: PluginAgentTool[] = [
   {
     id: "visual-python.manim.agent.list-scenes",
     definition: tool("list_scenes", "列出工程中的 Manim 场景文档及当前场景。"),
@@ -149,6 +149,8 @@ export const manimAgentTools: PluginAgentTool[] = [
     execute: runCapability("check_voiceover"),
   },
 ];
+
+export const manimAgentTools: PluginAgentTool[] = manimAgentToolDefinitions.map((tool) => ({ ...tool, workbenchKinds: ["python"] }));
 
 export const manimAgentToolNames = new Set(manimAgentTools.map((item) => item.definition.function.name));
 

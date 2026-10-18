@@ -11,6 +11,10 @@ export type HardwarePin = {
   pwm?: boolean;
   /** 支持模拟输入（ADC）。 */
   analog?: boolean;
+  /** 支持数字输入时的内置上拉。 */
+  pullUp?: boolean;
+  /** 支持数字输入时的内置下拉。 */
+  pullDown?: boolean;
   /** 只能输入，不能输出（例如 ESP32 的 GPIO34-39）。 */
   inputOnly?: boolean;
   /** 板载按钮、串口或会影响启动的引脚，默认不出现在下拉里。 */
@@ -21,6 +25,7 @@ export type HardwarePin = {
 
 /** 积木上会出现的引脚用法。 */
 export type HardwarePinUse = "digital-output" | "digital-input" | "pwm" | "analog";
+export type HardwarePinPull = "none" | "up" | "down";
 
 export type BoardProfile = {
   boardId: HardwareBoardId;
@@ -32,6 +37,8 @@ export type BoardProfile = {
   defaultI2c: { sda: string; scl: string };
   /** PWM 默认频率（赫兹）。 */
   pwmFrequencyHz: number;
+  /** PWM 频率上限（赫兹）；未定义表示当前板卡没有已声明的上限。 */
+  pwmFrequencyMaxHz?: number;
   /** PWM 占空比上限（0 到该值）。 */
   pwmDutyMax: number;
   /** 板载 LED 低电平点亮时为 true（ESP8266 常见）。 */
@@ -48,28 +55,28 @@ const esp32Wroom: BoardProfile = {
   pwmFrequencyHz: 1000,
   pwmDutyMax: 1023,
   pins: [
-    { id: "0", label: "GPIO0（启动按键）", digital: true, pwm: true, reserved: true },
-    { id: "1", label: "GPIO1（串口 TX）", digital: true, reserved: true },
-    { id: "2", label: "GPIO2（板载 LED）", digital: true, pwm: true, builtinLed: true },
-    { id: "3", label: "GPIO3（串口 RX）", digital: true, reserved: true },
-    { id: "4", label: "GPIO4", digital: true, pwm: true },
-    { id: "5", label: "GPIO5", digital: true, pwm: true },
-    { id: "12", label: "GPIO12", digital: true, pwm: true },
-    { id: "13", label: "GPIO13", digital: true, pwm: true },
-    { id: "14", label: "GPIO14", digital: true, pwm: true },
-    { id: "15", label: "GPIO15", digital: true, pwm: true },
-    { id: "16", label: "GPIO16", digital: true, pwm: true },
-    { id: "17", label: "GPIO17", digital: true, pwm: true },
-    { id: "18", label: "GPIO18", digital: true, pwm: true },
-    { id: "19", label: "GPIO19", digital: true, pwm: true },
-    { id: "21", label: "GPIO21", digital: true, pwm: true },
-    { id: "22", label: "GPIO22", digital: true, pwm: true },
-    { id: "23", label: "GPIO23", digital: true, pwm: true },
-    { id: "25", label: "GPIO25（DAC）", digital: true, pwm: true },
-    { id: "26", label: "GPIO26（DAC）", digital: true, pwm: true },
-    { id: "27", label: "GPIO27", digital: true, pwm: true },
-    { id: "32", label: "GPIO32（模拟输入）", digital: true, pwm: true, analog: true },
-    { id: "33", label: "GPIO33（模拟输入）", digital: true, pwm: true, analog: true },
+    { id: "0", label: "GPIO0（启动按键）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "1", label: "GPIO1（串口 TX）", digital: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "2", label: "GPIO2（板载 LED）", digital: true, pwm: true, pullUp: true, pullDown: true, builtinLed: true },
+    { id: "3", label: "GPIO3（串口 RX）", digital: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "4", label: "GPIO4", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "5", label: "GPIO5", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "12", label: "GPIO12", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "13", label: "GPIO13", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "14", label: "GPIO14", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "15", label: "GPIO15", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "16", label: "GPIO16", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "17", label: "GPIO17", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "18", label: "GPIO18", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "19", label: "GPIO19", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "21", label: "GPIO21", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "22", label: "GPIO22", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "23", label: "GPIO23", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "25", label: "GPIO25（DAC）", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "26", label: "GPIO26（DAC）", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "27", label: "GPIO27", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "32", label: "GPIO32（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "33", label: "GPIO33（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
     { id: "34", label: "GPIO34（仅输入/模拟）", analog: true, inputOnly: true },
     { id: "35", label: "GPIO35（仅输入/模拟）", analog: true, inputOnly: true },
     { id: "36", label: "GPIO36（部分板卡占用）", analog: true, inputOnly: true, reserved: true },
@@ -84,20 +91,21 @@ const esp8266Esp12e: BoardProfile = {
   analogRead: "adc0",
   defaultI2c: { sda: "4", scl: "5" },
   pwmFrequencyHz: 1000,
+  pwmFrequencyMaxHz: 1000,
   pwmDutyMax: 1023,
   builtinLedActiveLow: true,
   pins: [
     { id: "A0", label: "A0（模拟输入）", analog: true, inputOnly: true },
-    { id: "0", label: "GPIO0（D3，启动）", digital: true, pwm: true, reserved: true },
-    { id: "1", label: "GPIO1（D10，串口 TX）", digital: true, reserved: true },
-    { id: "2", label: "GPIO2（D4，板载 LED）", digital: true, pwm: true, builtinLed: true },
-    { id: "3", label: "GPIO3（D9，串口 RX）", digital: true, reserved: true },
-    { id: "4", label: "GPIO4（D2）", digital: true, pwm: true },
-    { id: "5", label: "GPIO5（D1）", digital: true, pwm: true },
-    { id: "12", label: "GPIO12（D6）", digital: true, pwm: true },
-    { id: "13", label: "GPIO13（D7）", digital: true, pwm: true },
-    { id: "14", label: "GPIO14（D5）", digital: true, pwm: true },
-    { id: "15", label: "GPIO15（D8）", digital: true, pwm: true },
+    { id: "0", label: "GPIO0（D3，启动）", digital: true, pwm: true, pullUp: true, reserved: true },
+    { id: "1", label: "GPIO1（D10，串口 TX）", digital: true, pullUp: true, reserved: true },
+    { id: "2", label: "GPIO2（D4，板载 LED）", digital: true, pwm: true, pullUp: true, builtinLed: true },
+    { id: "3", label: "GPIO3（D9，串口 RX）", digital: true, pullUp: true, reserved: true },
+    { id: "4", label: "GPIO4（D2）", digital: true, pwm: true, pullUp: true },
+    { id: "5", label: "GPIO5（D1）", digital: true, pwm: true, pullUp: true },
+    { id: "12", label: "GPIO12（D6）", digital: true, pwm: true, pullUp: true },
+    { id: "13", label: "GPIO13（D7）", digital: true, pwm: true, pullUp: true },
+    { id: "14", label: "GPIO14（D5）", digital: true, pwm: true, pullUp: true },
+    { id: "15", label: "GPIO15（D8）", digital: true, pwm: true, pullUp: true },
     { id: "16", label: "GPIO16（D0，不支持 PWM）", digital: true },
   ],
 };
@@ -151,6 +159,34 @@ export function validateBoardPin(profile: BoardProfile | undefined, use: Hardwar
   return undefined;
 }
 
+/** 校验数字输入引脚的内置上下拉模式。 */
+export function validateDigitalInputPull(
+  profile: BoardProfile | undefined,
+  pinId: string,
+  pull: HardwarePinPull,
+): string | undefined {
+  const pinProblem = validateBoardPin(profile, "digital-input", pinId);
+  if (pinProblem) return pinProblem;
+  if (pull !== "none" && pull !== "up" && pull !== "down") return `不支持的内部拉模式：${pull}`;
+  if (pull === "none") return undefined;
+
+  const pin = profile?.pins.find((item) => item.id === pinId);
+  if (!pin) return `引脚 ${pinId} 不存在`;
+  if (pull === "up" && !pin.pullUp) return `引脚 ${pin.label} 不支持内部上拉`;
+  if (pull === "down" && !pin.pullDown) return `引脚 ${pin.label} 不支持内部下拉`;
+  return undefined;
+}
+
+/** 校验音调频率；频率未能静态确定时由生成代码负责限制。 */
+export function validateToneFrequency(profile: BoardProfile | undefined, frequency: number | undefined): string | undefined {
+  if (!profile || frequency === undefined) return undefined;
+  if (!Number.isFinite(frequency) || frequency <= 0) return "音调频率必须大于 0 Hz";
+  if (profile.pwmFrequencyMaxHz !== undefined && frequency > profile.pwmFrequencyMaxHz) {
+    return `${profile.displayName} 音调频率不能超过 ${profile.pwmFrequencyMaxHz} Hz`;
+  }
+  return undefined;
+}
+
 /** 检查板卡档案自身是否自洽，返回中文问题列表（为空表示通过）。 */
 export function collectBoardProfileIssues(profiles: readonly BoardProfile[]): string[] {
   const issues: string[] = [];
@@ -163,6 +199,7 @@ export function collectBoardProfileIssues(profiles: readonly BoardProfile[]): st
     if (!profile.displayName.trim()) issues.push(`${prefix} 缺少显示名`);
     if (profile.chipFamily !== chipFamilyOfBoard(profile.boardId)) issues.push(`${prefix} 芯片系列与固件目录不一致`);
     if (profile.pwmFrequencyHz <= 0) issues.push(`${prefix} 的 PWM 默认频率无效`);
+    if (profile.pwmFrequencyMaxHz !== undefined && profile.pwmFrequencyMaxHz <= 0) issues.push(`${prefix} 的 PWM 频率上限无效`);
     if (profile.pwmDutyMax <= 0) issues.push(`${prefix} 的 PWM 占空比上限无效`);
     if (profile.pins.length === 0) issues.push(`${prefix} 缺少引脚定义`);
 
@@ -172,6 +209,7 @@ export function collectBoardProfileIssues(profiles: readonly BoardProfile[]): st
       if (!pin.id.trim()) issues.push(`${prefix} 存在缺少编号的引脚`);
       if (pinIds.has(pin.id)) issues.push(`${prefix} 的引脚 ${pin.id} 重复定义`);
       pinIds.add(pin.id);
+      if ((pin.pullUp || pin.pullDown) && !pin.digital) issues.push(`${prefix} 引脚 ${pin.id} 内置上下拉能力必须是数字引脚`);
       if (pin.builtinLed) builtinLedCount += 1;
       if (!pin.digital && !pin.analog) issues.push(`${prefix} 的引脚 ${pin.id} 没有任何可用能力`);
       if (pin.pwm && !pin.digital) issues.push(`${prefix} 的引脚 ${pin.id} 支持 PWM 却不是数字引脚`);

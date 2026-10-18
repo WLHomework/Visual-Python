@@ -117,6 +117,66 @@ describe("Visual Python Agent Core", () => {
     expect(mocks.streamAiChat.mock.calls[0][2]?.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "get_context" }) })]));
   });
 
+  it("adds MicroPython constraints only for hardware workbench profiles", async () => {
+    mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
+    await runVisualPythonAgent({
+      prompt: "让板载 LED 闪烁",
+      host: createHost({ getSnapshot: () => ({ workspaceMode: "code", workbench: { id: "esp32-wroom", label: "ESP32 WROOM", kind: "micropython", boardId: "esp32-wroom" } }) }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    const hardwareSystem = ((mocks.streamAiChat.mock.calls[0][0] as AiChatMessage[]).find((message) => message.role === "system")?.content || "");
+    expect(hardwareSystem).toContain("MicroPython");
+    expect(hardwareSystem).toContain("硬件积木");
+    expect(hardwareSystem).toContain("引脚");
+
+    mocks.streamAiChat.mockReset();
+    mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
+    await runVisualPythonAgent({
+      prompt: "运行 Python",
+      host: createHost({ getSnapshot: () => ({ workspaceMode: "code", workbench: { id: "python", label: "Python", kind: "python" } }) }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    const pythonSystem = ((mocks.streamAiChat.mock.calls[0][0] as AiChatMessage[]).find((message) => message.role === "system")?.content || "");
+    expect(pythonSystem).not.toContain("只使用当前工具箱中的硬件积木");
+  });
+
+  it("filters Python-only and Manim tools from a MicroPython workbench", async () => {
+    mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
+    await runVisualPythonAgent({
+      prompt: "读取当前工程状态",
+      host: createHost({
+        getSnapshot: () => ({ workspaceMode: "code", workbench: { id: "esp32-wroom", label: "ESP32 WROOM", kind: "micropython" } }),
+        getTools: () => manimAgentTools,
+      }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    const names = ((mocks.streamAiChat.mock.calls[0][2]?.tools || []) as Array<{ function: { name: string } }>).map((tool) => tool.function.name);
+    expect(names).not.toContain("check_dependencies");
+    expect(names).not.toContain("install_dependencies");
+    expect(names).not.toContain("list_resources");
+    expect(names).not.toContain("render_manim");
+    expect(names).toContain("get_context");
+  });
+
+  it("uses the host-provided current block catalog for graphical requests", async () => {
+    const getBlockCatalog = vi.fn(() => JSON.stringify({
+      categories: [{ name: "硬件", blocks: [{ type: "hardware_pin_write" }] }],
+      candidates: [{ type: "hardware_pin_write", label: "设置引脚", category: "硬件", contract: { fields: ["PIN"] } }],
+    }));
+    mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
+    await runVisualPythonAgent({
+      prompt: "让 LED 闪烁",
+      host: createHost({ getSnapshot: () => ({ workspaceMode: "visual", workbench: { id: "esp32-wroom", label: "ESP32 WROOM", kind: "micropython" } }), getBlockCatalog }),
+      onEvent: () => undefined,
+      signal: new AbortController().signal,
+    });
+    expect(getBlockCatalog).toHaveBeenCalledWith("让 LED 闪烁");
+    expect((mocks.streamAiChat.mock.calls[0][0] as AiChatMessage[]).some((message) => message.content.includes("hardware_pin_write"))).toBe(true);
+  });
+
   it("exposes only apply_block_plan as a graphical workspace mutation tool", async () => {
     mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
     await runVisualPythonAgent({

@@ -45,7 +45,7 @@ import {
  */
 
 export type HardwareDeviceOptions = {
-  /** 当前运行目标选定的板卡；连接时用它做握手校验。 */
+  /** 当前 MicroPython 工作台选定的板卡；连接时用它做握手校验。 */
   boardId: HardwareBoardId | undefined;
   /** 设备输出（stdout）转发给控制台，让用户不必盯着面板也能看到。 */
   onOutput?: (stream: DeviceLogStream, text: string) => void;
@@ -254,6 +254,7 @@ export function useHardwareDevice(options: HardwareDeviceOptions): HardwareDevic
       const message = hardwareErrorMessage(caught);
       setPhase("idle");
       setError(message);
+      pushLog("stderr", `${message}\n`);
       optionsRef.current.onNotice?.(`连接设备失败：${message}`);
       return false;
     }

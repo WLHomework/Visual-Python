@@ -88,16 +88,32 @@ export function hardwareErrorCode(error: unknown): string | null {
   return null;
 }
 
+export const hardwareMicroPythonSetupHint = "设备上没有可用的 MicroPython。请到 设置 → 硬件设备 刷写固件后再连接。";
+
 export function hardwareErrorMessage(error: unknown): string {
+  let message: string;
   if (typeof error === "string") return error;
-  if (error instanceof Error && error.message) return error.message;
-  if (error && typeof error === "object") {
+  if (error instanceof Error && error.message) {
+    message = error.message;
+  } else if (error && typeof error === "object") {
     const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message) return message;
+    if (typeof message === "string" && message) {
+      return shouldGuideMicroPythonSetup(error, message) ? hardwareMicroPythonSetupHint : message;
+    }
     const code = hardwareErrorCode(error);
     if (code) return code;
+    return String(error);
+  } else {
+    return String(error);
   }
-  return String(error);
+  return message;
+}
+
+function shouldGuideMicroPythonSetup(error: unknown, message: string): boolean {
+  const code = hardwareErrorCode(error);
+  if (code === "unsupported") return true;
+  if (code !== "protocol" && code !== "device") return false;
+  return /MicroPython|Raw REPL|固件|板卡|开发板/.test(message);
 }
 
 /** 设备断开类错误：界面据此把连接状态改为「未连接」并提示重新插拔。 */

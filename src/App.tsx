@@ -5564,6 +5564,12 @@ export default function App() {
             return { pluginId, name: discovery.manifest?.name, path: discovery.path, active: true };
           },
           getPluginExecutionState: () => ({ [`${manimPlugin.manifest.id}.rendering`]: renderingManimRef.current || manimRenderAttempt.current !== null }),
+          getWorkbench: () => ({
+            id: profileRef.current.id,
+            label: profileRef.current.label,
+            kind: profileRef.current.kind,
+            ...(profileRef.current.boardId ? { boardId: profileRef.current.boardId } : {}),
+          }),
           stopPluginExecutions: stopManimRender,
           agentCapabilities: getActiveAgentCapabilities(),
           getAgentCapabilities: getActiveAgentCapabilities,
@@ -5587,6 +5593,7 @@ export default function App() {
               definition: tool.definition,
               label: tool.label,
               workspaceModes: tool.workspaceModes,
+              workbenchKinds: tool.workbenchKinds,
               readOnly: tool.readOnly,
               changesState: tool.changesState,
               requiresPermission: tool.requiresPermission,
@@ -5683,6 +5690,12 @@ export default function App() {
             const document = sceneDocumentsRef.current.find((item) => item.id === activeSceneIdRef.current);
             return {
               workspaceMode: workspaceModeRef.current,
+              workbench: {
+                id: profileRef.current.id,
+                label: profileRef.current.label,
+                kind: profileRef.current.kind,
+                ...(profileRef.current.boardId ? { boardId: profileRef.current.boardId } : {}),
+              },
               project: { name: projectName, path: projectPathRef.current, dirty: projectDirty, activeDocument: { id: activeSceneIdRef.current, name: document?.name || "当前文档" }, documentCount: sceneDocumentsRef.current.length },
               code: sourceCodeRef.current,
               lineCount: sourceCodeRef.current ? sourceCodeRef.current.split("\n").length : 0,

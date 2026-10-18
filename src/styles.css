@@ -754,7 +754,6 @@ button { font: inherit; }
   .app-settings-dialog .settings-actions,.plugin-manager-dialog .plugin-heading-actions { justify-content: flex-start; }
   .app-settings-dialog .close-behavior-options { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .app-settings-dialog .close-behavior-options button { min-width: 0; padding: 0 8px; }
-  .app-settings-dialog .hardware-target-options { grid-template-columns: minmax(0,1fr); }
   .plugin-manager-dialog .plugin-card-grid { grid-template-columns: 1fr; }
 }
 
@@ -6461,74 +6460,6 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   overflow: visible;
 }
 
-.hardware-target-options {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.hardware-target-options button {
-  min-width: 0;
-  height: 70px;
-  display: grid;
-  align-content: center;
-  gap: 5px;
-  padding: 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.hardware-target-options button:hover {
-  background: var(--hover);
-}
-
-.hardware-target-options button.selected {
-  border-color: #2f9e8f;
-  background: var(--selected);
-}
-
-.hardware-target-options button strong {
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.hardware-target-options button small {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.hardware-board-picker {
-  display: grid;
-  gap: 6px;
-  max-width: 320px;
-}
-
-.hardware-board-picker label {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.hardware-board-picker select {
-  min-height: 34px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  background: var(--surface-2);
-}
-
-.hardware-board-picker small {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
 .hardware-firmware-wizard {
   display: grid;
   align-content: start;
@@ -6714,31 +6645,6 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 }
 
 /* 硬件工作台（Mixly 风格）：顶部操作条、右侧设备抽屉、首次进入引导。 */
-
-.hardware-workbench-enter {
-  height: 32px;
-  margin-left: 6px;
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid color-mix(in srgb, var(--border), #2f9e8f 50%);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--surface-2), #2f9e8f 14%);
-  color: #9fded3;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.hardware-workbench-enter:hover {
-  background: color-mix(in srgb, var(--surface-3), #2f9e8f 26%);
-  color: #fff;
-}
-
-.hardware-workbench-switch {
-  margin-left: 6px;
-  border: 1px solid var(--border);
-}
 
 .hardware-bar {
   min-width: 0;

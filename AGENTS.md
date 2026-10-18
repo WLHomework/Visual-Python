@@ -31,6 +31,12 @@ Visual Python: a Blockly-based Python/Manim workbench. Vite + React + TypeScript
 - Project files use the `.vpy` extension (registered as a file association).
 - User-facing UI text and docs are mostly Chinese; keep new strings consistent with that.
 
+## Workbench Profiles
+
+- `src/profiles/workbenchProfile.ts` is the source of truth for the active workbench (`python` or a `micropython` board) and its `features`.
+- Build profile-specific toolboxes through `src/profiles/profileToolbox.ts`; UI differences in `App.tsx` must read `profile.features.*` instead of checking board IDs directly.
+- Keep board-specific generation and device behavior in `src/hardware/` and `src/profiles/useHardwareRunner.ts`. Add a profile field and tests before introducing a new UI difference.
+
 ## Commits and PRs
 
 Short action-oriented subjects (Chinese is common, no prefixes). PRs should describe the user-visible change, list validation commands, and include screenshots for UI changes. Call out Tauri/desktop and generated-docs effects.

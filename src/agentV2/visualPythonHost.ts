@@ -23,7 +23,7 @@ type ProjectResourceStatus = { path: string; exists: boolean; size: number };
 type InstalledPluginSummary = { id: string; name: string; version: string; active: boolean; valid?: boolean; errors?: string[] };
 type CodeEditor = MonacoEditor.IStandaloneCodeEditor;
 
-/** 「运行」的结果。设备目标（开发板）不是本机进程，所以要把“是否真的跑起来了”明确回传。 */
+/** 「运行」的结果。MicroPython 工作台不是本机进程，所以要把“是否真的跑起来了”明确回传。 */
 export type HostRunResult = {
   started: boolean;
   target?: "host" | "device";
@@ -38,6 +38,13 @@ export type HostDeviceExecutionState = {
   devicePhase: string;
   devicePort: string | null;
   deviceConnected: boolean;
+};
+
+export type HostWorkbenchContext = {
+  id: string;
+  label: string;
+  kind: "python" | "micropython";
+  boardId?: string;
 };
 
 export type VisualPythonHostServices = {
@@ -81,6 +88,7 @@ export type VisualPythonHostServices = {
   stopDeviceExecution?: () => Promise<void>;
   stopPluginExecutions?: () => Promise<void>;
   getPluginExecutionState?: () => Record<string, unknown>;
+  getWorkbench?: () => HostWorkbenchContext;
   writeProject: (path: string, sourceOverride?: string) => Promise<boolean>;
   saveProject: () => Promise<boolean>;
   invoke: Invoke;
@@ -406,6 +414,7 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
       const currentDocument = services.documentsRef.current.find((document) => document.id === services.activeDocumentIdRef.current);
       return {
         workspaceMode: services.workspaceModeRef.current,
+        workbench: services.getWorkbench?.() ?? null,
         project: { name: services.projectName, path: services.projectPathRef.current, dirty: services.getProjectDirty(), activeDocument: { id: services.activeDocumentIdRef.current, name: currentDocument?.name || "当前文档" }, documentCount: services.documentsRef.current.length },
         code: services.sourceCodeRef.current,
         lineCount: services.sourceCodeRef.current ? services.sourceCodeRef.current.split("\n").length : 0,

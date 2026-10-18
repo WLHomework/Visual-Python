@@ -2,6 +2,7 @@ import type * as Blockly from "blockly/core";
 import type { pythonGenerator } from "blockly/python";
 import type { AiChatToolDefinition } from "../../aiConfig";
 import type { WorkspaceMode } from "../../workspaceMode";
+import type { WorkbenchKind } from "../../profiles/workbenchProfile";
 
 export const PLUGIN_API_VERSION = "1";
 
@@ -116,6 +117,7 @@ export interface PluginAgentTool {
   definition: AiChatToolDefinition;
   label: string;
   workspaceModes?: WorkspaceMode[];
+  workbenchKinds?: WorkbenchKind[];
   readOnly?: boolean;
   changesState?: boolean;
   requiresPermission?: boolean;

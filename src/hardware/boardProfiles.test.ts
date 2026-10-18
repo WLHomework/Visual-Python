@@ -7,6 +7,8 @@ import {
   getBoardProfile,
   hardwareBoardProfiles,
   isHardwareBoardId,
+  validateToneFrequency,
+  validateDigitalInputPull,
   validateBoardPin,
   type BoardProfile,
 } from "./boardProfiles";
@@ -33,9 +35,11 @@ describe("hardware board profiles", () => {
       ...esp8266,
       boardId: "esp8266-esp12e",
       defaultI2c: { sda: "99", scl: "5" },
+      pwmFrequencyMaxHz: 0,
       pins: [...esp8266.pins, { id: "5", label: "重复引脚", digital: true }],
     };
     const issues = collectBoardProfileIssues([broken]);
+    expect(issues.some((issue) => issue.includes("PWM 频率上限无效"))).toBe(true);
     expect(issues.some((issue) => issue.includes("默认 I2C 引脚 99"))).toBe(true);
     expect(issues.some((issue) => issue.includes("重复定义"))).toBe(true);
     expect(issues.some((issue) => issue.includes("缺少板卡档案：esp32-wroom"))).toBe(true);
@@ -46,6 +50,14 @@ describe("hardware board profiles", () => {
     expect(isHardwareBoardId("esp32-s3")).toBe(false);
     expect(isHardwareBoardId(undefined)).toBe(false);
     expect(getBoardProfile(undefined)).toBeUndefined();
+  });
+
+  it("rejects pull capabilities on non-digital pins", () => {
+    const broken: BoardProfile = {
+      ...esp8266,
+      pins: esp8266.pins.map((pin) => pin.id === "A0" ? { ...pin, pullUp: true } : pin),
+    };
+    expect(collectBoardProfileIssues([broken]).some((issue) => issue.includes("内置上下拉能力必须是数字引脚"))).toBe(true);
   });
 
   it("exposes the builtin LED with the right polarity", () => {
@@ -106,5 +118,23 @@ describe("board pin validation", () => {
     expect(validateBoardPin(esp32, "analog", "2")).toContain("不支持模拟输入");
     expect(validateBoardPin(esp8266, "analog", "A0")).toBeUndefined();
     expect(validateBoardPin(esp8266, "digital-output", "16")).toBeUndefined();
+  });
+
+  it("validates pull modes against each board pin", () => {
+    expect(validateDigitalInputPull(esp32, "2", "none")).toBeUndefined();
+    expect(validateDigitalInputPull(esp32, "2", "up")).toBeUndefined();
+    expect(validateDigitalInputPull(esp32, "2", "down")).toBeUndefined();
+    expect(validateDigitalInputPull(esp8266, "14", "up")).toBeUndefined();
+    expect(validateDigitalInputPull(esp8266, "16", "up")).toContain("不支持内部上拉");
+    expect(validateDigitalInputPull(esp8266, "14", "down")).toContain("不支持内部下拉");
+    expect(validateDigitalInputPull(esp8266, "16", "none")).toBeUndefined();
+  });
+
+  it("validates the tone frequency limit", () => {
+    expect(validateToneFrequency(esp8266, 1000)).toBeUndefined();
+    expect(validateToneFrequency(esp8266, 1001)).toContain("1000");
+    expect(validateToneFrequency(esp32, 20000)).toBeUndefined();
+    expect(validateToneFrequency(esp8266, 0)).toContain("大于 0");
+    expect(validateToneFrequency(esp8266, undefined)).toBeUndefined();
   });
 });
