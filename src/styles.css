@@ -754,6 +754,7 @@ button { font: inherit; }
   .app-settings-dialog .settings-actions,.plugin-manager-dialog .plugin-heading-actions { justify-content: flex-start; }
   .app-settings-dialog .close-behavior-options { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .app-settings-dialog .close-behavior-options button { min-width: 0; padding: 0 8px; }
+  .app-settings-dialog .hardware-target-options { grid-template-columns: minmax(0,1fr); }
   .plugin-manager-dialog .plugin-card-grid { grid-template-columns: 1fr; }
 }
 
@@ -5197,6 +5198,7 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 }
 
 .ai-assistant {
+  position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -5531,6 +5533,42 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 .ai-composer-input.dragging {
   border-color: #2f9e8f;
   background: color-mix(in srgb,#2f9e8f,var(--surface-1) 94%);
+}
+
+.ai-assistant-drop-overlay {
+  position: absolute;
+  z-index: 4;
+  inset: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 2px dashed #2f9e8f;
+  border-radius: 8px;
+  background: color-mix(in srgb,var(--surface-1),transparent 18%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.ai-assistant-drop-overlay strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.ai-assistant-drop-overlay small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ai-assistant-drop-overlay .ai-assistant-drop-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb,#2f9e8f,transparent 84%);
+  color: #2f9e8f;
 }
 
 .ai-composer-attachments {
@@ -6377,4 +6415,617 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 
 .context-view:has(.monaco-hover.workbench-hover.compact) {
   pointer-events: none !important;
+}
+
+.hardware-target-chip {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .12);
+  color: inherit;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.hardware-target-chip:hover {
+  background: rgba(255, 255, 255, .2);
+}
+
+.hardware-target-chip em {
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .18);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.hardware-target-section {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.hardware-target-section > .settings-pane-header {
+  margin-bottom: 0;
+}
+
+.hardware-target-section .hardware-firmware-wizard {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+  padding: 0;
+  overflow: visible;
+}
+
+.hardware-target-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.hardware-target-options button {
+  min-width: 0;
+  height: 70px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.hardware-target-options button:hover {
+  background: var(--hover);
+}
+
+.hardware-target-options button.selected {
+  border-color: #2f9e8f;
+  background: var(--selected);
+}
+
+.hardware-target-options button strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.hardware-target-options button small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.hardware-board-picker {
+  display: grid;
+  gap: 6px;
+  max-width: 320px;
+}
+
+.hardware-board-picker label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hardware-board-picker select {
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.hardware-board-picker small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.hardware-firmware-wizard {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.hardware-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.hardware-form-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.hardware-form-grid select {
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.hardware-firmware-meta {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.hardware-firmware-meta > div,
+.hardware-inline-notice,
+.hardware-error,
+.hardware-success {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hardware-firmware-meta code,
+.hardware-firmware-meta small {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.hardware-inline-notice,
+.hardware-error,
+.hardware-success {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.hardware-error {
+  color: #df7979;
+  border-color: color-mix(in srgb, var(--border), #df7979 45%);
+}
+
+.hardware-success {
+  color: #69c2a4;
+  border-color: color-mix(in srgb, var(--border), #69c2a4 45%);
+}
+
+.hardware-confirmation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hardware-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hardware-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hardware-progress {
+  display: grid;
+  gap: 7px;
+}
+
+.hardware-progress > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.hardware-progress progress {
+  width: 100%;
+  accent-color: #2f9e8f;
+}
+
+.hardware-loading,
+.hardware-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Stage 7: hardware device panel and unified run loop. */
+
+.console-content.has-hardware-device-status { grid-template-rows: auto minmax(0,1fr) auto; }
+.console-content.has-manim-render-status.has-hardware-device-status { grid-template-rows: 31px auto minmax(0,1fr) auto; }
+
+.hardware-device-console-status {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2), #2f9e8f 10%);
+  color: var(--text);
+  font-size: 10px;
+}
+
+.hardware-device-console-status-text {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hardware-device-console-status-text svg {
+  flex: 0 0 auto;
+  color: #58bdab;
+}
+
+.hardware-device-console-status-text strong {
+  flex: 0 1 auto;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.hardware-device-console-status-text span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.hardware-device-console-track {
+  position: relative;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--surface-3), transparent 15%);
+}
+
+.hardware-device-console-track > span {
+  display: block;
+  height: 100%;
+  background: #2f9e8f;
+  transition: width .15s linear;
+}
+
+.hardware-device-console-status.phase-stopping .hardware-device-console-status-text svg,
+.hardware-device-console-status.phase-stopping .hardware-device-console-status-text span {
+  color: #c66b6b;
+}
+
+/* 硬件工作台（Mixly 风格）：顶部操作条、右侧设备抽屉、首次进入引导。 */
+
+.hardware-workbench-enter {
+  height: 32px;
+  margin-left: 6px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--border), #2f9e8f 50%);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-2), #2f9e8f 14%);
+  color: #9fded3;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.hardware-workbench-enter:hover {
+  background: color-mix(in srgb, var(--surface-3), #2f9e8f 26%);
+  color: #fff;
+}
+
+.hardware-workbench-switch {
+  margin-left: 6px;
+  border: 1px solid var(--border);
+}
+
+.hardware-bar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.hardware-bar-board,
+.hardware-bar-port {
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.hardware-bar-board {
+  width: 118px;
+}
+
+.hardware-bar-port {
+  width: 132px;
+}
+
+.hardware-bar-board:disabled,
+.hardware-bar-port:disabled {
+  opacity: .5;
+}
+
+.hardware-bar-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.hardware-bar-button {
+  height: 30px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 4px;
+  background: #2f9e8f;
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.hardware-bar-button:hover:not(:disabled) {
+  background: #27907f;
+}
+
+.hardware-bar-button.secondary {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 400;
+}
+
+.hardware-bar-button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.hardware-bar-run {
+  min-width: 84px;
+  height: 30px;
+  margin-left: 0;
+}
+
+@media (max-width: 1280px) {
+  .hardware-bar-board {
+    width: 100px;
+  }
+
+  .hardware-bar-port {
+    width: 108px;
+  }
+}
+
+/* 底部面板「设备」页签：设备文件与只读预览（设备输出本身在「输出」页签里）。 */
+
+.console-device {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hardware-files {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: 34px minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.hardware-files-bar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.hardware-files-device {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.hardware-files-device.connected {
+  color: #9fded3;
+}
+
+.hardware-files-path {
+  margin-left: auto;
+  color: var(--muted);
+  font: 11px "Cascadia Code", Consolas, monospace;
+}
+
+.hardware-files-bar button,
+.hardware-files-list button {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.hardware-files-bar button:hover:not(:disabled),
+.hardware-files-list button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.hardware-files-bar button:disabled,
+.hardware-files-list button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.hardware-files-list {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.hardware-files-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 45%);
+  font-size: 11px;
+}
+
+.hardware-files-name {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hardware-files-name svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.hardware-files-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-files-name button.link {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: #74b6e8;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.hardware-files-name button.link:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+
+.hardware-files-size {
+  color: var(--muted);
+  font: 10px "Cascadia Code", Consolas, monospace;
+}
+
+.hardware-files-empty {
+  margin: 0;
+  padding: 14px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.hardware-files-preview {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 28px minmax(0, 1fr);
+  border-top: 1px solid var(--border);
+}
+
+.hardware-files-preview > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+  color: var(--muted);
+  font: 11px "Cascadia Code", Consolas, monospace;
+}
+
+.hardware-files-preview > header button {
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.hardware-files-preview > header button:hover {
+  color: var(--text);
+}
+
+.hardware-files-preview pre {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: #171a1f;
+  color: #b9c1cc;
+  font: 11px/1.55 "Cascadia Code", Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hardware-menu {
+  width: 268px;
+}
+
+.hardware-menu-label {
+  margin: 6px 6px 3px;
+  padding-top: 7px;
+  border-top: 1px solid #3a424c;
+  color: #808b98;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.hardware-menu-label:first-child {
+  margin-top: 2px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.hardware-menu-check {
+  justify-self: end;
+  color: #58bdab;
 }

@@ -18,7 +18,7 @@ import "katex/dist/katex.min.css";
 import { createCodeChangePreview } from "./agentV2/codeChanges";
 import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2/types";
 import { getAiAgentPermissionMode, getAiReasoningEffort, saveAiReasoningEffort, type AiAgentPermissionMode, type AiReasoningEffort } from "./aiConfig";
-import { MAX_IMAGE_COUNT, prepareImageFile, restorePersistedImageAttachment, toPersistedImageAttachment, validateImageFiles, type AiImageAttachment, type PersistedAiImageAttachment } from "./aiImageAttachments";
+import { MAX_IMAGE_COUNT, pickImageFiles, prepareImageFile, restorePersistedImageAttachment, toPersistedImageAttachment, validateImageFiles, type AiImageAttachment, type PersistedAiImageAttachment } from "./aiImageAttachments";
 import { buildAiConversationHistory } from "./aiConversationContext";
 import { CONVERSATION_STORES_PREFIX, conversationStoreKey, conversationStoreTimestamp, isStorageQuotaError } from "./sessionPersistence";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
@@ -74,6 +74,7 @@ type AgentRun = {
   prompt: string;
   request?: string;
   mode: AiAgentMode;
+  effort?: AiReasoningEffort;
   initialPlan?: AiAgentPlanStep[];
   activities: AiAgentActivity[];
   status: "queued" | "running" | "done" | "error" | "stopped";
@@ -115,6 +116,26 @@ export function mergePendingAiAttachments(current: readonly AiImageAttachment[],
 
 export function canSubmitAiPrompt(prompt: string, attachments: readonly AiImageAttachment[]): boolean {
   return Boolean(prompt.trim()) || attachments.some((attachment) => attachment.sendable && Boolean(attachment.dataUrl));
+}
+
+// 运行中同样允许添加图片，为下一条消息做准备；这里只限制数量，不限制运行状态。
+export function canAddAiAttachments(attachments: readonly AiImageAttachment[]): boolean {
+  return attachments.length < MAX_IMAGE_COUNT;
+}
+
+// 排队任务保留入队时选择的思考强度，正在运行的任务不受后续切换影响。
+export function resolveRunEffort(run: { effort?: AiReasoningEffort } | undefined, current: AiReasoningEffort): AiReasoningEffort {
+  return run?.effort ?? current;
+}
+
+export function isFileDragPayload(types: readonly string[] | null | undefined): boolean {
+  return Boolean(types && Array.from(types).includes("Files"));
+}
+
+export function nextAiDropDepth(depth: number, phase: "enter" | "leave" | "drop"): number {
+  if (phase === "drop") return 0;
+  const current = Math.max(0, depth);
+  return phase === "enter" ? current + 1 : Math.max(0, current - 1);
 }
 
 const legacyAiHistoryStorageKey = "visual-python:ai-conversation-history";
@@ -167,6 +188,7 @@ export function parseStoredRuns(value: unknown): AgentRun[] {
     if (typeof run.id !== "number" || typeof run.prompt !== "string" || !Array.isArray(run.activities)) return [];
     const status = run.status === "running" ? "stopped" : run.status;
     if (status !== "queued" && status !== "done" && status !== "error" && status !== "stopped") return [];
+    const effort = run.effort === "low" || run.effort === "medium" || run.effort === "high" || run.effort === "xhigh" ? run.effort : undefined;
     const finishedAt = typeof run.finishedAt === "number"
       ? run.finishedAt
       : run.status === "running" && typeof run.startedAt === "number"
@@ -189,7 +211,7 @@ export function parseStoredRuns(value: unknown): AgentRun[] {
     const activities = run.result && typeof run.result.summary === "string"
       ? removeFinalMessageActivity(run.activities, run.result.summary)
       : run.activities;
-    return [{ ...run, id: run.id, prompt: run.prompt, mode: run.mode === "plan" ? "plan" : "agent", ...(initialPlan.length ? { initialPlan } : { initialPlan: undefined }), ...(attachments.length ? { attachments, persistedAttachments: undefined } : { attachments: undefined, persistedAttachments: undefined }), activities, status, finishedAt } as AgentRun];
+    return [{ ...run, id: run.id, prompt: run.prompt, mode: run.mode === "plan" ? "plan" : "agent", effort, ...(initialPlan.length ? { initialPlan } : { initialPlan: undefined }), ...(attachments.length ? { attachments, persistedAttachments: undefined } : { attachments: undefined, persistedAttachments: undefined }), activities, status, finishedAt } as AgentRun];
   });
 }
 
@@ -1342,6 +1364,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const [prompt, setPrompt] = useState("");
   const [pendingAttachments, setPendingAttachments] = useState<AiImageAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [dropDepth, setDropDepth] = useState(0);
   const [agentMode, setAgentMode] = useState<AiAgentMode>("agent");
   const [agentModeMenuOpen, setAgentModeMenuOpen] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<AiReasoningEffort>(() => getAiReasoningEffort());
@@ -1397,16 +1420,41 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   };
 
   const handleComposerPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(event.clipboardData.files || []).filter((file) => file.type.startsWith("image/"));
+    const files = pickImageFiles(Array.from(event.clipboardData.files || []));
     if (!files.length) return;
     event.preventDefault();
     void addImageFiles(files);
   };
 
-  const handleComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
+  const handlePanelDragEnter = (event: React.DragEvent<HTMLElement>) => {
+    if (!isFileDragPayload(event.dataTransfer?.types)) return;
     event.preventDefault();
-    const files = Array.from(event.dataTransfer.files || []).filter((file) => file.type.startsWith("image/"));
-    void addImageFiles(files);
+    setDropDepth((depth) => nextAiDropDepth(depth, "enter"));
+  };
+
+  const handlePanelDragOver = (event: React.DragEvent<HTMLElement>) => {
+    if (!isFileDragPayload(event.dataTransfer?.types)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    setDropDepth((depth) => (depth > 0 ? depth : 1));
+  };
+
+  const handlePanelDragLeave = (event: React.DragEvent<HTMLElement>) => {
+    if (!isFileDragPayload(event.dataTransfer?.types)) return;
+    setDropDepth((depth) => nextAiDropDepth(depth, "leave"));
+  };
+
+  const handlePanelDrop = (event: React.DragEvent<HTMLElement>) => {
+    setDropDepth(0);
+    const dropped = Array.from(event.dataTransfer?.files || []);
+    if (!dropped.length) return;
+    event.preventDefault();
+    const images = pickImageFiles(dropped);
+    if (!images.length) {
+      setAttachmentError("仅支持 PNG、JPEG、WebP 图片");
+      return;
+    }
+    void addImageFiles(images);
   };
 
   useEffect(() => {
@@ -1622,6 +1670,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const runAgent = async (nextPrompt = prompt, excludedRunId?: number, existingRunId?: number, visiblePrompt = nextPrompt, runMode: AiAgentMode = agentMode, initialPlan: AiAgentPlanStep[] = [], nextAttachments?: AiImageAttachment[]): Promise<void> => {
     const normalizedPrompt = nextPrompt.trim();
     const existingRun = existingRunId === undefined ? undefined : runsRef.current.find((run) => run.id === existingRunId);
+    const runEffort = resolveRunEffort(existingRun, reasoningEffort);
     const sourceAttachments = nextAttachments ?? (existingRunId === undefined
       ? pendingAttachments
       : existingRun?.attachments || pendingAttachments);
@@ -1672,7 +1721,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         history,
         conversationId: conversationState.activeId,
         agentMode: runMode,
-        reasoningEffort,
+        reasoningEffort: runEffort,
         ...(initialPlan.length ? { initialPlan } : {}),
         onActivity: (activity) => updateActivity(id, activity),
         onProgress: (progress) => updateRun(id, { progress }),
@@ -1728,7 +1777,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       void runAgent(normalizedPrompt, undefined, undefined, normalizedPrompt, agentMode, [], nextAttachments);
       return;
     }
-    setRuns((items) => [...items, { id: runId.current++, prompt: normalizedPrompt || `图片附件（${nextAttachments.length} 张）`, mode: agentMode, activities: [], status: "queued", attachments: nextAttachments }]);
+    setRuns((items) => [...items, { id: runId.current++, prompt: normalizedPrompt || `图片附件（${nextAttachments.length} 张）`, mode: agentMode, effort: reasoningEffort, activities: [], status: "queued", attachments: nextAttachments }]);
     setPrompt("");
     setPendingAttachments([]);
   };
@@ -1826,7 +1875,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     applyAiAssistantSuggestion(suggestion, setPrompt, () => promptRef.current?.focus(), enqueuePrompt);
   };
 
-  return <section className="ai-assistant" aria-label="AI 编程助手">
+  return <section className="ai-assistant" aria-label="AI 编程助手" onDragEnter={handlePanelDragEnter} onDragOver={handlePanelDragOver} onDragLeave={handlePanelDragLeave} onDrop={handlePanelDrop}>
     <header className="ai-assistant-header">
       <div className="ai-assistant-title"><span className="ai-assistant-icon"><Sparkles size={16}/></span><strong>AI 编程助手</strong><small title={activeConversation?.title}>{activeConversation?.title || "新对话"}</small></div>
       <div className="ai-assistant-actions">
@@ -1893,7 +1942,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       {showScrollToLatest && runs.length > 0 && <button type="button" className="ai-scroll-to-latest" onClick={scrollToLatest} title="回到最新消息" aria-label="回到最新消息"><ArrowDown size={16}/></button>}
     </div>
     <div className="ai-composer">
-      <div className="ai-composer-input" onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add("dragging"); }} onDragLeave={(event) => event.currentTarget.classList.remove("dragging")} onDrop={(event) => { event.currentTarget.classList.remove("dragging"); handleComposerDrop(event); }}>
+      <div className={`ai-composer-input${dropDepth > 0 ? " dragging" : ""}`}>
         {pendingAttachments.length > 0 && <div className="ai-composer-attachments" aria-label="待发送图片">
           {pendingAttachments.map((attachment) => <div className="ai-composer-attachment" key={attachment.id} title={`${attachment.name} · ${formatImageAttachmentSize(attachment.sourceBytes)}`}>
             <img src={attachment.previewDataUrl || attachment.dataUrl} alt={attachment.name}/>
@@ -1905,7 +1954,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={handleImageInputChange}/>
         <div className="ai-composer-footer">
           <div className="ai-agent-mode-menu" ref={agentModeMenuRef}>
-            <button ref={agentModeTriggerRef} type="button" className={`ai-agent-mode-trigger ${agentModeMenuOpen ? "open" : ""}`} disabled={running} onClick={() => { setReasoningEffortMenuOpen(false); setAgentModeMenuOpen((open) => !open); }} onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setReasoningEffortMenuOpen(false); setAgentModeMenuOpen(true); } }} title={agentMode === "plan" ? "只读分析并制定计划" : "直接执行任务"} aria-label={`智能体模式：${agentMode === "plan" ? "计划" : "智能体"}`} aria-haspopup="menu" aria-expanded={agentModeMenuOpen}>
+            <button ref={agentModeTriggerRef} type="button" className={`ai-agent-mode-trigger ${agentModeMenuOpen ? "open" : ""}`} onClick={() => { setReasoningEffortMenuOpen(false); setAgentModeMenuOpen((open) => !open); }} onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setReasoningEffortMenuOpen(false); setAgentModeMenuOpen(true); } }} title={agentMode === "plan" ? "只读分析并制定计划" : "直接执行任务"} aria-label={`智能体模式：${agentMode === "plan" ? "计划" : "智能体"}`} aria-haspopup="menu" aria-expanded={agentModeMenuOpen}>
               {agentMode === "plan" ? <ListChecks size={13}/> : <Sparkles size={13}/>}<span>{agentMode === "plan" ? "计划" : "智能体"}</span><ChevronDown size={13}/>
             </button>
             {agentModeMenuOpen && <div className="ai-agent-mode-options" role="menu" aria-label="选择智能体模式">
@@ -1914,7 +1963,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
             </div>}
           </div>
           <div className="ai-agent-mode-menu ai-reasoning-effort-menu" ref={reasoningEffortMenuRef}>
-            <button ref={reasoningEffortTriggerRef} type="button" className={`ai-agent-mode-trigger ai-reasoning-effort-trigger ${reasoningEffortMenuOpen ? "open" : ""}`} disabled={running} onClick={() => { setAgentModeMenuOpen(false); setReasoningEffortMenuOpen((open) => !open); }} title={`思考强度：${reasoningEffortLabels[reasoningEffort]}`} aria-label={`思考强度：${reasoningEffortLabels[reasoningEffort]}`} aria-haspopup="menu" aria-expanded={reasoningEffortMenuOpen}>
+            <button ref={reasoningEffortTriggerRef} type="button" className={`ai-agent-mode-trigger ai-reasoning-effort-trigger ${reasoningEffortMenuOpen ? "open" : ""}`} onClick={() => { setAgentModeMenuOpen(false); setReasoningEffortMenuOpen((open) => !open); }} title={`思考强度：${reasoningEffortLabels[reasoningEffort]}`} aria-label={`思考强度：${reasoningEffortLabels[reasoningEffort]}`} aria-haspopup="menu" aria-expanded={reasoningEffortMenuOpen}>
               <span>{reasoningEffortLabels[reasoningEffort]}</span><ChevronDown size={13}/>
             </button>
             {reasoningEffortMenuOpen && <div className="ai-agent-mode-options ai-reasoning-effort-options" role="menu" aria-label="选择思考强度">
@@ -1924,12 +1973,13 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
           </div>
           <span className="ai-composer-scope" title={`${contextName} · ${lineCount} 行代码`}><Code2 size={14}/><span>{contextName}</span><small>{lineCount} 行</small></span>
           <span className="ai-composer-footer-spacer"/>
-          <button type="button" className="ai-composer-attach" onClick={() => imageInputRef.current?.click()} disabled={running || pendingAttachments.length >= MAX_IMAGE_COUNT} title="添加图片" aria-label="添加图片"><ImagePlus size={16}/></button>
+          <button type="button" className="ai-composer-attach" onClick={() => imageInputRef.current?.click()} disabled={!canAddAiAttachments(pendingAttachments)} title="添加图片" aria-label="添加图片"><ImagePlus size={16}/></button>
           {running
             ? <button className="stop" onClick={stopAgent} title="停止智能体" aria-label="停止智能体"><Square size={13}/></button>
             : <button onClick={() => void runAgent()} disabled={!canSubmitAiPrompt(prompt, pendingAttachments)} title="发送" aria-label="发送"><Send size={16}/></button>}
         </div>
       </div>
     </div>
+    {dropDepth > 0 && <div className="ai-assistant-drop-overlay" aria-label="松开以添加图片"><span className="ai-assistant-drop-icon"><ImagePlus size={18}/></span><strong>松开以添加图片</strong><small>支持 PNG / JPEG / WebP，最多 {MAX_IMAGE_COUNT} 张</small></div>}
   </section>;
 }

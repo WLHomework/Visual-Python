@@ -65,4 +65,26 @@ describe("project file validation", () => {
     const projectId = createProjectId();
     expect(validateProjectFile({ ...legacy, projectId }).projectId).toBe(projectId);
   });
+
+  it("defaults to a host target and keeps device projects loadable", () => {
+    expect(validateProjectFile({ ...validProject })).not.toHaveProperty("hardware");
+    expect(validateProjectFile({ ...validProject, hardware: { target: "host" } }).hardware).toEqual({ target: "host" });
+
+    const device = validateProjectFile({
+      ...validProject,
+      hardware: { target: "device", boardId: "esp8266-esp12e", entryFile: "main.py" },
+    });
+    expect(device.hardware).toEqual({ target: "device", boardId: "esp8266-esp12e", entryFile: "main.py" });
+    expect(validateProjectFile({ ...validProject, hardware: { target: "device", boardId: "esp32-wroom" } }).hardware)
+      .toEqual({ target: "device", boardId: "esp32-wroom" });
+  });
+
+  it("drops board details from host targets and rejects invalid device targets", () => {
+    expect(validateProjectFile({ ...validProject, hardware: { target: "host", boardId: "esp32-wroom" } }).hardware)
+      .toEqual({ target: "host" });
+    expect(() => validateProjectFile({ ...validProject, hardware: { target: "device" } })).toThrow("板卡");
+    expect(() => validateProjectFile({ ...validProject, hardware: { target: "device", boardId: "esp32-s3" } })).toThrow("板卡");
+    expect(() => validateProjectFile({ ...validProject, hardware: "device" })).toThrow("硬件目标");
+    expect(() => validateProjectFile({ ...validProject, hardware: { target: "device", boardId: "esp32-wroom", entryFile: "../evil.py" } })).toThrow("入口文件");
+  });
 });

@@ -82,6 +82,21 @@ function targetBlock(
   issue("INVALID_TARGET", "This operation requires a blockId or ref target", operationIndex);
 }
 
+/** 计划按 `blockId` / `afterBlockId` 点名的既有积木；`ref` 目标都在 `refs` 里。 */
+function planBlockIdTargets(plan: BlockPlan): string[] {
+  const ids = new Set<string>();
+  const collect = (target: BlockPlanTarget) => {
+    if ("blockId" in target) ids.add(target.blockId);
+    else if ("afterBlockId" in target) ids.add(target.afterBlockId);
+  };
+  for (const operation of plan.operations) {
+    if (operation.action === "create") continue;
+    if (operation.action === "connect") collect(operation.to);
+    else collect(operation.target);
+  }
+  return [...ids];
+}
+
 function clearInput(input: Blockly.Input) {
   const child = input.connection?.targetBlock();
   if (!child) return;
@@ -410,7 +425,22 @@ export async function compileBlockPlan(plan: BlockPlan, services: BlockPlanCompi
     const templates = new Map(services.getBlockTemplates(types).map((template) => [template.type, template]));
     const { refs, autoChained } = applyOperations(plan, candidate, templates, entryTypes);
     if (signal.aborted) return { ok: false, changed: false, issues: [{ code: "ABORTED", message: "Agent task stopped" }] };
-    const contextIssues = services.validateContexts(candidate);
+    // 只把「本次计划创建或点名的积木」上的上下文问题当成计划失败。
+    // 原因：候选工作区 = 用户工作区 + 本次改动，全量校验会把用户早就存在、与本次改动无关的问题
+    // （例如切回本机目标后遗留的硬件积木、来自已禁用插件的旧积木）也算到这次计划头上，
+    // 导致 AI 在有历史问题的工作区里无法做任何修改。问题面板仍然显示全量校验结果，
+    // 所以这类既有问题不会被藏起来，只是不再挡住计划。
+    // 没有 blockId 的问题无法判断归属，仍然照常上报。
+    const involvedBlockIds = new Set<string>();
+    const includeCreated = (block: Blockly.Block) => {
+      // 创建出来的积木连同它的子积木都算本次计划的一部分（字面量、模板里的影子块等）。
+      for (const descendant of block.getDescendants(false)) involvedBlockIds.add(descendant.id);
+    };
+    for (const block of refs.values()) includeCreated(block);
+    for (const blockId of planBlockIdTargets(plan)) involvedBlockIds.add(blockId);
+    const contextIssues = services
+      .validateContexts(candidate)
+      .filter((entry) => !entry.blockId || involvedBlockIds.has(entry.blockId));
     if (contextIssues.length) {
       const refByBlockId = new Map([...refs.entries()].map(([ref, block]) => [block.id, ref]));
       return {

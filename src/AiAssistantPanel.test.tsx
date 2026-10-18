@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
-import type { AiImageAttachment } from "./aiImageAttachments";
+import { MAX_IMAGE_COUNT, type AiImageAttachment } from "./aiImageAttachments";
 
 const attachment = (id: string, sendable = true): AiImageAttachment => ({ id, name: `${id}.png`, mimeType: "image/png", width: 100, height: 100, sourceBytes: 100, dataUrl: sendable ? `data:image/png;base64,${id}` : undefined, sendable });
 
@@ -18,6 +18,35 @@ describe("AI assistant Markdown", () => {
     expect(canSubmitAiPrompt("  ", [attachment("image")])).toBe(true);
     expect(canSubmitAiPrompt("describe this", [])).toBe(true);
     expect(canSubmitAiPrompt("  ", [attachment("restored", false)])).toBe(false);
+  });
+
+  it("keeps preparing attachments for the next message while a run is active", () => {
+    expect(canAddAiAttachments([])).toBe(true);
+    expect(canAddAiAttachments(Array.from({ length: MAX_IMAGE_COUNT - 1 }, (_, index) => attachment(String(index))))).toBe(true);
+    expect(canAddAiAttachments(Array.from({ length: MAX_IMAGE_COUNT }, (_, index) => attachment(String(index))))).toBe(false);
+  });
+
+  it("keeps the reasoning effort a queued run was composed with", () => {
+    expect(resolveRunEffort({ effort: "low" }, "high")).toBe("low");
+    expect(resolveRunEffort({}, "xhigh")).toBe("xhigh");
+    expect(resolveRunEffort(undefined, "medium")).toBe("medium");
+  });
+
+  it("only treats payloads carrying files as panel drop targets", () => {
+    expect(isFileDragPayload(["Files"])).toBe(true);
+    expect(isFileDragPayload(["text/plain", "Files"])).toBe(true);
+    expect(isFileDragPayload(["application/x-visual-python-resource"])).toBe(false);
+    expect(isFileDragPayload([])).toBe(false);
+    expect(isFileDragPayload(undefined)).toBe(false);
+  });
+
+  it("tracks nested drag enter and leave events so the drop overlay stays visible", () => {
+    expect(nextAiDropDepth(0, "enter")).toBe(1);
+    expect(nextAiDropDepth(1, "enter")).toBe(2);
+    expect(nextAiDropDepth(2, "leave")).toBe(1);
+    expect(nextAiDropDepth(1, "leave")).toBe(0);
+    expect(nextAiDropDepth(0, "leave")).toBe(0);
+    expect(nextAiDropDepth(3, "drop")).toBe(0);
   });
 
   it("renders only the centered project-wide suggestion buttons in the welcome state", () => {
@@ -1041,6 +1070,17 @@ describe("AI assistant conversation persistence", () => {
 
     expect(runs).toHaveLength(1);
     expect(runs[0].activities).toHaveLength(2);
+  });
+
+  it("keeps a queued run's reasoning effort and drops invalid values", () => {
+    const runs = parseStoredRuns([
+      { id: 1, prompt: "继续执行", mode: "plan", effort: "xhigh", status: "queued", activities: [] },
+      { id: 2, prompt: "继续执行", mode: "agent", effort: "turbo", status: "queued", activities: [] },
+    ]);
+
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toMatchObject({ mode: "plan", effort: "xhigh", status: "queued" });
+    expect(runs[1].effort).toBeUndefined();
   });
 });
 

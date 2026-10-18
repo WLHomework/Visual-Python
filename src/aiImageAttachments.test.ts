@@ -3,6 +3,7 @@ import {
   MAX_IMAGE_COUNT,
   MAX_TOTAL_SOURCE_BYTES,
   MAX_SOURCE_IMAGE_BYTES,
+  pickImageFiles,
   restorePersistedImageAttachment,
   toPersistedImageAttachment,
   validateImageFiles,
@@ -88,5 +89,19 @@ describe("AI image attachment persistence", () => {
 
   it("rejects malformed persisted records", () => {
     expect(restorePersistedImageAttachment({ id: "bad", name: "x.txt" })).toBeNull();
+  });
+});
+
+describe("AI image file picking", () => {
+  it("keeps image files and drops everything else", () => {
+    const files = [
+      fileLike("image/png", 100),
+      fileLike("text/plain", 100, "notes.txt"),
+      fileLike("image/JPEG", 100, "photo.jpg"),
+      fileLike("", 100, "unknown.dat"),
+    ];
+
+    expect(pickImageFiles(files)).toEqual([files[0], files[2]]);
+    expect(pickImageFiles([])).toEqual([]);
   });
 });

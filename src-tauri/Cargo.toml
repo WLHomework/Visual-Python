@@ -18,6 +18,7 @@ tauri-build = { version = "2.6.3", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+esptools = { version = "0.1.2", default-features = false, features = ["esptool"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = ["image-png", "protocol-asset", "tray-icon"] }
 tauri-plugin-log = "2"
@@ -30,6 +31,7 @@ url = "2.5"
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "rustls", "stream"] }
 base64 = "0.22"
 sha2 = "0.10"
+serialport = { version = "4.10.1", default-features = false }
 tokio = { version = "1", features = ["macros", "sync", "time", "net", "rt"] }
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "native-tls"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }

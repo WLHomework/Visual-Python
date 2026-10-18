@@ -25,6 +25,7 @@ use tokio_tungstenite::tungstenite::http::header::{AUTHORIZATION, HeaderValue};
 use tokio_tungstenite::tungstenite::Message;
 
 mod codex_agent;
+mod hardware;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -7067,6 +7068,7 @@ pub fn run() {
         .manage(AiChatRequests::default())
         .manage(CodexAgentState::default())
         .manage(PyrightState::default())
+        .manage(hardware::session::HardwareState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_fs::init())
@@ -7180,7 +7182,21 @@ pub fn run() {
             codex_agent_next_event,
             codex_agent_respond_to_request,
             codex_agent_reject_request,
-            codex_agent_shutdown
+            codex_agent_shutdown,
+            hardware::firmware::hardware_get_firmware_catalog,
+            hardware::firmware::hardware_list_serial_ports,
+            hardware::firmware::hardware_download_firmware,
+            hardware::firmware::hardware_flash_firmware,
+            hardware::commands::hardware_connect,
+            hardware::commands::hardware_disconnect,
+            hardware::commands::hardware_device_state,
+            hardware::commands::hardware_list_files,
+            hardware::commands::hardware_read_file,
+            hardware::commands::hardware_delete_file,
+            hardware::commands::hardware_upload,
+            hardware::commands::hardware_run,
+            hardware::commands::hardware_reset,
+            hardware::commands::hardware_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running Visual Python");

@@ -25,7 +25,8 @@
         "backgroundColor": "#f7f8fa",
         "shadow": true,
         "fullscreen": false,
-        "visible": false
+        "visible": false,
+        "dragDropEnabled": false
       },
       {
         "label": "splash",

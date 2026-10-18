@@ -23,6 +23,23 @@ type ProjectResourceStatus = { path: string; exists: boolean; size: number };
 type InstalledPluginSummary = { id: string; name: string; version: string; active: boolean; valid?: boolean; errors?: string[] };
 type CodeEditor = MonacoEditor.IStandaloneCodeEditor;
 
+/** 「运行」的结果。设备目标（开发板）不是本机进程，所以要把“是否真的跑起来了”明确回传。 */
+export type HostRunResult = {
+  started: boolean;
+  target?: "host" | "device";
+  /** 设备运行的编号，便于在设备日志里对号入座。 */
+  runId?: number;
+  message?: string;
+};
+
+/** 设备（开发板）上的执行状态，供 AI 工具轮询与停止使用。 */
+export type HostDeviceExecutionState = {
+  deviceRunning: boolean;
+  devicePhase: string;
+  devicePort: string | null;
+  deviceConnected: boolean;
+};
+
 export type VisualPythonHostServices = {
   workspaceModeRef: Ref<string>;
   documentsRef: Ref<CodeDocument[]>;
@@ -57,8 +74,10 @@ export type VisualPythonHostServices = {
   setInstallingPackages: (installing: boolean) => void;
   switchDocumentConsoleState: (fromDocumentId: string, toDocumentId: string) => void;
   formatCurrentPythonCode: (announce?: boolean) => Promise<string | null>;
-  runCode: () => Promise<void>;
+  runCode: () => Promise<HostRunResult | void>;
   stopCode: () => Promise<void>;
+  getDeviceExecutionState?: () => HostDeviceExecutionState;
+  stopDeviceExecution?: () => Promise<void>;
   stopPluginExecutions?: () => Promise<void>;
   getPluginExecutionState?: () => Record<string, unknown>;
   writeProject: (path: string, sourceOverride?: string) => Promise<boolean>;
@@ -532,17 +551,27 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
       if (changed) markDirty();
       return { changed, diff: changed ? createCodeChangePreview(previousCode, code) : "", lineCount: code ? code.split("\n").length : 0, __codeChange: changed ? { before: previousCode, after: code, documentId: services.activeDocumentIdRef.current, documentName: services.documentsRef.current.find((document) => document.id === services.activeDocumentIdRef.current)?.name } : undefined };
     }
-    if (name === "run_project") { await services.runCode(); return { started: services.taskId.current !== null }; }
+    if (name === "run_project") {
+      const result = await services.runCode();
+      const device = services.getDeviceExecutionState?.();
+      return {
+        started: result?.started ?? services.taskId.current !== null,
+        ...(result?.target ? { target: result.target, runId: result.runId, message: result.message } : {}),
+        ...(device ? { deviceRunning: device.deviceRunning, devicePort: device.devicePort } : {}),
+      };
+    }
     if (name === "get_execution_state") {
-      const running = services.taskId.current !== null;
-      return { running, pythonElapsedSeconds: running && services.pythonRunStartedAt.current ? Math.max(0, Math.floor((Date.now() - services.pythonRunStartedAt.current) / 1000)) : services.pythonRunElapsed.current, output: services.outputRef.current.slice(-120).map(({ stream, data }) => ({ stream, data })), problems: services.problemsRef.current.map(({ kind, line, message, suggestion }) => ({ kind, line, message, suggestion })), ...(services.getPluginExecutionState?.() || {}) };
+      const device = services.getDeviceExecutionState?.();
+      const running = services.taskId.current !== null || Boolean(device?.deviceRunning);
+      return { running, pythonElapsedSeconds: running && services.pythonRunStartedAt.current ? Math.max(0, Math.floor((Date.now() - services.pythonRunStartedAt.current) / 1000)) : services.pythonRunElapsed.current, output: services.outputRef.current.slice(-120).map(({ stream, data }) => ({ stream, data })), problems: services.problemsRef.current.map(({ kind, line, message, suggestion }) => ({ kind, line, message, suggestion })), ...(device ? { deviceRunning: device.deviceRunning, devicePhase: device.devicePhase, devicePort: device.devicePort, deviceConnected: device.deviceConnected } : {}), ...(services.getPluginExecutionState?.() || {}) };
     }
     if (name === "wait") {
       const milliseconds = Math.max(100, Math.min(10_000, Math.round(typeof args.milliseconds === "number" ? args.milliseconds : 1000)));
       await waitWithSignal(milliseconds, signal);
-      return { waitedMilliseconds: milliseconds, running: services.taskId.current !== null, ...(services.getPluginExecutionState?.() || {}) };
+      const device = services.getDeviceExecutionState?.();
+      return { waitedMilliseconds: milliseconds, running: services.taskId.current !== null || Boolean(device?.deviceRunning), ...(device ? { deviceRunning: device.deviceRunning, devicePhase: device.devicePhase } : {}), ...(services.getPluginExecutionState?.() || {}) };
     }
-    if (name === "stop_execution") { await services.stopPluginExecutions?.(); if (services.taskId.current !== null) await services.stopCode(); return { stopped: true }; }
+    if (name === "stop_execution") { await services.stopPluginExecutions?.(); if (services.taskId.current !== null) await services.stopCode(); await services.stopDeviceExecution?.(); return { stopped: true }; }
     if (name === "save_project") {
       const path = services.projectPathRef.current;
       const saved = path ? await services.writeProject(path, services.sourceCodeRef.current) : await services.saveProject();

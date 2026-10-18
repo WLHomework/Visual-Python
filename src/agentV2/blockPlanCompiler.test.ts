@@ -379,4 +379,89 @@ describe("BlockPlan compiler", () => {
     expect(host.commit).not.toHaveBeenCalled();
     workspace.dispose();
   });
+
+  it("ignores context issues on blocks the plan never touches", async () => {
+    const workspace = new Blockly.Workspace();
+    const preexisting = workspace.newBlock("agent_plan_value");
+    const host = services(workspace);
+    // 模拟界面的全量上下文校验：工作区里每个 agent_plan_value 都报问题。
+    host.validateContexts = vi.fn((candidate: Blockly.Workspace) => candidate.getAllBlocks(false)
+      .filter((block) => block.type === "agent_plan_value")
+      .map((block) => ({ blockId: block.id, message: "缺少必填输入：数字。" })));
+    const result = await compileBlockPlan(parseBlockPlan({
+      version: 1,
+      mode: "append",
+      operations: [{ action: "create", ref: "step", block: "agent_plan_statement" }],
+    }), host, new AbortController().signal);
+
+    expect(host.validateContexts).toHaveBeenCalled();
+    expect(preexisting.id).toBeTruthy();
+    expect(result).toMatchObject({ ok: true, changed: true });
+    expect(host.commit).toHaveBeenCalled();
+    workspace.dispose();
+  });
+
+  it("still fails when the plan's own block has a context issue", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    host.validateContexts = vi.fn((candidate: Blockly.Workspace) => candidate.getAllBlocks(false)
+      .filter((block) => block.type === "agent_plan_value")
+      .map((block) => ({ blockId: block.id, message: "缺少必填输入：数字。" })));
+    const result = await compileBlockPlan(parseBlockPlan({
+      version: 1,
+      mode: "replace",
+      operations: [{ action: "create", ref: "amount", block: "agent_plan_value" }],
+    }), host, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: false, changed: false, issues: [{ code: "CONTEXT_VALIDATION_FAILED", ref: "amount" }] });
+    expect(host.commit).not.toHaveBeenCalled();
+    workspace.dispose();
+  });
+
+  it("implicitly created children count as part of the plan", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    // 模板里的影子块（math_number）由计划自己创建，因此它的上下文问题同样应该挡住计划。
+    host.validateContexts = vi.fn((candidate: Blockly.Workspace) => candidate.getAllBlocks(false)
+      .filter((block) => block.type === "math_number")
+      .map((block) => ({ blockId: block.id, message: "数字输入不合法。" })));
+    const result = await compileBlockPlan(parseBlockPlan({
+      version: 1,
+      mode: "replace",
+      operations: [{ action: "create", ref: "step", block: "agent_plan_statement" }],
+    }), host, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: false, changed: false, issues: [{ code: "CONTEXT_VALIDATION_FAILED", message: "数字输入不合法。" }] });
+    workspace.dispose();
+  });
+
+  it("still fails when an existing block the plan edits has a context issue", async () => {
+    const workspace = new Blockly.Workspace();
+    const existing = workspace.newBlock("agent_plan_statement");
+    const host = services(workspace);
+    host.validateContexts = vi.fn(() => [{ blockId: existing.id, message: "这一步缺少必填输入。" }]);
+    const result = await compileBlockPlan(parseBlockPlan({
+      version: 1,
+      mode: "patch",
+      operations: [{ action: "update", target: { blockId: existing.id }, inputs: { VALUE: 3 } }],
+    }), host, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: false, changed: false, issues: [{ code: "CONTEXT_VALIDATION_FAILED", ref: existing.id, blockType: "agent_plan_statement", message: "这一步缺少必填输入。" }] });
+    expect(host.commit).not.toHaveBeenCalled();
+    workspace.dispose();
+  });
+
+  it("still fails on workspace-level issues that cannot be attributed to a block", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    host.validateContexts = vi.fn(() => [{ message: "工作区里没有可运行的场景积木。" }]);
+    const result = await compileBlockPlan(parseBlockPlan({
+      version: 1,
+      mode: "replace",
+      operations: [{ action: "create", ref: "amount", block: "agent_plan_value" }],
+    }), host, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: false, changed: false, issues: [{ code: "CONTEXT_VALIDATION_FAILED", message: "工作区里没有可运行的场景积木。" }] });
+    workspace.dispose();
+  });
 });

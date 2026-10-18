@@ -7,6 +7,7 @@ import { localizeBlockDefinitions } from "./blockDisplayLocalization";
 import { installFileBlockPickerFields } from "./fileBlockPicker";
 import { isPythonAnnotation, isPythonIdentifier, normalizePythonIdentifier, pythonIdentifierOrFallback, sanitizePythonIdentifier } from "./pythonIdentifiers";
 import { pythonSyntaxToolbox, registerPythonSyntaxBlocks, standardLibraryCall } from "./pythonSyntaxBlocks";
+import { registerHardwareBlocks } from "./hardware/hardwareBlocks";
 
 const locale = Object.fromEntries(
   Object.entries(ZhHans).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
@@ -120,6 +121,7 @@ registerPythonSyntaxBlocks({
   collection: colours.collection,
   file: colours.file,
 });
+registerHardwareBlocks();
 
 class ThemedMutatorIcon extends Blockly.icons.MutatorIcon {
   constructor(flyoutBlockTypes: string[], sourceBlock: Blockly.BlockSvg) {

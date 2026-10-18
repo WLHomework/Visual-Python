@@ -61,6 +61,10 @@ export function validateImageFiles(files: readonly ImageFileLike[], existingCoun
   return { ok: errors.length === 0, errors };
 }
 
+export function pickImageFiles<T extends { type: string }>(files: readonly T[]): T[] {
+  return files.filter((file) => file.type.toLowerCase().startsWith("image/"));
+}
+
 function newAttachmentId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
