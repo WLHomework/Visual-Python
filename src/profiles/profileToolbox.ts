@@ -1,6 +1,6 @@
 import * as Blockly from "blockly/core";
 import { toolbox as baseToolbox } from "../pythonBlocks";
-import { hardwareToolboxCategory, hardwareToolboxCategoryName, setActiveHardwareBoard } from "../hardware/hardwareBlocks";
+import { hardwareToolboxCategory, isHardwareToolboxCategoryName, setActiveHardwareBoard } from "../hardware/hardwareBlocks";
 import { isHardwareWorkbench, type WorkbenchProfile } from "./workbenchProfile";
 
 const baseCategoryNames = new Set(
@@ -92,7 +92,7 @@ export function buildProfileToolbox(toolbox: Blockly.utils.toolbox.ToolboxDefini
   if (!Array.isArray(definition.contents)) return toolbox;
   const kept = definition.contents.filter((item) => {
     if (item.kind !== "category") return true;
-    if (item.name === hardwareToolboxCategoryName) return false;
+    if (isHardwareToolboxCategoryName(item.name)) return false;
     return typeof item.name === "string" && baseCategoryNames.has(item.name);
   }).map(filterHardwareCategory).filter((item): item is NonNullable<typeof item> => item !== null);
   return {

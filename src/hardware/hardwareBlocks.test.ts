@@ -378,8 +378,21 @@ describe("hardware toolbox category", () => {
     expect(pinOf(esp32, "hardware_tone")?.fields?.PIN).toBe("2");
 
     const category = hardwareToolboxCategory("esp32-wroom") as { name: string; colour: string; contents: unknown[] };
-    expect(category.name).toBe("硬件");
+    expect(category.name).toBe("ESP32 硬件");
     expect(category.contents.length).toBeGreaterThan(5);
+  });
+
+  it("builds a named toolbox for each board and omits unsupported S3 blocks", () => {
+    const esp8266 = hardwareToolboxCategory("esp8266-esp12e") as { name: string; contents: unknown[] };
+    const esp32s3 = hardwareToolboxCategory("esp32-s3") as { name: string; contents: unknown[] };
+    const blockTypes = (contents: unknown[]) => contents
+      .map((item) => (item as { type?: string }).type)
+      .filter((type): type is string => type !== undefined);
+
+    expect(esp8266.name).toBe("ESP8266 硬件");
+    expect(esp32s3.name).toBe("ESP32-S3 硬件");
+    expect(blockTypes(esp8266.contents)).toContain("hardware_builtin_led");
+    expect(blockTypes(esp32s3.contents)).not.toContain("hardware_builtin_led");
   });
 
   it("shows a hint instead of pin values without a board", () => {

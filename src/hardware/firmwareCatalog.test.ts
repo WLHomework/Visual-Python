@@ -24,6 +24,14 @@ const validCatalog: FirmwareCatalog = {
       url: "https://micropython.org/resources/firmware/ESP8266_GENERIC-20260401-v1.27.0.bin",
       sha256: "b".repeat(64),
     },
+    {
+      boardId: "esp32-s3",
+      chipFamily: "esp32s3",
+      version: "1.29.0",
+      filename: "ESP32_GENERIC_S3-20260824-v1.29.0.bin",
+      url: "https://micropython.org/resources/firmware/ESP32_GENERIC_S3-20260824-v1.29.0.bin",
+      sha256: "c".repeat(64),
+    },
   ],
 };
 
@@ -32,8 +40,12 @@ describe("firmware catalog", () => {
     expect(getFirmwareImage(validCatalog, "esp32-wroom")).toEqual(validCatalog.images[0]);
   });
 
-  it("rejects unsupported board ids instead of falling back to another image", () => {
-    expect(getFirmwareImage(validCatalog, "esp32-s3" as never)).toBeUndefined();
+  it("selects the ESP32-S3 image with the S3 chip family", () => {
+    expect(getFirmwareImage(validCatalog, "esp32-s3")).toMatchObject({
+      boardId: "esp32-s3",
+      chipFamily: "esp32s3",
+      filename: "ESP32_GENERIC_S3-20260824-v1.29.0.bin",
+    });
   });
 
   it("normalizes an official catalog and rejects unsafe image metadata", () => {

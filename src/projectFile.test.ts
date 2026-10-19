@@ -80,7 +80,7 @@ describe("project file validation", () => {
   });
 
   it("rejects projects that need an unknown workbench profile", () => {
-    expect(() => validateProjectFile({ ...validProject, profile: "esp32-s3" })).toThrow("工作台");
+    expect(() => validateProjectFile({ ...validProject, profile: "esp32-s4" })).toThrow("工作台");
     expect(() => validateProjectFile({ ...validProject, profile: { id: "python" } })).toThrow("工作台");
     expect(() => validateProjectFile({ ...validProject, profile: "" })).toThrow("工作台");
   });

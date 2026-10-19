@@ -76,6 +76,16 @@ pub fn firmware_catalog() -> Vec<FirmwareImage> {
             sha256: "94bfdf94a6c48ac5dfe79203577baad61a58c2525cc39a010b934a6666d4c551".to_string(),
             flash_offset: 0,
         },
+        FirmwareImage {
+            board_id: "esp32-s3".to_string(),
+            chip_family: "esp32s3".to_string(),
+            version: "1.29.0".to_string(),
+            filename: "ESP32_GENERIC_S3-20260824-v1.29.0.bin".to_string(),
+            url: "https://micropython.org/resources/firmware/ESP32_GENERIC_S3-20260824-v1.29.0.bin"
+                .to_string(),
+            sha256: "1dd9dcd27ba2d6a1cb7f7b49a063f46d3d807d68b0151161233920228285e300".to_string(),
+            flash_offset: 0,
+        },
     ]
 }
 
@@ -94,6 +104,11 @@ pub fn cached_firmware_path(cache_root: &Path, image: &FirmwareImage) -> PathBuf
 }
 
 pub fn flash_command_args(image: &FirmwareImage, port_name: &str, operation: &str) -> Vec<String> {
+    let esptool_operation = match operation {
+        "erase-flash" => "erase_flash",
+        "write-flash" => "write_flash",
+        other => other,
+    };
     vec![
         "--chip".to_string(),
         image.chip_family.clone(),
@@ -101,7 +116,7 @@ pub fn flash_command_args(image: &FirmwareImage, port_name: &str, operation: &st
         port_name.to_string(),
         "--baud".to_string(),
         "460800".to_string(),
-        operation.to_string(),
+        esptool_operation.to_string(),
     ]
 }
 
@@ -330,7 +345,7 @@ mod tests {
     use crate::hardware::simulated::SimulatedDevice;
 
     #[test]
-    fn exposes_only_the_first_stage_board_families() {
+    fn exposes_supported_board_families() {
         let catalog = firmware_catalog();
 
         assert_eq!(
@@ -338,7 +353,7 @@ mod tests {
                 .iter()
                 .map(|image| image.board_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["esp32-wroom", "esp8266-esp12e"]
+            vec!["esp32-wroom", "esp8266-esp12e", "esp32-s3"]
         );
         assert!(catalog.iter().all(|image| image.version == "1.29.0"));
     }
@@ -349,6 +364,7 @@ mod tests {
 
         assert_eq!(catalog[0].flash_offset, 0x1000);
         assert_eq!(catalog[1].flash_offset, 0);
+        assert_eq!(catalog[2].flash_offset, 0);
     }
 
     #[test]
@@ -385,7 +401,9 @@ mod tests {
             firmware_cache_filename(&image),
             "1.29.0/ESP32_GENERIC-20260824-v1.29.0.bin"
         );
-        assert!(firmware_image_for_board("esp32-s3").is_none());
+        let s3 = firmware_image_for_board("esp32-s3").expect("ESP32-S3 image should exist");
+        assert_eq!(s3.filename, "ESP32_GENERIC_S3-20260824-v1.29.0.bin");
+        assert_eq!(s3.sha256, "1dd9dcd27ba2d6a1cb7f7b49a063f46d3d807d68b0151161233920228285e300");
     }
 
     #[test]
@@ -404,6 +422,8 @@ mod tests {
         let esp32 = firmware_image_for_board("esp32-wroom").expect("ESP32 image should exist");
         let esp8266 =
             firmware_image_for_board("esp8266-esp12e").expect("ESP8266 image should exist");
+        let esp32s3 =
+            firmware_image_for_board("esp32-s3").expect("ESP32-S3 image should exist");
 
         assert_eq!(
             flash_command_args(&esp32, "COM3", "erase-flash"),
@@ -414,7 +434,7 @@ mod tests {
                 "COM3",
                 "--baud",
                 "460800",
-                "erase-flash"
+                "erase_flash"
             ]
             .into_iter()
             .map(String::from)
@@ -429,11 +449,19 @@ mod tests {
                 "COM4",
                 "--baud",
                 "460800",
-                "write-flash"
+                "write_flash"
             ]
             .into_iter()
             .map(String::from)
             .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            flash_command_args(&esp32s3, "COM5", "write-flash")[0..2],
+            ["--chip".to_string(), "esp32s3".to_string()]
+        );
+        assert_eq!(
+            flash_command_args(&esp32s3, "COM5", "write-flash").last(),
+            Some(&"write_flash".to_string())
         );
     }
 
@@ -483,7 +511,7 @@ mod tests {
                 .code,
             "invalid"
         );
-        let unknown = prepare_flash(&state, cache, "esp32-s3", "COM3", true).unwrap_err();
+        let unknown = prepare_flash(&state, cache, "unknown-board", "COM3", true).unwrap_err();
         assert_eq!(unknown.code, "invalid");
         assert!(unknown.message.contains("不支持的板卡"));
     }

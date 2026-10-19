@@ -28,7 +28,7 @@ describe("profile toolbox", () => {
 
   it("puts the hardware category first and hides plugin categories on a hardware profile", () => {
     const toolbox = buildProfileToolbox(fakeToolbox, getWorkbenchProfile("esp8266-esp12e"));
-    expect(categoryNames(toolbox)).toEqual(["硬件", "输入输出", "循环"]);
+    expect(categoryNames(toolbox)).toEqual(["ESP8266 硬件", "输入输出", "循环"]);
     const contents = (toolbox as unknown as { contents: Array<{ kind?: string }> }).contents;
     expect(contents.some((item) => item.kind === "sep")).toBe(true);
     const hardware = contents[0] as { contents: Array<{ kind?: string; text?: string; fields?: Record<string, string> }> };
@@ -39,7 +39,7 @@ describe("profile toolbox", () => {
   it("replaces a previously injected hardware category instead of duplicating it", () => {
     const profile = getWorkbenchProfile("esp32-wroom");
     const twice = buildProfileToolbox(buildProfileToolbox(fakeToolbox, profile), profile);
-    expect(categoryNames(twice)).toEqual(["硬件", "输入输出", "循环"]);
+    expect(categoryNames(twice)).toEqual(["ESP32 硬件", "输入输出", "循环"]);
   });
 
   it("activates the board only for a hardware profile", () => {

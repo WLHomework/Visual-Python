@@ -1,7 +1,7 @@
-export const supportedHardwareBoards = ["esp32-wroom", "esp8266-esp12e"] as const;
+export const supportedHardwareBoards = ["esp32-wroom", "esp8266-esp12e", "esp32-s3"] as const;
 
 export type HardwareBoardId = (typeof supportedHardwareBoards)[number];
-export type HardwareChipFamily = "esp32" | "esp8266";
+export type HardwareChipFamily = "esp32" | "esp8266" | "esp32s3";
 
 export type FirmwareImage = {
   boardId: HardwareBoardId;
@@ -20,6 +20,7 @@ export type FirmwareCatalog = {
 const boardChipFamilies: Record<HardwareBoardId, HardwareChipFamily> = {
   "esp32-wroom": "esp32",
   "esp8266-esp12e": "esp8266",
+  "esp32-s3": "esp32s3",
 };
 
 export function chipFamilyOfBoard(boardId: HardwareBoardId): HardwareChipFamily {

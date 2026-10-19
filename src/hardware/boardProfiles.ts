@@ -110,7 +110,41 @@ const esp8266Esp12e: BoardProfile = {
   ],
 };
 
-export const hardwareBoardProfiles: readonly BoardProfile[] = [esp32Wroom, esp8266Esp12e];
+const esp32S3: BoardProfile = {
+  boardId: "esp32-s3",
+  chipFamily: "esp32s3",
+  displayName: "ESP32-S3",
+  analogRead: "adcPin",
+  defaultI2c: { sda: "8", scl: "9" },
+  pwmFrequencyHz: 1000,
+  pwmDutyMax: 1023,
+  pins: [
+    { id: "0", label: "GPIO0（启动配置）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "1", label: "GPIO1（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "2", label: "GPIO2（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "3", label: "GPIO3（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "4", label: "GPIO4（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "5", label: "GPIO5（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "6", label: "GPIO6（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "7", label: "GPIO7（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "8", label: "GPIO8（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "9", label: "GPIO9（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "10", label: "GPIO10（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "11", label: "GPIO11", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "12", label: "GPIO12", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "13", label: "GPIO13", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "14", label: "GPIO14", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "15", label: "GPIO15", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "16", label: "GPIO16", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "17", label: "GPIO17", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "18", label: "GPIO18", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "19", label: "GPIO19（USB D-）", digital: true, reserved: true },
+    { id: "20", label: "GPIO20（USB D+）", digital: true, reserved: true },
+    { id: "21", label: "GPIO21", digital: true, pwm: true, pullUp: true, pullDown: true },
+  ],
+};
+
+export const hardwareBoardProfiles: readonly BoardProfile[] = [esp32Wroom, esp8266Esp12e, esp32S3];
 
 export function isHardwareBoardId(value: unknown): value is HardwareBoardId {
   return typeof value === "string" && (supportedHardwareBoards as readonly string[]).includes(value);

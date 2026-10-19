@@ -40,10 +40,11 @@ describe("new project dialog", () => {
     const { markup } = render({ currentId: "esp32-wroom" });
 
     expect(markup).toContain("新建工程");
-    expect(markup.match(/new-project-option /g)?.length).toBe(3);
+    expect(markup.match(/new-project-option /g)?.length).toBe(4);
     expect(markup).toContain("Python");
     expect(markup).toContain("ESP32 WROOM");
     expect(markup).toContain("ESP8266 ESP-12E（NodeMCU）");
+    expect(markup).toContain("ESP32-S3");
     expect(markup).toContain("在本机运行，支持 Manim 动画与全部内置积木");
     expect(markup).toContain('class="new-project-option current" aria-current="true"');
     expect(markup).toContain("当前");

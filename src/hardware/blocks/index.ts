@@ -12,8 +12,8 @@ import * as ultrasonic from "./ultrasonic";
 import {
   hardwareBlockLabels,
   hardwareColours,
+  hardwareToolboxCategoryLabel,
   hardwareSectionLabel,
-  hardwareToolboxCategoryName,
   pinUseByBlockType,
   pinUsesForBlock,
   registerHardwareBoardPinExtension,
@@ -26,7 +26,9 @@ export {
   countIncompatiblePins,
   getActiveHardwareBoard,
   hardwareBlockTypes,
+  hardwareToolboxCategoryLabel,
   hardwareToolboxCategoryName,
+  isHardwareToolboxCategoryName,
   isHardwareBlockType,
   refreshHardwareBlocks,
   setActiveHardwareBoard,
@@ -69,7 +71,7 @@ export function hardwareToolboxContents(boardId?: HardwareBoardId): Blockly.util
 export function hardwareToolboxCategory(boardId?: HardwareBoardId): Blockly.utils.toolbox.ToolboxItemInfo {
   return {
     kind: "category",
-    name: hardwareToolboxCategoryName,
+    name: hardwareToolboxCategoryLabel(boardId),
     colour: hardwareColours.board,
     contents: hardwareToolboxContents(boardId),
   } as unknown as Blockly.utils.toolbox.ToolboxItemInfo;

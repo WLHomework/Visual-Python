@@ -20,7 +20,7 @@ const memoryStorage = () => {
 
 describe("workbench profiles", () => {
   it("lists python first and one profile per supported board", () => {
-    expect(listWorkbenchProfiles().map((profile) => profile.id)).toEqual(["python", "esp32-wroom", "esp8266-esp12e"]);
+    expect(listWorkbenchProfiles().map((profile) => profile.id)).toEqual(["python", "esp32-wroom", "esp8266-esp12e", "esp32-s3"]);
     expect(getWorkbenchProfile("esp8266-esp12e").label).toBe("ESP8266 ESP-12E（NodeMCU）");
     expect(getWorkbenchProfile("python").label).toBe("Python");
   });
@@ -44,11 +44,11 @@ describe("workbench profiles", () => {
 
   it("normalizes unknown ids to python", () => {
     expect(isWorkbenchProfileId("esp32-wroom")).toBe(true);
-    expect(isWorkbenchProfileId("esp32-s3")).toBe(false);
+    expect(isWorkbenchProfileId("esp32-s3")).toBe(true);
     expect(isWorkbenchProfileId(undefined)).toBe(false);
-    expect(normalizeWorkbenchProfileId("esp32-s3")).toBe("python");
+    expect(normalizeWorkbenchProfileId("esp32-s3")).toBe("esp32-s3");
     expect(normalizeWorkbenchProfileId(42, "esp32-wroom")).toBe("esp32-wroom");
-    expect(getWorkbenchProfile("esp32-s3" as never).id).toBe("python");
+    expect(getWorkbenchProfile("esp32-s3").id).toBe("esp32-s3");
   });
 
   it("round-trips the stored profile and survives broken storage", () => {

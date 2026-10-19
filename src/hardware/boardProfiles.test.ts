@@ -15,6 +15,7 @@ import {
 
 const esp32 = getBoardProfile("esp32-wroom") as BoardProfile;
 const esp8266 = getBoardProfile("esp8266-esp12e") as BoardProfile;
+const esp32s3 = getBoardProfile("esp32-s3") as BoardProfile;
 const pinIds = (profile: BoardProfile, use: Parameters<typeof boardPinChoices>[1]) => boardPinChoices(profile, use).map((pin) => pin.id);
 
 describe("hardware board profiles", () => {
@@ -47,9 +48,20 @@ describe("hardware board profiles", () => {
 
   it("recognizes only supported board ids", () => {
     expect(isHardwareBoardId("esp32-wroom")).toBe(true);
-    expect(isHardwareBoardId("esp32-s3")).toBe(false);
+    expect(isHardwareBoardId("esp32-s3")).toBe(true);
     expect(isHardwareBoardId(undefined)).toBe(false);
     expect(getBoardProfile(undefined)).toBeUndefined();
+  });
+
+  it("defines the generic ESP32-S3 profile without assuming a builtin LED", () => {
+    expect(esp32s3).toMatchObject({
+      boardId: "esp32-s3",
+      chipFamily: "esp32s3",
+      displayName: "ESP32-S3",
+      analogRead: "adcPin",
+      defaultI2c: { sda: "8", scl: "9" },
+    });
+    expect(builtinLedPin(esp32s3)).toBeUndefined();
   });
 
   it("rejects pull capabilities on non-digital pins", () => {

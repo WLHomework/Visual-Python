@@ -13,6 +13,22 @@ import type { HardwareBoardId } from "../firmwareCatalog";
 
 export const hardwareToolboxCategoryName = "硬件";
 
+const hardwareToolboxShortNames: Record<HardwareBoardId, string> = {
+  "esp32-wroom": "ESP32",
+  "esp8266-esp12e": "ESP8266",
+  "esp32-s3": "ESP32-S3",
+};
+
+export function hardwareToolboxCategoryLabel(boardId?: HardwareBoardId): string {
+  const profile = getBoardProfile(boardId);
+  if (!profile) return hardwareToolboxCategoryName;
+  return `${hardwareToolboxShortNames[profile.boardId] ?? profile.displayName} 硬件`;
+}
+
+export function isHardwareToolboxCategoryName(name: unknown): boolean {
+  return name === hardwareToolboxCategoryName || (typeof name === "string" && name.endsWith(" 硬件"));
+}
+
 export const hardwareColours = {
   pin: "#b95073",
   pwm: "#c58b32",

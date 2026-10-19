@@ -84,11 +84,17 @@ export function register(): void {
 
 export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbox.FlyoutItemInfo[] {
   const profile = getBoardProfile(boardId);
-  return [
-    { kind: "block", type: "hardware_builtin_led", fields: { STATE: "on" } },
-    { kind: "sep", gap: 20 },
+  const contents: Blockly.utils.toolbox.FlyoutItemInfo[] = [];
+  if (profile && builtinLedPin(profile)) {
+    contents.push(
+      { kind: "block", type: "hardware_builtin_led", fields: { STATE: "on" } } as unknown as Blockly.utils.toolbox.FlyoutItemInfo,
+      { kind: "sep", gap: 20 } as unknown as Blockly.utils.toolbox.FlyoutItemInfo,
+    );
+  }
+  contents.push(
     hardwareSectionLabel("数字引脚"),
     { kind: "block", type: "hardware_pin_write", fields: { PIN: boardPinChoices(profile, "digital-output")[0]?.id ?? "", LEVEL: "1" } },
     { kind: "block", type: "hardware_pin_read", fields: { PIN: boardPinChoices(profile, "digital-input")[0]?.id ?? "", PULL: "none" } },
-  ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
+  );
+  return contents;
 }
