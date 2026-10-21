@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
-import { toolbox as baseToolbox } from "../../pythonBlocks";
+import { generateWorkspacePython, toolbox as baseToolbox } from "../../pythonBlocks";
 import { buildProfileToolbox } from "../../profiles/profileToolbox";
 import { getWorkbenchProfile } from "../../profiles/workbenchProfile";
+import { collectHardwareBlockIssues } from "../hardwareBlocks";
 import { setActiveHardwareBoard } from "../blocks/shared";
 import { esp32S3Toolbox } from "./esp32-s3";
 import { hardwareBlockEntries } from "./hardwareEntries";
@@ -13,6 +14,7 @@ type ResolvedCategory = {
   kind?: string;
   name?: string;
   colour?: string | number;
+  categorystyle?: string;
   custom?: string;
   contents?: Array<Record<string, unknown>>;
 };
@@ -83,6 +85,31 @@ describe("esp32S3Toolbox", () => {
     }
   });
 
+  it("still loads and generates blocks that are not in the toolbox", () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      // 工具箱只决定"能拖出什么"：旧工程里已经在用的积木必须照常生成，也不能被当成问题。
+      const tryBlock = workspace.newBlock("python_try_except");
+      const assignment = workspace.newBlock("python_assign_target");
+      const dict = workspace.newBlock("python_dict_get");
+      const tryInput = tryBlock.getInput("TRY")?.connection;
+      const targetConnection = assignment.previousConnection;
+      const valueInput = assignment.getInput("VALUE")?.connection;
+      const dictOutput = dict.outputConnection;
+      if (!tryInput || !targetConnection || !valueInput || !dictOutput) throw new Error("测试积木缺少连接点");
+      tryInput.connect(targetConnection);
+      valueInput.connect(dictOutput);
+
+      const code = generateWorkspacePython(workspace);
+
+      expect(code).toContain("try:");
+      expect(code).toContain(".get(");
+      expect(collectHardwareBlockIssues(workspace, "esp32-s3")).toEqual([]);
+    } finally {
+      workspace.dispose();
+    }
+  });
+
   it("covers every hardware block the board provides", () => {
     const types = new Set(blockTypes(resolveS3()));
 
@@ -114,6 +141,64 @@ describe("esp32S3Toolbox", () => {
     } finally {
       workspace.dispose();
     }
+  });
+
+  it("keeps every block in a category on the same colour", () => {
+    setActiveHardwareBoard("esp32-s3");
+    const workspace = new Blockly.Workspace();
+    try {
+      for (const category of resolveS3().contents) {
+        const typesByColour = new Map<string, string[]>();
+        for (const entry of category.contents ?? []) {
+          if (entry.kind !== "block") continue;
+          const block = workspace.newBlock(String(entry.type));
+          try {
+            const colour = block.getColour();
+            // 只写 style 的积木（controls_if、math_number 等）在没有主题的无头工作区里取不到颜色。
+            if (colour === "#000000") continue;
+            const key = colour.toLowerCase();
+            typesByColour.set(key, [...(typesByColour.get(key) ?? []), String(entry.type)]);
+          } finally {
+            block.dispose(false);
+          }
+        }
+        const summary = [...typesByColour].map(([colour, types]) => `${colour}：${types.join("、")}`).join("；");
+        expect(typesByColour.size, `分类「${String(category.name)}」里的积木颜色不一致：${summary}`).toBeLessThanOrEqual(1);
+      }
+    } finally {
+      workspace.dispose();
+      setActiveHardwareBoard(undefined);
+    }
+  });
+
+  it("gives every category a different colour", () => {
+    const classicStyles =
+      (Blockly.Themes.Classic as unknown as { categoryStyles: Record<string, { colour?: string | number }> }).categoryStyles;
+    const hueToHex = (Blockly.utils.colour as unknown as { hueToHex(hue: number): string }).hueToHex;
+    const colourOf = (category: ResolvedCategory): string => {
+      const raw =
+        typeof category.colour === "string" && category.colour
+          ? category.colour
+          : // 动态分类（变量）沿用基础工具箱的 categorystyle，颜色要到 Classic 主题里查。
+            category.categorystyle
+            ? String(classicStyles[category.categorystyle]?.colour ?? "")
+            : "";
+      if (!raw) return "";
+      // 色条写的是色相（如 "210"）还是十六进制都按最终颜色比较。
+      return (/^#/.test(raw) ? raw : hueToHex(Number(raw))).toLowerCase();
+    };
+    const categories = resolveS3().contents;
+    const seen = new Map<string, string>();
+
+    for (const category of categories) {
+      const name = String(category.name);
+      const colour = colourOf(category);
+      expect(colour, `分类「${name}」没有颜色`).not.toBe("");
+      expect(seen.get(colour), `「${seen.get(colour)}」与「${name}」用了同一个颜色`).toBeUndefined();
+      seen.set(colour, name);
+    }
+
+    expect(seen.size).toBe(categories.length);
   });
 
   it("offers the range mapping block in the math category", () => {

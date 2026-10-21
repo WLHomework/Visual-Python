@@ -46,7 +46,7 @@ const definitions = [
     message0: "重启开发板",
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.loop,
     tooltip: "立即像按下复位键一样重启开发板，程序会从头运行，未保存的数据会丢失。",
   },
   {
@@ -56,7 +56,7 @@ const definitions = [
     inputsInline: true,
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.loop,
     tooltip: "进入深度睡眠以省电，指定毫秒后自动重启。睡眠期间串口和 USB 通信会中断（ESP32-S3 原生 USB 会断开），醒来后程序从头运行，普通变量不会保留。",
   },
 ];

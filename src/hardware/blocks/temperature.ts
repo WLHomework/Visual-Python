@@ -16,7 +16,7 @@ const definitions = [
     type: "hardware_mcu_temperature",
     message0: "读取芯片温度（℃）",
     output: "Number",
-    colour: hardwareColours.analog,
+    colour: hardwareColours.sensor,
     tooltip: "读取芯片内部温度，返回整数摄氏度。数值是芯片自身发热后的温度，通常比室温高，不是环境温度。",
   },
 ];

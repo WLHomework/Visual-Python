@@ -23,7 +23,7 @@ const inputOutputCategory: ToolboxCategorySpec = {
 const sensorCategory: ToolboxCategorySpec = {
   id: "sensor",
   name: "传感器",
-  colour: hardwareColours.analog,
+  colour: hardwareColours.sensor,
   items: ["hardware_dht_temperature", "hardware_dht_humidity", "hardware_ultrasonic_distance", "hardware_mcu_temperature"],
 };
 
@@ -37,7 +37,7 @@ const actuatorCategory: ToolboxCategorySpec = {
 const lightCategory: ToolboxCategorySpec = {
   id: "light",
   name: "灯光",
-  colour: hardwareColours.board,
+  colour: hardwareColours.light,
   // S3 没有普通板载 LED，hardware_builtin_led 会被解析器静默跳过；板载 RGB 灯由内置 RGB 积木控制。
   items: [
     "hardware_builtin_led",
@@ -52,7 +52,7 @@ const lightCategory: ToolboxCategorySpec = {
 const displayCategory: ToolboxCategorySpec = {
   id: "display",
   name: "显示",
-  colour: hardwareColours.board,
+  colour: hardwareColours.display,
   items: ["hardware_oled_init", "hardware_oled_clear", "hardware_oled_text", "hardware_oled_pixel", "hardware_oled_write"],
 };
 

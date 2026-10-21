@@ -30,11 +30,16 @@ export function isHardwareToolboxCategoryName(name: unknown): boolean {
 }
 
 export const hardwareColours = {
-  pin: "#b95073",
-  pwm: "#c58b32",
-  analog: "#7657b5",
+  // 每个分类一种颜色：分类色条与积木同色，15 个分类互不重复（见 toolboxes/esp32-s3.test.ts）。
+  pin: "#9e2f3f",
+  pwm: "#9e5018",
+  sensor: "#3f7a3f",
+  light: "#b8912f",
+  display: "#4a5568",
   board: "#2f9e8f",
   loop: "#4b9b62",
+  // 与 Python 界面的数学积木同色（见 pythonBlocks.ts 的 blockStyles.math_blocks）。
+  math: "#4f72b8",
 };
 
 export const pinUseByBlockType: Record<string, HardwarePinUse> = {

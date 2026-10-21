@@ -36,7 +36,7 @@ const definitions = [
     ],
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.light,
     tooltip: "控制开发板自带的单颗 WS2812 RGB 灯；数据引脚由板卡决定，请不要在同一引脚上再接其他设备。",
   },
   {
@@ -49,7 +49,7 @@ const definitions = [
     inputsInline: true,
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.light,
     tooltip: "初始化一条 NeoPixel 灯带，请先运行此积木再使用其他设置积木。",
     extensions: ["hardware_board_pin"],
   },
@@ -65,7 +65,7 @@ const definitions = [
     inputsInline: true,
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.light,
     tooltip: "设置指定灯珠的颜色，RGB 值会限制在 0 到 255，请先初始化 NeoPixel。",
   },
   {
@@ -73,16 +73,16 @@ const definitions = [
     message0: "NeoPixel 灯全部熄灭",
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.light,
     tooltip: "将所有灯珠待刷新的颜色设置为黑色。",
   },
   {
     type: "hardware_neopixel_write",
-    message0: "鍒锋柊 NeoPixel 鏄剧ず",
+    message0: "刷新 NeoPixel 显示",
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
-    tooltip: "灏嗙紦瀛樼殑 NeoPixel 棰滆壊鍐欏叆灯带并显示出来。",
+    colour: hardwareColours.light,
+    tooltip: "将缓存的 NeoPixel 颜色写入灯带并显示出来。",
   },
 ];
 

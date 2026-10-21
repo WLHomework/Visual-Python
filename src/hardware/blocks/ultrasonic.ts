@@ -20,7 +20,7 @@ const definitions = [
       { type: "field_dropdown", name: "ECHO", options: [["请先选择硬件板卡", ""]] },
     ],
     output: "Number",
-    colour: hardwareColours.analog,
+    colour: hardwareColours.sensor,
     tooltip: "返回距离（厘米）。等待回响超时 30000 微秒时返回 -1。",
     extensions: ["hardware_board_pin"],
   },

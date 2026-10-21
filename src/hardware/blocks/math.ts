@@ -14,7 +14,7 @@ const definitions = [
     ],
     inputsInline: true,
     output: "Number",
-    colour: hardwareColours.analog,
+    colour: hardwareColours.math,
     tooltip: "按比例把数值从原范围换算到目标范围，例如把传感器读数映射为百分比。原范围的上下限不能相等。",
   },
 ];

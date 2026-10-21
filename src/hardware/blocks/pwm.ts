@@ -16,7 +16,7 @@ const definitions = [
     inputsInline: true,
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.pwm,
+    colour: hardwareColours.pin,
     tooltip: "输出 PWM 信号，占空比越大输出越强，可用来调光或调速。",
     extensions: ["hardware_board_pin"],
   },

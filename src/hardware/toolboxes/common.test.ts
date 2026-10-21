@@ -81,13 +81,25 @@ describe("common 分类声明", () => {
     const [control] = resolveCategories([controlCategory()]).contents;
 
     expect(control.contents?.map((entry) => entry.type)).toEqual([
-      "controls_if",
       "controls_repeat_ext",
       "controls_whileUntil",
       "controls_for",
       "controls_flow_statements",
       "hardware_forever",
       "hardware_sleep_ms",
+    ]);
+  });
+
+  it("keeps the conditional statement with the logic blocks", () => {
+    const [logic] = resolveCategories([logicCategory()]).contents;
+
+    expect(logic.contents?.map((entry) => entry.type)).toEqual([
+      "controls_if",
+      "logic_compare",
+      "logic_operation",
+      "logic_negate",
+      "logic_boolean",
+      "python_conditional",
     ]);
   });
 

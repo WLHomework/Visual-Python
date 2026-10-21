@@ -15,7 +15,7 @@ const definitions = [
     inputsInline: true,
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.display,
     tooltip: "使用当前板卡的默认 I2C 引脚初始化 SSD1306 OLED。常见地址为 0x3C；请先运行此积木。",
   },
   {
@@ -23,7 +23,7 @@ const definitions = [
     message0: "清空 OLED 画面",
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.display,
     tooltip: "清空内存中的 OLED 画面，运行刷新积木后才会显示。",
   },
   {
@@ -37,7 +37,7 @@ const definitions = [
     inputsInline: true,
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.display,
     tooltip: "在 OLED 缓冲区写入一行文字，坐标单位为像素；请先初始化 OLED。",
   },
   {
@@ -51,7 +51,7 @@ const definitions = [
     inputsInline: true,
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.display,
     tooltip: "设置 OLED 缓冲区中的单个像素，运行刷新积木后才会显示。",
   },
   {
@@ -59,7 +59,7 @@ const definitions = [
     message0: "刷新 OLED 显示",
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.display,
     tooltip: "将 OLED 缓冲区内容写入屏幕。",
   },
 ];

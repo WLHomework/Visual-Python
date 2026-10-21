@@ -56,7 +56,7 @@ const definitions = [
     args0: [{ type: "field_dropdown", name: "STATE", options: [["点亮", "on"], ["熄灭", "off"]] }],
     previousStatement: null,
     nextStatement: null,
-    colour: hardwareColours.board,
+    colour: hardwareColours.light,
     tooltip: "控制开发板自带的 LED。",
   },
 ];

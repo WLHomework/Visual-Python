@@ -35,7 +35,6 @@ export const controlCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategoryS
   name: "控制",
   colour: baseCategoryColour("循环"),
   items: [
-    "controls_if",
     "controls_repeat_ext",
     "controls_whileUntil",
     "controls_for",
@@ -50,7 +49,7 @@ export const logicCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpe
   id: "logic",
   name: "逻辑",
   colour: baseCategoryColour("逻辑"),
-  items: ["logic_compare", "logic_operation", "logic_negate", "logic_boolean", "python_conditional", ...extra],
+  items: ["controls_if", "logic_compare", "logic_operation", "logic_negate", "logic_boolean", "python_conditional", ...extra],
 });
 
 export const mathCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
@@ -101,7 +100,7 @@ export const listCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec
     "python_index",
     "python_list_set",
     "python_list_insert",
-    "python_length",
+    "lists_length",
     ...extra,
   ],
 });

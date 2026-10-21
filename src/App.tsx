@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import * as Blockly from "blockly/core";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -31,6 +31,7 @@ import { createPluginDraftStore, createPluginDraftStorePersistence, validatePlug
 import { serializePluginIrFile as serializePluginIr } from "./agentV2/pluginIr";
 import { restoreInstalledPluginFiles, restorePluginAfterFailure } from "./agentV2/pluginRuntime";
 import { runAgentWithProtocolFallback } from "./codexAgentRunner";
+import { nextConsoleStickToLatest } from "./consoleAutoScroll";
 import type { AiAgentPermissionMode, AiReasoningEffort } from "./aiConfig";
 import type { AiImageAttachment } from "./aiImageAttachments";
 import { createAiConversationScope } from "./aiConversationContext";
@@ -956,7 +957,7 @@ export default function App() {
   const outputRef = useRef<OutputEntry[]>(output);
   const outputScrollRef = useRef<HTMLDivElement>(null);
   const outputStickToLatestRef = useRef(true);
-  const outputScrollFrameRef = useRef<number | null>(null);
+  const outputLastScrollTopRef = useRef(0);
   const problemScrollRef = useRef<HTMLDivElement>(null);
   const problemStickToLatestRef = useRef(true);
   const problemScrollFrameRef = useRef<number | null>(null);
@@ -1232,7 +1233,13 @@ export default function App() {
   const handleOutputScroll = useCallback(() => {
     const scroll = outputScrollRef.current;
     if (!scroll) return;
-    outputStickToLatestRef.current = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight <= 32;
+    outputStickToLatestRef.current = nextConsoleStickToLatest({
+      stick: outputStickToLatestRef.current,
+      previousTop: outputLastScrollTopRef.current,
+      top: scroll.scrollTop,
+      distanceToBottom: scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight,
+    });
+    outputLastScrollTopRef.current = scroll.scrollTop;
   }, []);
 
   const handleProblemScroll = useCallback(() => {
@@ -1249,6 +1256,8 @@ export default function App() {
     }
     setOutput([]);
     setProblems([]);
+    outputStickToLatestRef.current = true;
+    outputLastScrollTopRef.current = 0;
   }, []);
 
   const cancelAutosave = useCallback(() => {
@@ -2079,10 +2088,13 @@ export default function App() {
     setBottomPanelOpen(true);
   }, []);
 
-  useEffect(() => {
-    if (activePanel !== "output") return;
+  useLayoutEffect(() => {
+    if (activePanel !== "output" || !effectiveBottomPanelOpen) return;
+    // 重新打开输出页时回到“跟随最新内容”：上次收起前用户可能停在中间，
+    // 若不重置，下一次运行会一直停在旧位置，看起来就像输出没有滚动。
     outputStickToLatestRef.current = true;
-  }, [activePanel]);
+    outputLastScrollTopRef.current = outputScrollRef.current?.scrollTop ?? 0;
+  }, [activePanel, effectiveBottomPanelOpen]);
 
   // 预览与设备页签各自只属于某些界面：切界面时把控制台收回「输出」，避免停在看不见的页签上。
   useEffect(() => {
@@ -2090,20 +2102,13 @@ export default function App() {
     else if (!profile.features.devicePanel && activePanel === "device") openConsolePanel("output");
   }, [activePanel, profile.features.devicePanel, profile.features.renderPreview, openConsolePanel]);
 
-  useEffect(() => {
+  // 输出面板跟随最新内容：内容一变就在绘制前滚到底。
+  // 不用 requestAnimationFrame：下一次更新的清理会取消还没执行的帧，输出连着来时面板就停在原地。
+  useLayoutEffect(() => {
     const scroll = outputScrollRef.current;
     if (!scroll || activePanel !== "output" || !effectiveBottomPanelOpen || !outputStickToLatestRef.current) return;
-    if (outputScrollFrameRef.current !== null) cancelAnimationFrame(outputScrollFrameRef.current);
-    outputScrollFrameRef.current = requestAnimationFrame(() => {
-      outputScrollFrameRef.current = null;
-      if (outputStickToLatestRef.current && outputScrollRef.current === scroll) scroll.scrollTop = scroll.scrollHeight;
-    });
-    return () => {
-      if (outputScrollFrameRef.current !== null) {
-        cancelAnimationFrame(outputScrollFrameRef.current);
-        outputScrollFrameRef.current = null;
-      }
-    };
+    scroll.scrollTop = scroll.scrollHeight;
+    outputLastScrollTopRef.current = scroll.scrollTop;
   }, [activePanel, effectiveBottomPanelOpen, output, bottomPanelHeight, renderingManim, manimRenderProgress?.phase, manimRenderProgress?.percent]);
 
   const ensureDesktopNotificationPermission = useCallback(async () => {
@@ -5049,6 +5054,8 @@ export default function App() {
       setCodeRuntimeDiagnostic(null);
       setBottomPanelOpen(true);
       setActivePanel("output");
+      // 新一次运行从底部开始看：上一次可能停在中间翻旧输出。
+      outputStickToLatestRef.current = true;
       return validateBeforeExecution();
     },
   });

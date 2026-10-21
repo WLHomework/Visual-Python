@@ -154,8 +154,12 @@ export function useHardwareDevice(options: HardwareDeviceOptions): HardwareDevic
   );
 
   // 事件订阅只建立一次；回调用 ref 读最新的配置，避免反复退订。
+  //
+  // `cancelled` 必须是每次 effect 自己的局部变量：开发版的严格模式会「挂载 → 清理 → 再挂载」，
+  // 而 `listen` 是异步的。用共享 ref 记“已卸载”时，第二次挂载会把标记改回来，
+  // 第一次的订阅于是活了下来——每个设备事件被处理两遍，输出面板里运行结束/错误消息成对重复。
   useEffect(() => {
-    disposed.current = false;
+    let cancelled = false;
     let unlisteners: UnlistenFn[] = [];
     void listenHardwareDeviceEvents({
       onStateChanged: (next) => setSnapshot(next),
@@ -190,7 +194,7 @@ export function useHardwareDevice(options: HardwareDeviceOptions): HardwareDevic
         }
       },
     }).then((listeners) => {
-      if (disposed.current) {
+      if (cancelled) {
         unlistenHardwareDeviceEvents(listeners);
         return;
       }
@@ -199,10 +203,18 @@ export function useHardwareDevice(options: HardwareDeviceOptions): HardwareDevic
       /* 非 Tauri 环境（纯浏览器预览）里没有事件系统：忽略即可。 */
     });
     return () => {
-      disposed.current = true;
+      cancelled = true;
       unlistenHardwareDeviceEvents(unlisteners);
     };
   }, [pushLog, resolveWaiter]);
+
+  // 组件卸载后不再往日志里追加（事件回调可能比卸载晚一步到达）。
+  useEffect(() => {
+    disposed.current = false;
+    return () => {
+      disposed.current = true;
+    };
+  }, []);
 
   // 重新打开面板（或刷新页面）时恢复已有连接：后端状态在进程里，不随界面丢失。
   useEffect(() => {

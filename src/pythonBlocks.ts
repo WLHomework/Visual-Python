@@ -1381,6 +1381,7 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
       { kind: "block", type: "python_dynamic_dict", extraState: { itemCount: 1 }, inputs: { KEY0: textShadow("名称"), VALUE0: textShadow("示例") } },
       toolboxSectionLabel("列表与元组"),
       { kind: "block", type: "python_list_method", fields: { METHOD: "append" }, inputs: { LIST: listShadow([1, 2]), ARG: numberShadow(3) } },
+      { kind: "block", type: "lists_length", inputs: { VALUE: listShadow([1, 2, 3]) } },
       { kind: "block", type: "python_list_insert", inputs: { LIST: listShadow([1, 3]), INDEX: numberShadow(1), VALUE: numberShadow(2) } },
       { kind: "block", type: "python_list_set", inputs: { LIST: listShadow([1, 2, 3]), INDEX: numberShadow(0), VALUE: numberShadow(10) } },
       { kind: "block", type: "python_list_slice_set", inputs: { LIST: listShadow([1, 2, 3, 4]), START: numberShadow(1), STOP: numberShadow(3), STEP: numberShadow(1), VALUES: listShadow([20, 30]) } },

@@ -9,7 +9,7 @@ const definitions = [
     message0: "读取模拟引脚 %1",
     args0: [{ type: "field_dropdown", name: "PIN", options: [["（请先选择硬件板卡）", ""]] }],
     output: "Number",
-    colour: hardwareColours.analog,
+    colour: hardwareColours.pin,
     tooltip: "读取模拟电压数值，可用于电位器、光敏电阻等元件。",
     extensions: ["hardware_board_pin"],
   },
