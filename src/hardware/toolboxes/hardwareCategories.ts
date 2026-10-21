@@ -61,18 +61,26 @@ export const displayCategory = (): ToolboxCategorySpec => ({
   items: ["hardware_oled_init", "hardware_oled_clear", "hardware_oled_text", "hardware_oled_pixel", "hardware_oled_write"],
 });
 
-/** 通信：三块板卡都有 I2C（ESP8266 为软件 I2C）；Wi-Fi 属于「网络」，后续再加。 */
-export const communicationCategory = (): ToolboxCategorySpec => ({
+/** 通信：I2C 三块板卡都有；ESP32-S3 再追加 BLE 与 ESP-NOW 积木。 */
+export const communicationCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
   id: "communication",
   name: "通信",
   colour: hardwareColours.communication,
-  items: ["hardware_i2c_init", "hardware_i2c_scan", "hardware_i2c_write_register", "hardware_i2c_read_register"],
+  items: ["hardware_i2c_init", "hardware_i2c_scan", "hardware_i2c_write_register", "hardware_i2c_read_register", ...extra],
 });
 
-/** 网络：三块板卡都带 Wi-Fi（仅 2.4 GHz）。 */
-export const networkCategory = (): ToolboxCategorySpec => ({
+/** 网络：Wi-Fi 三块板卡都有（仅 2.4 GHz）；ESP32-S3 再追加 HTTP、NTP 与 MQTT。 */
+export const networkCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
   id: "network",
   name: "网络",
   colour: hardwareColours.network,
-  items: ["hardware_wifi_connect", "hardware_wifi_wait", "hardware_wifi_connected", "hardware_wifi_ip", "hardware_wifi_disconnect"],
+  items: ["hardware_wifi_connect", "hardware_wifi_wait", "hardware_wifi_connected", "hardware_wifi_ip", "hardware_wifi_disconnect", ...extra],
+});
+
+/** 存储：设备文本文件与 NVS 键值，目前只有 ESP32-S3 支持。 */
+export const storageCategory = (): ToolboxCategorySpec => ({
+  id: "storage",
+  name: "存储",
+  colour: hardwareColours.storage,
+  items: ["hardware_file_write", "hardware_file_read", "hardware_nvs_set", "hardware_nvs_get"],
 });

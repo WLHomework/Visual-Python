@@ -945,3 +945,203 @@ describe("hardware toolbox category", () => {
     }
   });
 });
+
+describe("ESP32-S3 advanced wireless and storage blocks", () => {
+  const text = (value: string) => ({ block: { type: "text", fields: { TEXT: value } } });
+
+  it("generates HTTP GET, NTP sync and a readable UTC time", () => {
+    const http = generate([{ type: "hardware_http_get", inputs: { URL: text("http://example.com") } }], "esp32-s3");
+    const ntp = generate([{ type: "hardware_ntp_sync" }], "esp32-s3");
+    const now = generate([{ type: "hardware_ntp_now" }], "esp32-s3");
+
+    expect(http).toContain("import requests");
+    expect(http).toContain("def hardware_http_get(url):");
+    expect(http).toContain("response = requests.get(str(url), timeout=5)");
+    expect(http).toContain("return response.text");
+    expect(http).toContain("hardware_http_get('http://example.com')");
+    expect(ntp).toContain("import ntptime");
+    expect(ntp).toContain("ntptime.settime()");
+    expect(now).toContain("import time");
+    expect(now).toContain('time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())');
+  });
+
+  it("generates BLE advertising with a bounded name and a stop command", () => {
+    const code = generate([chain(
+      { type: "hardware_ble_start", inputs: { NAME: text("VisualPython") } },
+      { type: "hardware_ble_stop" },
+    )], "esp32-s3");
+
+    expect(code).toContain("import bluetooth");
+    expect(code).toContain("_ble = bluetooth.BLE()");
+    expect(code).toContain("def hardware_ble_start(name):");
+    expect(code).toContain("_ble.config(gap_name=text)");
+    expect(code).toContain("_ble.gap_advertise(None)");
+    expect(code).toContain("data = text.encode()");
+    expect(code).toContain("while len(data) > 20:");
+    expect(code).toContain("connectable=False");
+    expect(code).toContain("hardware_ble_start('VisualPython')");
+    expect(code).toContain("hardware_ble_stop()");
+  });
+
+  it("generates ESP-NOW setup, MAC conversion, sending and receiving", () => {
+    const code = generate([chain(
+      { type: "hardware_espnow_init" },
+      { type: "hardware_espnow_send", inputs: { TEXT: text("Hi"), MAC: text("aa:bb:cc:dd:ee:ff") } },
+    )], "esp32-s3");
+    const receive = generate([{ type: "hardware_espnow_receive", inputs: { TIMEOUT: number(500) } }], "esp32-s3");
+
+    expect(code).toContain("import network");
+    expect(code).toContain("import espnow");
+    expect(code).toContain("_wlan = network.WLAN(network.STA_IF)");
+    expect(code).toContain("_espnow = espnow.ESPNow()");
+    expect(code).toContain("_wlan.active(True)");
+    expect(code).toContain("_espnow.active(True)");
+    expect(code).toContain("def hardware_espnow_mac_bytes(mac):");
+    expect(code).toContain("result[index] = int(parts[index], 16)");
+    expect(code).toContain("_espnow.add_peer(peer)");
+    expect(code).toContain("_espnow.send(peer, str(text), False)");
+    expect(code).toContain("hardware_espnow_send('aa:bb:cc:dd:ee:ff', 'Hi')");
+    expect(receive).toContain("_espnow.recv(int(timeout_ms))");
+    expect(receive).toContain("hardware_espnow_receive(int(500))");
+    expect(receive).toContain("global _espnow_last_mac");
+  });
+
+  it("generates the MQTT connection, publish, subscribe and receive queue", () => {
+    const code = generate([chain(
+      {
+        type: "hardware_mqtt_connect",
+        inputs: {
+          SERVER: text("192.168.1.2"),
+          PORT: number(1883),
+          CLIENT_ID: text("vp-s3"),
+          USER: text("user"),
+          PASSWORD: text("secret"),
+        },
+      },
+      { type: "hardware_mqtt_publish", inputs: { TOPIC: text("visual-python/test"), MESSAGE: text("hello") } },
+      { type: "hardware_mqtt_subscribe", inputs: { TOPIC: text("visual-python/test") } },
+    )], "esp32-s3");
+
+    expect(code).toContain("import umqtt.simple");
+    expect(code).toContain("_mqtt = umqtt.simple.MQTTClient(str('vp-s3'), str('192.168.1.2'), port=int(1883), user=(str('user') or None), password=str('secret'))");
+    expect(code).toContain("_mqtt.set_callback(_mqtt_on_message)");
+    expect(code).toContain("_mqtt.connect()");
+    expect(code).toContain("_mqtt.publish(str('visual-python/test').encode(), str('hello').encode())");
+    expect(code).toContain("_mqtt.subscribe(str('visual-python/test').encode())");
+    expect(code).toContain("def _mqtt_on_message(topic, msg):");
+    expect(code).toContain("_mqtt_messages.append((_mqtt_text(topic), _mqtt_text(msg)))");
+
+    const wait = generate([{ type: "hardware_mqtt_wait", inputs: { TIMEOUT: number(200) } }], "esp32-s3");
+    expect(wait).toContain("import time");
+    expect(wait).toContain("_mqtt.check_msg()");
+    expect(wait).toContain("time.sleep_ms(20)");
+    expect(wait).toContain("hardware_mqtt_wait(int(200))");
+    expect(wait).toContain("_mqtt_messages.pop(0)");
+    expect(wait).toContain("global _mqtt_last_topic");
+    expect(wait).toContain("_mqtt_last_topic = item[0]");
+    expect(wait).toContain("return item[1]");
+  });
+
+  it("generates text-file and NVS storage helpers", () => {
+    const code = generate([chain(
+      { type: "hardware_file_write", inputs: { PATH: text("/data.txt"), TEXT: text("hello") } },
+      { type: "hardware_nvs_set", inputs: { KEY: text("counter"), VALUE: text("1") } },
+    )], "esp32-s3");
+
+    expect(code).toContain("import esp32");
+    expect(code).toContain('with open(str(path), "w") as file:');
+    expect(code).toContain("file.write(str(text))");
+    expect(code).toContain("hardware_file_write('/data.txt', 'hello')");
+    expect(code).toContain('_nvs = esp32.NVS("visual_python")');
+    expect(code).toContain("_nvs.set_blob(str(key), str(value).encode())");
+    expect(code).toContain("hardware_nvs_set('counter', '1')");
+    expect(code).toContain("_nvs.commit()");
+
+    const read = generate([{ type: "hardware_file_read", inputs: { PATH: text("/data.txt") } }], "esp32-s3");
+    const nvsRead = generate([{ type: "hardware_nvs_get", inputs: { KEY: text("counter") } }], "esp32-s3");
+    expect(read).toContain("def hardware_file_read(path):");
+    expect(read).toContain("file.read()");
+    expect(nvsRead).toContain("def hardware_nvs_get(key):");
+    expect(nvsRead).toContain("length = _nvs.get_blob(str(key), data)");
+    expect(nvsRead).toContain("hardware_nvs_get('counter')");
+    expect(nvsRead).toContain("bytes(data[:length]).decode()");
+  });
+
+  it("does not generate ESP32-S3-only blocks on the other boards", () => {
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
+      const http = generate([{ type: "hardware_http_get", inputs: { URL: text("http://example.com") } }], boardId);
+      expect(http).not.toContain("requests.get");
+      expect(http).not.toContain("hardware_http_get");
+
+      const ble = generate([{ type: "hardware_ble_start", inputs: { NAME: text("VP") } }], boardId);
+      expect(ble).toContain("仅 ESP32-S3");
+
+      const file = generate([{ type: "hardware_file_write", inputs: { PATH: text("/data.txt"), TEXT: text("x") } }], boardId);
+      expect(file).toContain("仅 ESP32-S3");
+      expect(file).not.toContain("open(");
+    }
+  });
+
+  it("reports S3-only blocks on the other boards in the problem panel", () => {
+    const workspace = loadWorkspace([
+      { type: "hardware_http_get", inputs: { URL: text("http://example.com") } },
+      { type: "hardware_ble_start", inputs: { NAME: text("VP") } },
+      { type: "hardware_file_write", inputs: { PATH: text("/data.txt"), TEXT: text("x") } },
+    ], "esp32-wroom");
+    expect(collectHardwareBlockIssues(workspace, "esp32-wroom").map((issue) => issue.message)).toEqual([
+      "「HTTP GET 请求」积木：ESP32 WROOM 不支持该联网/无线积木（仅 ESP32-S3）",
+      "「开启 BLE 广播」积木：ESP32 WROOM 不支持该联网/无线积木（仅 ESP32-S3）",
+      "「写入设备文件」积木：ESP32 WROOM 不支持设备存储积木（仅 ESP32-S3）",
+    ]);
+    workspace.dispose();
+  });
+
+  it("validates URLs, MACs, MQTT settings, file paths and NVS keys", () => {
+    const http = loadWorkspace([{ type: "hardware_http_get", inputs: { URL: text("example.com") } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(http, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「HTTP GET 请求」积木：网址必须以 http:// 或 https:// 开头",
+    ]);
+    http.dispose();
+
+    const espnow = loadWorkspace([{ type: "hardware_espnow_send", inputs: { TEXT: text("Hi"), MAC: text("aa:bb:cc") } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(espnow, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「ESP-NOW 发送」积木：MAC 地址应写成 6 组十六进制，例如 aa:bb:cc:dd:ee:ff",
+    ]);
+    espnow.dispose();
+
+    const mqtt = loadWorkspace([{
+      type: "hardware_mqtt_connect",
+      inputs: {
+        SERVER: text(""),
+        PORT: number(70000),
+        CLIENT_ID: text(""),
+        USER: text(""),
+        PASSWORD: text(""),
+      },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(mqtt, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「连接 MQTT」积木：服务器地址不能为空",
+      "「连接 MQTT」积木：客户端 ID 不能为空",
+      "「连接 MQTT」积木：端口必须是 1–65535 之间的整数",
+    ]);
+    mqtt.dispose();
+
+    const file = loadWorkspace([{ type: "hardware_file_write", inputs: { PATH: text("/main.py"), TEXT: text("x") } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(file, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「写入设备文件」积木：不要写入 /main.py，它会覆盖正在运行的程序",
+    ]);
+    file.dispose();
+
+    const nvs = loadWorkspace([{ type: "hardware_nvs_set", inputs: { KEY: text("key with spaces"), VALUE: text("x") } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(nvs, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「写入 NVS 键值」积木：NVS 键必须是 1–15 个 ASCII 字母、数字或下划线",
+    ]);
+    nvs.dispose();
+
+    const nvsValue = loadWorkspace([{ type: "hardware_nvs_set", inputs: { KEY: text("key"), VALUE: text("中".repeat(342)) } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(nvsValue, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「写入 NVS 键值」积木：NVS 文本值不能超过约 1 KB",
+    ]);
+    nvsValue.dispose();
+  });
+});

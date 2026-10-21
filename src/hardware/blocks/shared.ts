@@ -21,6 +21,7 @@ export const hardwareColours = {
   board: "#2f9e8f",
   communication: "#1f6f7f",
   network: "#5f6b2f",
+  storage: "#7a5c3a",
   loop: "#4b9b62",
   // 与 Python 界面的数学积木同色（见 pythonBlocks.ts 的 blockStyles.math_blocks）。
   math: "#4f72b8",
@@ -88,6 +89,25 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_wifi_disconnect: "断开 Wi-Fi",
   hardware_wifi_connected: "Wi-Fi 已连接",
   hardware_wifi_ip: "Wi-Fi IP 地址",
+  hardware_http_get: "HTTP GET 请求",
+  hardware_ntp_sync: "NTP 校时",
+  hardware_ntp_now: "设备当前时间",
+  hardware_ble_start: "开启 BLE 广播",
+  hardware_ble_stop: "停止 BLE 广播",
+  hardware_espnow_init: "初始化 ESP-NOW",
+  hardware_espnow_mac: "ESP-NOW 本机 MAC",
+  hardware_espnow_send: "ESP-NOW 发送",
+  hardware_espnow_receive: "接收 ESP-NOW 消息",
+  hardware_espnow_last_mac: "最近 ESP-NOW 发送者",
+  hardware_mqtt_connect: "连接 MQTT",
+  hardware_mqtt_publish: "MQTT 发布",
+  hardware_mqtt_subscribe: "MQTT 订阅",
+  hardware_mqtt_wait: "等待 MQTT 消息",
+  hardware_mqtt_last_topic: "最近 MQTT 主题",
+  hardware_file_write: "写入设备文件",
+  hardware_file_read: "读取设备文件",
+  hardware_nvs_set: "写入 NVS 键值",
+  hardware_nvs_get: "读取 NVS 键值",
   hardware_mcu_temperature: "芯片温度",
   hardware_sleep_ms: "等待毫秒",
   hardware_forever: "永远重复",
@@ -99,6 +119,33 @@ export const hardwareBlockLabels: Record<string, string> = {
 };
 
 export const hardwareBlockTypes: readonly string[] = Object.keys(hardwareBlockLabels);
+
+/** 只有 `BoardProfile.advancedWireless` 为 true 的板卡才生成这些积木。 */
+export const advancedWirelessBlockTypes: readonly string[] = [
+  "hardware_http_get",
+  "hardware_ntp_sync",
+  "hardware_ntp_now",
+  "hardware_ble_start",
+  "hardware_ble_stop",
+  "hardware_espnow_init",
+  "hardware_espnow_mac",
+  "hardware_espnow_send",
+  "hardware_espnow_receive",
+  "hardware_espnow_last_mac",
+  "hardware_mqtt_connect",
+  "hardware_mqtt_publish",
+  "hardware_mqtt_subscribe",
+  "hardware_mqtt_wait",
+  "hardware_mqtt_last_topic",
+];
+
+/** 只有 `BoardProfile.deviceStorage` 为 true 的板卡才生成这些积木。 */
+export const deviceStorageBlockTypes: readonly string[] = [
+  "hardware_file_write",
+  "hardware_file_read",
+  "hardware_nvs_set",
+  "hardware_nvs_get",
+];
 
 export type HardwareBlockIssue = { blockId?: string; message: string };
 
@@ -286,6 +333,11 @@ export const numericInputValue = (block: Blockly.Block, inputName: string): numb
   if (!target || target.type !== "math_number") return undefined;
   const value = Number(target.getFieldValue("NUM"));
   return Number.isFinite(value) ? value : undefined;
+};
+export const textInputValue = (block: Blockly.Block, inputName: string): string | undefined => {
+  const target = block.getInputTargetBlock(inputName);
+  if (!target || target.type !== "text") return undefined;
+  return String(target.getFieldValue("TEXT") ?? "");
 };
 export const pythonOrder = Order;
 export const hardwareGenerator = pythonGenerator;

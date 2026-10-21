@@ -21,7 +21,7 @@ type ResolvedCategory = {
 type ResolvedDefinition = { kind?: string; contents: ResolvedCategory[] };
 
 const expectedCategoryNames = [
-  "输入/输出", "控制", "逻辑", "数学", "文本", "列表", "赋值", "变量", "函数", "调用", "串口", "通信", "网络", "传感器", "执行器", "灯光", "显示",
+  "输入/输出", "控制", "逻辑", "数学", "文本", "列表", "赋值", "变量", "函数", "调用", "串口", "通信", "网络", "存储", "传感器", "执行器", "灯光", "显示",
 ];
 
 /** 第 2 节 v1 清单里明确允许出现的 python_* 积木。 */
@@ -233,7 +233,7 @@ describe("esp32S3Toolbox", () => {
     );
   });
 
-  it("offers the I2C blocks in the communication category", () => {
+  it("offers the I2C, BLE and ESP-NOW blocks in the communication category", () => {
     const communication = resolveS3().contents.find((category) => category.name === "通信");
 
     expect(communication?.contents?.map((entry) => entry.type)).toEqual([
@@ -241,10 +241,17 @@ describe("esp32S3Toolbox", () => {
       "hardware_i2c_scan",
       "hardware_i2c_write_register",
       "hardware_i2c_read_register",
+      "hardware_ble_start",
+      "hardware_ble_stop",
+      "hardware_espnow_init",
+      "hardware_espnow_mac",
+      "hardware_espnow_send",
+      "hardware_espnow_receive",
+      "hardware_espnow_last_mac",
     ]);
   });
 
-  it("offers the Wi-Fi blocks in the network category", () => {
+  it("offers the Wi-Fi, HTTP, NTP and MQTT blocks in the network category", () => {
     const network = resolveS3().contents.find((category) => category.name === "网络");
 
     expect(network?.contents?.map((entry) => entry.type)).toEqual([
@@ -253,6 +260,25 @@ describe("esp32S3Toolbox", () => {
       "hardware_wifi_connected",
       "hardware_wifi_ip",
       "hardware_wifi_disconnect",
+      "hardware_http_get",
+      "hardware_ntp_sync",
+      "hardware_ntp_now",
+      "hardware_mqtt_connect",
+      "hardware_mqtt_publish",
+      "hardware_mqtt_subscribe",
+      "hardware_mqtt_wait",
+      "hardware_mqtt_last_topic",
+    ]);
+  });
+
+  it("offers text files and NVS in the storage category", () => {
+    const storage = resolveS3().contents.find((category) => category.name === "存储");
+
+    expect(storage?.contents?.map((entry) => entry.type)).toEqual([
+      "hardware_file_write",
+      "hardware_file_read",
+      "hardware_nvs_set",
+      "hardware_nvs_get",
     ]);
   });
 

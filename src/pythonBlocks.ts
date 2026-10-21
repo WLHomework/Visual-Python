@@ -1780,7 +1780,7 @@ export function hydrateDeferredInputs(block: Blockly.Block, options?: { sync?: b
       return;
     }
     const eventsWereEnabled = typeof Blockly.Events.isEnabled === "function" ? Blockly.Events.isEnabled() : true;
-    Blockly.Events.disable();
+    if (eventsWereEnabled) Blockly.Events.disable();
     const canToggleResize = typeof svgWorkspace.setResizesEnabled === "function";
     try {
       if (canToggleResize) svgWorkspace.setResizesEnabled(false);
@@ -1860,7 +1860,11 @@ export function generateWorkspacePython(workspace: Blockly.Workspace): string {
 export function loadWorkspaceFast(workspace: Blockly.Workspace, state: object, options?: { collapseIfBlocks?: number; keepEvents?: boolean }) {
   const eventsWereEnabled = typeof Blockly.Events.isEnabled === "function" ? Blockly.Events.isEnabled() : true;
   const keepEvents = Boolean(options?.keepEvents) && eventsWereEnabled;
-  if (!keepEvents) Blockly.Events.disable();
+  // 调用方可能已经禁用了事件（例如 AI 批量提交）。只在本函数真的把事件从
+  // 启用切到禁用时才恢复，避免多出一次没有对应 enable 的 disable，
+  // 把整个工作区永久静音、手动改积木也不再触发代码更新。
+  const shouldDisableEvents = !keepEvents && eventsWereEnabled;
+  if (shouldDisableEvents) Blockly.Events.disable();
   const svgWorkspace = workspace as Blockly.WorkspaceSvg;
   const canToggleResize = typeof svgWorkspace.setResizesEnabled === "function";
   try {
@@ -1873,7 +1877,7 @@ export function loadWorkspaceFast(workspace: Blockly.Workspace, state: object, o
     if (workspace.getAllBlocks(false).length >= collapseAt) collapseHeavyStatementBlocks(workspace);
   } finally {
     if (canToggleResize) svgWorkspace.setResizesEnabled(true);
-    if (!keepEvents && eventsWereEnabled) Blockly.Events.enable();
+    if (shouldDisableEvents) Blockly.Events.enable();
   }
 }
 

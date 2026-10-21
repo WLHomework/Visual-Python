@@ -32,6 +32,8 @@ type BoardCase = {
   random: boolean;
   i2c: boolean;
   wifi: boolean;
+  advancedWireless: boolean;
+  storage: boolean;
 };
 
 const boards: BoardCase[] = [
@@ -46,6 +48,8 @@ const boards: BoardCase[] = [
     random: true,
     i2c: true,
     wifi: true,
+    advancedWireless: true,
+    storage: true,
   },
   {
     boardId: "esp32-wroom",
@@ -58,6 +62,8 @@ const boards: BoardCase[] = [
     random: true,
     i2c: true,
     wifi: true,
+    advancedWireless: false,
+    storage: false,
   },
   {
     boardId: "esp8266-esp12e",
@@ -70,11 +76,15 @@ const boards: BoardCase[] = [
     random: false,
     i2c: true,
     wifi: true,
+    advancedWireless: false,
+    storage: false,
   },
 ];
 
-const expectedCategoryNames = [
-  "输入/输出", "控制", "逻辑", "数学", "文本", "列表", "赋值", "变量", "函数", "调用", "串口", "通信", "网络", "传感器", "执行器", "灯光", "显示",
+const expectedCategoryNames = (storage: boolean) => [
+  "输入/输出", "控制", "逻辑", "数学", "文本", "列表", "赋值", "变量", "函数", "调用", "串口", "通信", "网络",
+  ...(storage ? ["存储"] : []),
+  "传感器", "执行器", "灯光", "显示",
 ];
 
 /** 第 2 节 v1 清单里明确允许出现的 python_* 积木。 */
@@ -128,7 +138,7 @@ for (const board of boards) {
     it("wires the declaration into buildProfileToolbox with the section-2 category order", () => {
       const definition = resolveBoard(board.boardId);
 
-      expect(definition.contents.map((category) => category.name)).toEqual(expectedCategoryNames);
+      expect(definition.contents.map((category) => category.name)).toEqual(expectedCategoryNames(board.storage));
       // App 通过 buildProfileToolbox 拿到的就是这份解析结果。
       expect(buildProfileToolbox(baseToolbox, getWorkbenchProfile(board.boardId))).toEqual(definition);
     });
@@ -164,6 +174,13 @@ for (const board of boards) {
       expect(types.has("math_random_float")).toBe(board.random);
       expect(types.has("hardware_i2c_init")).toBe(board.i2c);
       expect(types.has("hardware_wifi_connect")).toBe(board.wifi);
+      expect(types.has("hardware_http_get")).toBe(board.advancedWireless);
+      expect(types.has("hardware_ntp_sync")).toBe(board.advancedWireless);
+      expect(types.has("hardware_ble_start")).toBe(board.advancedWireless);
+      expect(types.has("hardware_espnow_init")).toBe(board.advancedWireless);
+      expect(types.has("hardware_mqtt_connect")).toBe(board.advancedWireless);
+      expect(types.has("hardware_file_write")).toBe(board.storage);
+      expect(types.has("hardware_nvs_set")).toBe(board.storage);
     });
 
     it("instantiates every toolbox entry in a headless workspace", () => {

@@ -62,6 +62,24 @@ describe("bulk workspace loading", () => {
     }
   });
 
+  it("keeps the caller's disabled event state balanced around loadWorkspaceFast", () => {
+    const workspace = new Blockly.Workspace();
+    try {
+      Blockly.Events.disable();
+      try {
+        loadWorkspaceFast(workspace, starterState);
+      } finally {
+        Blockly.Events.enable();
+      }
+      // 调用方禁用事件时，批量载入不能留下未配对的 disable：
+      // 否则 AI 提交后整个工作区会被永久静音，手动改积木不再触发代码更新。
+      expect(Blockly.Events.isEnabled()).toBe(true);
+    } finally {
+      if (!Blockly.Events.isEnabled()) Blockly.Events.enable();
+      workspace.dispose();
+    }
+  });
+
   it("loads a long stack without creating every child block", () => {
     const workspace = new Blockly.Workspace();
     try {

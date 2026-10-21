@@ -68,6 +68,8 @@ describe("hardware board profiles", () => {
       builtinRgb: { pin: "48" },
       uartIds: [1, 2],
       mcuTemperature: true,
+      advancedWireless: true,
+      deviceStorage: true,
     });
     expect(builtinLedPin(esp32s3)).toBeUndefined();
     expect(esp32.builtinRgb).toBeUndefined();
@@ -81,6 +83,15 @@ describe("hardware board profiles", () => {
     // 芯片温度：S3 有 esp32.mcu_temperature()；经典 ESP32 只有未校准的 raw_temperature()，ESP8266 没有 esp32 模块。
     expect(esp32.mcuTemperature).toBeUndefined();
     expect(esp8266.mcuTemperature).toBeUndefined();
+  });
+
+  it("reserves HTTP/BLE/ESP-NOW/MQTT and device storage for ESP32-S3", () => {
+    expect(esp32s3.advancedWireless).toBe(true);
+    expect(esp32s3.deviceStorage).toBe(true);
+    expect(esp32.advancedWireless).toBeUndefined();
+    expect(esp32.deviceStorage).toBeUndefined();
+    expect(esp8266.advancedWireless).toBeUndefined();
+    expect(esp8266.deviceStorage).toBeUndefined();
   });
 
   it("rejects pull capabilities on non-digital pins", () => {

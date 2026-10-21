@@ -1,12 +1,23 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getActiveHardwareBoard, hardwareBlockTypes, setActiveHardwareBoard } from "../blocks/shared";
+import {
+  advancedWirelessBlockTypes,
+  deviceStorageBlockTypes,
+  getActiveHardwareBoard,
+  hardwareBlockTypes,
+  setActiveHardwareBoard,
+} from "../blocks/shared";
 import { hardwareBlockEntries } from "./hardwareEntries";
 
 const boards = ["esp32-wroom", "esp8266-esp12e", "esp32-s3"] as const;
-/** 该板卡没有的积木：板载 LED、板载 RGB 灯、电容触摸、串口与芯片温度随板卡变化。 */
+/** 该板卡没有的积木：板载 LED、板载 RGB 灯、电容触摸、串口、芯片温度与 S3 专属联网/存储随板卡变化。 */
 const missingByBoard: Record<string, readonly string[]> = {
   "esp32-s3": ["hardware_builtin_led"],
-  "esp32-wroom": ["hardware_onboard_rgb", "hardware_mcu_temperature"],
+  "esp32-wroom": [
+    "hardware_onboard_rgb",
+    "hardware_mcu_temperature",
+    ...advancedWirelessBlockTypes,
+    ...deviceStorageBlockTypes,
+  ],
   "esp8266-esp12e": [
     "hardware_touch_read",
     "hardware_onboard_rgb",
@@ -14,6 +25,8 @@ const missingByBoard: Record<string, readonly string[]> = {
     "hardware_uart_init",
     "hardware_uart_write",
     "hardware_uart_read",
+    ...advancedWirelessBlockTypes,
+    ...deviceStorageBlockTypes,
   ],
 };
 
@@ -55,6 +68,26 @@ describe("hardwareBlockEntries", () => {
     expect(hardwareBlockEntries("esp32-wroom").has("hardware_mcu_temperature")).toBe(false);
     expect(hardwareBlockEntries("esp8266-esp12e").has("hardware_uart_init")).toBe(false);
     expect(hardwareBlockEntries("esp8266-esp12e").has("hardware_mcu_temperature")).toBe(false);
+  });
+
+  it("keeps HTTP/BLE/ESP-NOW/MQTT and device storage only on ESP32-S3", () => {
+    const s3 = hardwareBlockEntries("esp32-s3");
+    expect(s3.has("hardware_http_get")).toBe(true);
+    expect(s3.has("hardware_ble_start")).toBe(true);
+    expect(s3.has("hardware_espnow_init")).toBe(true);
+    expect(s3.has("hardware_mqtt_connect")).toBe(true);
+    expect(s3.has("hardware_file_write")).toBe(true);
+    expect(s3.has("hardware_nvs_set")).toBe(true);
+
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
+      const entries = hardwareBlockEntries(boardId);
+      expect(entries.has("hardware_http_get")).toBe(false);
+      expect(entries.has("hardware_ble_start")).toBe(false);
+      expect(entries.has("hardware_espnow_init")).toBe(false);
+      expect(entries.has("hardware_mqtt_connect")).toBe(false);
+      expect(entries.has("hardware_file_write")).toBe(false);
+      expect(entries.has("hardware_nvs_set")).toBe(false);
+    }
   });
 
   it("covers every hardware block type the board supports", () => {

@@ -1,0 +1,170 @@
+import * as Blockly from "blockly/core";
+import { getBoardProfile } from "../boardProfiles";
+import type { HardwareBoardId } from "../firmwareCatalog";
+import {
+  defineHardwareBlocks,
+  ensureImport,
+  getActiveHardwareBoard,
+  hardwareColours,
+  hardwareGenerator,
+  hardwareSectionLabel,
+  pythonOrder,
+  unavailable,
+} from "./shared";
+
+const definitions = [
+  {
+    type: "hardware_file_write",
+    message0: "写入设备文件 %1 内容 %2",
+    args0: [
+      { type: "input_value", name: "PATH", check: "String" },
+      { type: "input_value", name: "TEXT", check: "String" },
+    ],
+    inputsInline: true,
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.storage,
+    tooltip:
+      "写入设备闪存里的文本文件。路径以 / 开头，例如 /data.txt，和「设备」面板看到的是同一份文件；不要写 /main.py，否则会影响程序启动。",
+  },
+  {
+    type: "hardware_file_read",
+    message0: "读取设备文件 %1",
+    args0: [{ type: "input_value", name: "PATH", check: "String" }],
+    inputsInline: true,
+    output: "String",
+    colour: hardwareColours.storage,
+    tooltip: "读取设备上的文本文件；文件不存在或无法读取时返回空字符串。",
+  },
+  {
+    type: "hardware_nvs_set",
+    message0: "写入 NVS 键 %1 值 %2",
+    args0: [
+      { type: "input_value", name: "KEY", check: "String" },
+      { type: "input_value", name: "VALUE", check: "String" },
+    ],
+    inputsInline: true,
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.storage,
+    tooltip:
+      "把文本保存到 NVS，掉电后仍然保留。键最多 15 个 ASCII 字母、数字或下划线，值最多约 1 KB；命名空间固定为 visual_python。",
+  },
+  {
+    type: "hardware_nvs_get",
+    message0: "读取 NVS 键 %1",
+    args0: [{ type: "input_value", name: "KEY", check: "String" }],
+    inputsInline: true,
+    output: "String",
+    colour: hardwareColours.storage,
+    tooltip: "读取 NVS 里的文本；键不存在或内容超过约 1 KB 时返回空字符串。",
+  },
+];
+
+const storageGuard = (): string | undefined => {
+  const profile = getActiveHardwareBoard();
+  if (!profile) return "请先选择硬件板卡";
+  if (!profile.deviceStorage) return `${profile.displayName} 不支持设备存储积木（仅 ESP32-S3）`;
+  return undefined;
+};
+
+const internals = () => hardwareGenerator as unknown as {
+  definitions_: Record<string, string>;
+  FUNCTION_NAME_PLACEHOLDER_: string;
+  provideFunction_(name: string, code: string[]): string;
+};
+
+const ensureFileWriteHelper = (): string =>
+  internals().provideFunction_("hardware_file_write", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(path, text):`,
+    "  with open(str(path), \"w\") as file:",
+    "    file.write(str(text))",
+  ]);
+
+const ensureFileReadHelper = (): string =>
+  internals().provideFunction_("hardware_file_read", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(path):`,
+    "  try:",
+    "    with open(str(path), \"r\") as file:",
+    "      return file.read()",
+    "  except OSError:",
+    '    return ""',
+  ]);
+
+const ensureNvs = (): void => {
+  ensureImport("esp32");
+  internals().definitions_.hardware_nvs = '_nvs = esp32.NVS("visual_python")';
+};
+
+const ensureNvsSetHelper = (): string =>
+  internals().provideFunction_("hardware_nvs_set", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(key, value):`,
+    "  _nvs.set_blob(str(key), str(value).encode())",
+    "  _nvs.commit()",
+  ]);
+
+const ensureNvsGetHelper = (): string =>
+  internals().provideFunction_("hardware_nvs_get", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(key):`,
+    "  data = bytearray(1024)",
+    "  try:",
+    "    length = _nvs.get_blob(str(key), data)",
+    "  except OSError:",
+    '    return ""',
+    "  try:",
+    "    return bytes(data[:length]).decode()",
+    "  except UnicodeError:",
+    "    return bytes(data[:length]).hex()",
+  ]);
+
+export function register(): void {
+  defineHardwareBlocks(definitions);
+
+  hardwareGenerator.forBlock.hardware_file_write = (block, generator) => {
+    const problem = storageGuard();
+    if (problem) return unavailable(problem);
+    const path = generator.valueToCode(block, "PATH", pythonOrder.NONE) || '""';
+    const text = generator.valueToCode(block, "TEXT", pythonOrder.NONE) || '""';
+    return `${ensureFileWriteHelper()}(${path}, ${text})\n`;
+  };
+
+  hardwareGenerator.forBlock.hardware_file_read = (block, generator) => {
+    if (storageGuard()) return ['""', pythonOrder.ATOMIC];
+    const path = generator.valueToCode(block, "PATH", pythonOrder.NONE) || '""';
+    return [`${ensureFileReadHelper()}(${path})`, pythonOrder.FUNCTION_CALL];
+  };
+
+  hardwareGenerator.forBlock.hardware_nvs_set = (block, generator) => {
+    const problem = storageGuard();
+    if (problem) return unavailable(problem);
+    ensureNvs();
+    const key = generator.valueToCode(block, "KEY", pythonOrder.NONE) || '""';
+    const value = generator.valueToCode(block, "VALUE", pythonOrder.NONE) || '""';
+    return `${ensureNvsSetHelper()}(${key}, ${value})\n`;
+  };
+
+  hardwareGenerator.forBlock.hardware_nvs_get = (block, generator) => {
+    if (storageGuard()) return ['""', pythonOrder.ATOMIC];
+    ensureNvs();
+    const key = generator.valueToCode(block, "KEY", pythonOrder.NONE) || '""';
+    return [`${ensureNvsGetHelper()}(${key})`, pythonOrder.FUNCTION_CALL];
+  };
+}
+
+export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbox.FlyoutItemInfo[] {
+  const profile = getBoardProfile(boardId);
+  if (!profile?.deviceStorage) return [];
+  const text = (value: string) => ({ shadow: { type: "text", fields: { TEXT: value } } });
+  return [
+    { kind: "sep", gap: 20 },
+    hardwareSectionLabel("设备存储"),
+    {
+      kind: "block",
+      type: "hardware_file_write",
+      inputs: { PATH: text("/data.txt"), TEXT: text("Hello") },
+    },
+    { kind: "block", type: "hardware_file_read", inputs: { PATH: text("/data.txt") } },
+    { kind: "block", type: "hardware_nvs_set", inputs: { KEY: text("counter"), VALUE: text("1") } },
+    { kind: "block", type: "hardware_nvs_get", inputs: { KEY: text("counter") } },
+  ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
+}

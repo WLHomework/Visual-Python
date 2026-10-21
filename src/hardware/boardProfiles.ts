@@ -51,6 +51,10 @@ export type BoardProfile = {
   uartIds?: readonly number[];
   /** 是否支持 esp32.mcu_temperature()；经典 ESP32 只有 raw_temperature()，ESP8266 没有 esp32 模块。 */
   mcuTemperature?: boolean;
+  /** 固件是否内置 HTTP、NTP、BLE、ESP-NOW 与 MQTT；目前只有官方 ESP32-S3 固件提供这些积木。 */
+  advancedWireless?: boolean;
+  /** 是否提供设备文本文件与 NVS 键值积木。 */
+  deviceStorage?: boolean;
   pins: HardwarePin[];
 };
 
@@ -133,6 +137,11 @@ const esp32S3: BoardProfile = {
   // ESP32-S3 有三个 UART，UART0 接板载 USB 串口（REPL）；tx/rx 由积木下拉选择（任意 GPIO）。
   uartIds: [1, 2],
   mcuTemperature: true,
+  // 官方 v1.29.0 的 S3 固件带 bluetooth / espnow，并冻结了 requests / ntptime / umqtt；
+  // 这些积木只放在 S3 工具箱，WROOM 与 ESP8266 不追加。
+  advancedWireless: true,
+  // 设备文件系统与 esp32.NVS 都由 S3 固件提供，并与「设备」面板共用文件系统。
+  deviceStorage: true,
   pins: [
     { id: "0", label: "GPIO0（启动配置）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
     { id: "1", label: "GPIO1（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
