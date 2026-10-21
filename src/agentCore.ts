@@ -31,7 +31,7 @@ function workbenchPromptRules(snapshot: Record<string, unknown>): string {
   const profile = workbench as Record<string, unknown>;
   if (profile.kind !== "micropython") return "";
   const label = typeof profile.label === "string" && profile.label.trim() ? profile.label.trim() : "当前硬件板卡";
-  return `\n\n当前是 MicroPython 硬件工作台（${label}）：\n- 程序会上传到开发板执行，不是在电脑本地 Python 解释器中运行。\n- 只使用当前工具箱中的硬件积木和固件内置的 MicroPython 模块；不要假设可以 pip 安装、访问电脑文件系统或使用 input()。\n- 开发板内存有限，避免大数组、深层递归和不必要的依赖。\n- 运行表示上传并执行，停止表示中断当前执行，必须依据真实工具结果判断是否成功。\n- 引脚和板卡能力以当前 Profile 与积木契约为准，不要凭空编造引脚号或外设 API。`;
+  return `\n\n当前是 MicroPython 硬件工作台（${label}）：\n- 程序会上传到开发板执行，不是在电脑本地 Python 解释器中运行。\n- 只使用当前工具箱里的积木（先用 get_task_block_directory / search_blocks 查找，不在工具箱里的积木不要使用）；可以使用固件内置的 MicroPython 模块。不要假设可以 pip 安装、访问电脑文件系统或使用 input()。\n- 开发板内存有限，避免大数组、深层递归和不必要的依赖。\n- 运行表示上传并执行，停止表示中断当前执行，必须依据真实工具结果判断是否成功。\n- 引脚和板卡能力以当前 Profile 与积木契约为准，不要凭空编造引脚号或外设 API。`;
 }
 const toolByName = (tools: AgentTool[], name: string) => tools.find((tool) => tool.definition.function.name === name);
 const systemRules = `你是 Visual Python 的通用软件智能体。你通过工具直接操控当前工程，而不是只在聊天中给出代码。

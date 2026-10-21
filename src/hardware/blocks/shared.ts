@@ -44,6 +44,7 @@ export const pinUseByBlockType: Record<string, HardwarePinUse> = {
   hardware_servo_write: "pwm",
   hardware_tone: "pwm",
   hardware_analog_read: "analog",
+  hardware_touch_read: "touch",
   hardware_neopixel_init: "digital-output",
   hardware_dht_temperature: "digital-input",
   hardware_dht_humidity: "digital-input",
@@ -54,6 +55,10 @@ export const pinUseByBlockField: Record<string, Record<string, HardwarePinUse>> 
     TRIGGER: "digital-output",
     ECHO: "digital-input",
   },
+  hardware_uart_init: {
+    TX: "digital-output",
+    RX: "digital-input",
+  },
 };
 
 export const hardwareBlockLabels: Record<string, string> = {
@@ -63,7 +68,9 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_pin_read: "读取数字引脚",
   hardware_pwm_write: "设置 PWM 输出",
   hardware_analog_read: "读取模拟输入",
+  hardware_touch_read: "触摸读数",
   hardware_builtin_led: "板载 LED",
+  hardware_onboard_rgb: "板载 RGB 灯",
   hardware_neopixel_init: "初始化 NeoPixel",
   hardware_neopixel_set_pixel: "设置 NeoPixel 颜色",
   hardware_neopixel_clear: "清空 NeoPixel",
@@ -76,8 +83,17 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_oled_text: "OLED 显示文字",
   hardware_oled_pixel: "OLED 像素",
   hardware_oled_write: "刷新 OLED 显示",
+  hardware_uart_init: "初始化串口",
+  hardware_uart_write: "串口发送",
+  hardware_uart_read: "串口读取",
+  hardware_mcu_temperature: "芯片温度",
   hardware_sleep_ms: "等待毫秒",
   hardware_forever: "永远重复",
+  hardware_ticks_ms: "毫秒计时器",
+  hardware_ticks_diff: "计时差值",
+  hardware_reset: "重启开发板",
+  hardware_deepsleep: "深度睡眠",
+  hardware_map_range: "数值映射",
 };
 
 export const hardwareBlockTypes: readonly string[] = Object.keys(hardwareBlockLabels);
@@ -194,6 +210,24 @@ export const ensureDhtHelper = (): string => {
     "    return sensor.temperature(), sensor.humidity()",
     "  except OSError:",
     "    return None, None",
+  ]);
+};
+
+export const ensureUartReadLineHelper = (): string => {
+  const internals = hardwareInternals();
+  return internals.provideFunction_("hardware_uart_readline", [
+    `def ${internals.FUNCTION_NAME_PLACEHOLDER_}():`,
+    "  data = _uart.readline()",
+    '  return data.decode() if data else ""',
+  ]);
+};
+
+export const ensureUartReadAllHelper = (): string => {
+  const internals = hardwareInternals();
+  return internals.provideFunction_("hardware_uart_readall", [
+    `def ${internals.FUNCTION_NAME_PLACEHOLDER_}():`,
+    "  data = _uart.read()",
+    '  return data.decode() if data else ""',
   ]);
 };
 

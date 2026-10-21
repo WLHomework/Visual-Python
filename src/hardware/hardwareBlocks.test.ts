@@ -71,6 +71,68 @@ describe("hardware code generation", () => {
     expect(code).toContain("import time");
   });
 
+  it("maps a value between ranges on every board", () => {
+    const blocks = [{
+      type: "hardware_map_range",
+      inputs: {
+        VALUE: number(512),
+        FROM_LOW: number(0),
+        FROM_HIGH: number(1023),
+        TO_LOW: number(0),
+        TO_HIGH: number(100),
+      },
+    }];
+
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e", "esp32-s3"] as const) {
+      expect(generate(blocks, boardId)).toBe("(512 - 0) * (100 - 0) / (1023 - 0) + 0\n");
+    }
+  });
+
+  it("measures elapsed time with the wrap-safe ticks helpers on every board", () => {
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e", "esp32-s3"] as const) {
+      const code = generate([
+        { type: "hardware_ticks_ms" },
+        { type: "hardware_ticks_diff", inputs: { START: number(1000), END: number(1500) } },
+      ], boardId);
+
+      expect(code).toContain("time.ticks_ms()");
+      expect(code).toContain("time.ticks_diff(1500, 1000)");
+      expect(code.match(/import time/g)).toHaveLength(1);
+    }
+  });
+
+  it("reads capacitive touch pads only on boards that have them", () => {
+    for (const boardId of ["esp32-wroom", "esp32-s3"] as const) {
+      const code = generate([{ type: "hardware_touch_read", fields: { PIN: "4" } }], boardId);
+
+      expect(code).toContain("import machine");
+      expect(code).toContain("machine.TouchPad(machine.Pin(4)).read()");
+    }
+
+    const esp8266 = generate([{ type: "hardware_touch_read", fields: { PIN: "4" } }], "esp8266-esp12e");
+    expect(esp8266.trim()).toBe("None");
+    expect(esp8266).not.toContain("TouchPad");
+  });
+
+  it("resets and deep-sleeps on every board", () => {
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e", "esp32-s3"] as const) {
+      const code = generate([chain(
+        { type: "hardware_reset" },
+        { type: "hardware_deepsleep", inputs: { MS: number(10000) } },
+      )], boardId);
+
+      expect(code).toContain("machine.reset()");
+      expect(code).toContain("machine.deepsleep(int(max(0, 10000)))");
+      expect(code.match(/import machine/g)).toHaveLength(1);
+    }
+  });
+
+  it("never passes a negative deep-sleep duration", () => {
+    const code = generate([{ type: "hardware_deepsleep", inputs: { MS: number(-5) } }], "esp32-s3");
+
+    expect(code).toContain("machine.deepsleep(int(max(0, -5)))");
+  });
+
   it("uses the dedicated ADC channel and active-low LED on ESP8266", () => {
     const code = generate([chain(
       { type: "hardware_builtin_led", fields: { STATE: "on" } },
@@ -205,6 +267,80 @@ describe("hardware code generation", () => {
     expect(esp8266).toContain("neopixel.NeoPixel(machine.Pin(4), int(max(1, 4)))");
   });
 
+  it("lights the onboard RGB LED only on boards that have one", () => {
+    const red = generate([{ type: "hardware_onboard_rgb", fields: { COLOR: "red" } }], "esp32-s3");
+    const off = generate([{ type: "hardware_onboard_rgb", fields: { COLOR: "off" } }], "esp32-s3");
+
+    expect(red).toContain("import machine");
+    expect(red).toContain("import neopixel");
+    expect(red).toContain("_onboard_rgb = neopixel.NeoPixel(machine.Pin(48, machine.Pin.OUT), 1)");
+    expect(red).toContain("_onboard_rgb[0] = (255, 0, 0)");
+    expect(red).toContain("_onboard_rgb.write()");
+    expect(red.match(/import neopixel/g)).toHaveLength(1);
+    expect(off).toContain("_onboard_rgb[0] = (0, 0, 0)");
+
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
+      const code = generate([{ type: "hardware_onboard_rgb", fields: { COLOR: "red" } }], boardId);
+      expect(code).toContain("没有板载 RGB 灯");
+      expect(code).not.toContain("neopixel.NeoPixel");
+    }
+  });
+
+  it("generates UART setup, text writes, and reads as text", () => {
+    const setup = generate([chain(
+      { type: "hardware_uart_init", fields: { UART: "2", TX: "16", RX: "17" }, inputs: { BAUD: number(115200) } },
+      { type: "hardware_uart_write", inputs: { TEXT: { block: { type: "text", fields: { TEXT: "Hello" } } } } },
+    )], "esp32-wroom");
+
+    expect(setup).toContain("import machine");
+    expect(setup).toContain("_uart = machine.UART(2, baudrate=int(115200), tx=machine.Pin(16), rx=machine.Pin(17))");
+    expect(setup).toContain("_uart.write(str('Hello'))");
+    expect(setup.match(/import machine/g)).toHaveLength(1);
+
+    const line = generate([{ type: "hardware_uart_read", fields: { MODE: "line" } }], "esp32-s3");
+    expect(line).toContain("def hardware_uart_readline():");
+    expect(line).toContain("data = _uart.readline()");
+    expect(line).toContain("hardware_uart_readline()");
+
+    const all = generate([{ type: "hardware_uart_read", fields: { MODE: "all" } }], "esp32-s3");
+    expect(all).toContain("def hardware_uart_readall():");
+    expect(all).toContain("data = _uart.read()");
+    expect(all).toContain("hardware_uart_readall()");
+  });
+
+  it("does not generate UART setup with the same send and receive pin", () => {
+    const same = generate([{ type: "hardware_uart_init", fields: { UART: "1", TX: "4", RX: "4" }, inputs: { BAUD: number(9600) } }], "esp32-s3");
+
+    expect(same).toContain("发送和接收引脚不能相同");
+    expect(same).not.toContain("machine.UART");
+  });
+
+  it("explains UART and MCU temperature blocks on boards without the hardware", () => {
+    const init = generate([{ type: "hardware_uart_init", fields: { UART: "1", TX: "4", RX: "5" }, inputs: { BAUD: number(9600) } }], "esp8266-esp12e");
+    expect(init).toContain("没有可用的串口");
+    expect(init).not.toContain("machine.UART");
+
+    const write = generate([{ type: "hardware_uart_write", inputs: { TEXT: { block: { type: "text", fields: { TEXT: "Hi" } } } } }], "esp8266-esp12e");
+    expect(write).toContain("没有可用的串口");
+    expect(write).not.toContain("_uart.write");
+
+    const read = generate([{ type: "hardware_uart_read", fields: { MODE: "line" } }], "esp8266-esp12e");
+    expect(read.trim()).toBe("None");
+    expect(read).not.toContain("hardware_uart_readline");
+
+    const wroom = generate([{ type: "hardware_mcu_temperature" }], "esp32-wroom");
+    expect(wroom.trim()).toBe("None");
+    expect(wroom).not.toContain("mcu_temperature");
+
+    const esp8266Temp = generate([{ type: "hardware_mcu_temperature" }], "esp8266-esp12e");
+    expect(esp8266Temp.trim()).toBe("None");
+    expect(esp8266Temp).not.toContain("esp32");
+
+    const s3 = generate([{ type: "hardware_mcu_temperature" }], "esp32-s3");
+    expect(s3).toContain("import esp32");
+    expect(s3).toContain("esp32.mcu_temperature()");
+  });
+
   it("generates one DHT helper for temperature and humidity with explicit number outputs", () => {
     const temperature = generate([{ type: "hardware_dht_temperature", fields: { PIN: "4", SENSOR: "DHT11" } }], "esp32-wroom");
     const humidity = generate([{ type: "hardware_dht_humidity", fields: { PIN: "5", SENSOR: "DHT22" } }], "esp32-wroom");
@@ -311,6 +447,104 @@ describe("hardware block validation", () => {
     expect(collectHardwareBlockIssues(valid, "esp32-wroom")).toEqual([]);
     valid.dispose();
   });
+
+  it("reports touch blocks on pins without capacitive touch", () => {
+    const s3 = loadWorkspace([{ type: "hardware_touch_read", fields: { PIN: "1" } }], "esp32-s3");
+    const s3Block = s3.getBlocksByType("hardware_touch_read")[0];
+    (s3Block.getField("PIN") as unknown as { value_: string }).value_ = "15";
+    expect(collectHardwareBlockIssues(s3, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「触摸读数」积木：引脚 GPIO15 不支持电容触摸",
+    ]);
+    s3.dispose();
+
+    const esp8266 = loadWorkspace([{ type: "hardware_touch_read", fields: { PIN: "" } }], "esp8266-esp12e");
+    const esp8266Block = esp8266.getBlocksByType("hardware_touch_read")[0];
+    (esp8266Block.getField("PIN") as unknown as { value_: string }).value_ = "4";
+    expect(collectHardwareBlockIssues(esp8266, "esp8266-esp12e").map((issue) => issue.message)).toEqual([
+      "「触摸读数」积木：引脚 GPIO4（D2） 不支持电容触摸",
+    ]);
+    esp8266.dispose();
+  });
+
+  it("reports the onboard RGB block on boards without one", () => {
+    const wroom = loadWorkspace([{ type: "hardware_onboard_rgb", fields: { COLOR: "red" } }], "esp32-wroom");
+    expect(collectHardwareBlockIssues(wroom, "esp32-wroom").map((issue) => issue.message)).toEqual([
+      "「板载 RGB 灯」积木：ESP32 WROOM 没有板载 RGB 灯",
+    ]);
+    wroom.dispose();
+
+    const s3 = loadWorkspace([{ type: "hardware_onboard_rgb", fields: { COLOR: "red" } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(s3, "esp32-s3")).toEqual([]);
+    s3.dispose();
+  });
+
+  it("reports an empty source range because it would divide by zero", () => {
+    const empty = loadWorkspace([{
+      type: "hardware_map_range",
+      inputs: { VALUE: number(5), FROM_LOW: number(3), FROM_HIGH: number(3), TO_LOW: number(0), TO_HIGH: number(10) },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(empty, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「数值映射」积木：原范围的上下限不能相等（会除以零）",
+    ]);
+    empty.dispose();
+
+    const computed = loadWorkspace([{
+      type: "hardware_map_range",
+      inputs: {
+        VALUE: number(5),
+        FROM_LOW: { block: { type: "math_arithmetic", fields: { OP: "ADD" }, inputs: { A: number(1), B: number(2) } } },
+        FROM_HIGH: { block: { type: "math_arithmetic", fields: { OP: "ADD" }, inputs: { A: number(1), B: number(2) } } },
+        TO_LOW: number(0),
+        TO_HIGH: number(10),
+      },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(computed, "esp32-s3")).toEqual([]);
+    computed.dispose();
+  });
+
+  it("reports UART and MCU temperature blocks that the selected board cannot run", () => {
+    const esp8266 = loadWorkspace([chain(
+      { type: "hardware_uart_init", fields: { UART: "1", TX: "4", RX: "5" }, inputs: { BAUD: number(9600) } },
+      { type: "hardware_uart_write", inputs: { TEXT: { block: { type: "text", fields: { TEXT: "Hi" } } } } },
+    )], "esp8266-esp12e");
+    expect(collectHardwareBlockIssues(esp8266, "esp8266-esp12e").map((issue) => issue.message)).toEqual([
+      "「初始化串口」积木：ESP8266 ESP-12E（NodeMCU） 没有可用的串口",
+      "「串口发送」积木：ESP8266 ESP-12E（NodeMCU） 没有可用的串口",
+    ]);
+    esp8266.dispose();
+
+    const samePin = loadWorkspace([{ type: "hardware_uart_init", fields: { UART: "1", TX: "4", RX: "4" }, inputs: { BAUD: number(9600) } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(samePin, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「初始化串口」积木：发送和接收不能使用同一个引脚",
+    ]);
+    samePin.dispose();
+
+    const missingPin = loadWorkspace([{ type: "hardware_uart_init", fields: { UART: "1", TX: "4", RX: "5" }, inputs: { BAUD: number(9600) } }], "esp32-s3");
+    const missingBlock = missingPin.getBlocksByType("hardware_uart_init")[0];
+    (missingBlock.getField("TX") as unknown as { value_: string }).value_ = "";
+    expect(collectHardwareBlockIssues(missingPin, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「初始化串口」积木：TX 请选择引脚",
+    ]);
+    missingPin.dispose();
+
+    const reservedPin = loadWorkspace([{ type: "hardware_uart_init", fields: { UART: "1", TX: "4", RX: "5" }, inputs: { BAUD: number(9600) } }], "esp32-s3");
+    const reservedBlock = reservedPin.getBlocksByType("hardware_uart_init")[0];
+    (reservedBlock.getField("TX") as unknown as { value_: string }).value_ = "3";
+    expect(collectHardwareBlockIssues(reservedPin, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「初始化串口」积木：TX 引脚 GPIO3（启动配置） 会影响设备启动，暂不支持使用",
+    ]);
+    reservedPin.dispose();
+
+    const wroom = loadWorkspace([{ type: "hardware_mcu_temperature" }], "esp32-wroom");
+    expect(collectHardwareBlockIssues(wroom, "esp32-wroom").map((issue) => issue.message)).toEqual([
+      "「芯片温度」积木：ESP32 WROOM 不支持读取芯片温度",
+    ]);
+    wroom.dispose();
+
+    const s3 = loadWorkspace([{ type: "hardware_mcu_temperature" }], "esp32-s3");
+    expect(collectHardwareBlockIssues(s3, "esp32-s3")).toEqual([]);
+    s3.dispose();
+  });
 });
 
 describe("hardware pin compatibility count", () => {
@@ -335,6 +569,13 @@ describe("hardware pin compatibility count", () => {
     const adc0 = loadWorkspace([{ type: "hardware_analog_read", fields: { PIN: "A0" } }], "esp8266-esp12e");
     expect(countIncompatiblePins(adc0, "esp32-wroom")).toBe(1);
     adc0.dispose();
+  });
+
+  it("counts touch pins that the target board does not offer", () => {
+    const s3 = loadWorkspace([{ type: "hardware_touch_read", fields: { PIN: "1" } }], "esp32-s3");
+    expect(countIncompatiblePins(s3, "esp32-s3")).toBe(0);
+    expect(countIncompatiblePins(s3, "esp8266-esp12e")).toBe(1);
+    s3.dispose();
   });
 });
 
@@ -393,6 +634,63 @@ describe("hardware toolbox category", () => {
     expect(esp32s3.name).toBe("ESP32-S3 硬件");
     expect(blockTypes(esp8266.contents)).toContain("hardware_builtin_led");
     expect(blockTypes(esp32s3.contents)).not.toContain("hardware_builtin_led");
+  });
+
+  it("offers the range mapping block on every board", () => {
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e", "esp32-s3"] as const) {
+      const entry = hardwareToolboxContents(boardId).find((item) => (item as { type?: string }).type === "hardware_map_range") as
+        | { inputs?: Record<string, { shadow?: { fields?: Record<string, number> } }> }
+        | undefined;
+      expect(entry, `${boardId} 缺少数值映射积木`).toBeDefined();
+      expect(entry?.inputs?.FROM_HIGH?.shadow?.fields?.NUM).toBe(1023);
+      expect(entry?.inputs?.TO_HIGH?.shadow?.fields?.NUM).toBe(100);
+    }
+  });
+
+  it("offers the wrap-safe timing blocks on every board", () => {
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e", "esp32-s3"] as const) {
+      const types = hardwareToolboxContents(boardId).map((item) => (item as { type?: string }).type);
+
+      expect(types).toEqual(expect.arrayContaining(["hardware_ticks_ms", "hardware_ticks_diff"]));
+    }
+  });
+
+  it("offers capacitive touch only on boards with touch pins", () => {
+    for (const boardId of ["esp32-wroom", "esp32-s3"] as const) {
+      const entry = hardwareToolboxContents(boardId).find((item) => (item as { type?: string }).type === "hardware_touch_read") as
+        | { fields?: Record<string, string> }
+        | undefined;
+
+      expect(entry?.fields?.PIN, `${boardId} 缺少触摸积木`).toBe(boardId === "esp32-s3" ? "1" : "2");
+    }
+
+    const esp8266Types = hardwareToolboxContents("esp8266-esp12e").map((item) => (item as { type?: string }).type);
+    expect(esp8266Types).not.toContain("hardware_touch_read");
+  });
+
+  it("offers the onboard RGB block only on boards that have one", () => {
+    const s3 = hardwareToolboxContents("esp32-s3").find((item) => (item as { type?: string }).type === "hardware_onboard_rgb") as
+      | { fields?: Record<string, string> }
+      | undefined;
+    expect(s3?.fields?.COLOR).toBe("red");
+
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
+      const types = hardwareToolboxContents(boardId).map((item) => (item as { type?: string }).type);
+      expect(types).not.toContain("hardware_onboard_rgb");
+    }
+  });
+
+  it("offers reset and deep sleep on every board", () => {
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e", "esp32-s3"] as const) {
+      const contents = hardwareToolboxContents(boardId);
+      const types = contents.map((item) => (item as { type?: string }).type);
+      const deepsleep = contents.find((item) => (item as { type?: string }).type === "hardware_deepsleep") as
+        | { inputs?: Record<string, { shadow?: { fields?: Record<string, number> } }> }
+        | undefined;
+
+      expect(types).toEqual(expect.arrayContaining(["hardware_reset", "hardware_deepsleep"]));
+      expect(deepsleep?.inputs?.MS?.shadow?.fields?.NUM).toBe(10000);
+    }
   });
 
   it("shows a hint instead of pin values without a board", () => {
@@ -455,5 +753,37 @@ describe("hardware toolbox category", () => {
     const stale = loadWorkspace([{ type: "hardware_ultrasonic_distance", fields: { TRIGGER: "14", ECHO: "16" } }], "esp8266-esp12e");
     expect(collectHardwareBlockIssues(stale, "esp8266-esp12e")).toEqual([]);
     stale.dispose();
+  });
+
+  it("offers UART blocks only on boards with a free two-way serial port", () => {
+    const contentsOf = (boardId: HardwareBoardId) => hardwareToolboxContents(boardId);
+    const initOf = (contents: Blockly.utils.toolbox.FlyoutItemInfo[]) =>
+      contents.find((item) => (item as { type?: string }).type === "hardware_uart_init") as
+        | { fields?: Record<string, string>; inputs?: Record<string, { shadow?: { fields?: Record<string, number> } }> }
+        | undefined;
+
+    const s3Contents = contentsOf("esp32-s3");
+    const s3 = initOf(s3Contents);
+    expect(s3?.fields).toMatchObject({ UART: "1", TX: "1", RX: "2" });
+    expect(s3?.inputs?.BAUD?.shadow?.fields?.NUM).toBe(9600);
+    const s3Types = s3Contents.map((item) => (item as { type?: string }).type);
+    expect(s3Types).toEqual(expect.arrayContaining(["hardware_uart_write", "hardware_uart_read"]));
+
+    // WROOM 的默认收发引脚避开板载 LED（GPIO2）。
+    const wroom = initOf(contentsOf("esp32-wroom"));
+    expect(wroom?.fields).toMatchObject({ UART: "1", TX: "4", RX: "5" });
+
+    const esp8266Types = contentsOf("esp8266-esp12e").map((item) => (item as { type?: string }).type);
+    expect(esp8266Types).not.toContain("hardware_uart_init");
+  });
+
+  it("offers the MCU temperature block only on boards that support it", () => {
+    const s3Types = hardwareToolboxContents("esp32-s3").map((item) => (item as { type?: string }).type);
+    expect(s3Types).toContain("hardware_mcu_temperature");
+
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
+      const types = hardwareToolboxContents(boardId).map((item) => (item as { type?: string }).type);
+      expect(types, `${boardId} 不应出现芯片温度积木`).not.toContain("hardware_mcu_temperature");
+    }
   });
 });

@@ -368,7 +368,24 @@ impl<T: Transport> MicroPythonDevice<T> {
         self.exit_raw_repl()?;
         // 软复位会清空设备状态，残留的未读字节也不再有意义。
         self.drain_pending()?;
-        self.transport.write_all(&[b'\r', CTRL_D])?;
+        // 只发 CTRL-D：友好 REPL 里空行上的 CTRL-D 就是软复位。
+        // 前面不能补 `\r` —— 空行会让设备回显一个新的 “>>> ”（pyexec.c 回到 input_restart
+        // 重新打印提示符），而 `run_main` 正是用 “>>> ” 判断“程序结束”，
+        // 多出来的这个回车会把整段运行输出当成“程序已结束”直接丢掉。
+        self.transport.write_all(&[CTRL_D])?;
+        // 等设备确认软复位已经开始：`MPY: soft reboot` 在 boot.py/main.py 之前打印
+        // （ports/*/main.c），所以这里不会吞掉程序输出，后面的读取窗口也从程序输出开始。
+        let reboot = self.read_marker(
+            SOFT_REBOOT_MARKER,
+            Some(self.timeouts.banner),
+            Some(self.timeouts.overall),
+            None,
+            true,
+            |_| {},
+        )?;
+        if !reboot.matched {
+            return Err(HardwareError::timeout("等待设备软复位超时"));
+        }
         Ok(())
     }
 
@@ -1183,6 +1200,42 @@ mod tests {
     }
 
     #[test]
+    fn streams_the_program_output_even_though_the_device_echoes_prompts() {
+        // 真机在友好 REPL 收到空行会回显一个新的 “>>> ”，而 “>>> ” 正是“程序结束”的标志：
+        // 软复位前后一旦多发一个回车，整段运行输出都会被当成“程序已结束”丢掉（真机实测现象）。
+        let mut device = device();
+        device.enter_raw_repl(true).expect("enter raw repl");
+        device.transport_mut().program_never_finishes = true;
+        device.transport_mut().program_output = b"tick 1\r\ntick 2\r\n".to_vec();
+        let mut streamed = Vec::new();
+
+        let outcome = device
+            .run_main(&RunOptions::observing(Duration::from_millis(60)), |chunk| {
+                streamed.extend_from_slice(chunk)
+            })
+            .expect("run succeeds");
+
+        // 程序没结束（真机上是死循环），说明读到的是程序输出而不是回显出来的提示符。
+        assert_eq!(outcome.status, RunStatus::StillRunning);
+        assert!(String::from_utf8_lossy(&streamed).contains("tick 1"));
+    }
+
+    #[test]
+    fn reports_a_timeout_when_the_device_never_confirms_the_soft_reset() {
+        // 设备不软复位（固件异常、程序卡死）时，宁可报超时，也不要让读取窗口对着
+        // 一片不会输出 “soft reboot” 的串口空等。
+        let mut device = device();
+        device.transport_mut().missing_soft_reboot_banner = true;
+
+        let error = device
+            .run_main(&observing(), |_| {})
+            .expect_err("reset is not confirmed");
+
+        assert_eq!(error.kind(), HardwareErrorKind::Timeout);
+        assert!(error.detail().contains("软复位"));
+    }
+
+    #[test]
     fn reports_a_crash_as_an_exception() {
         let mut device = device();
         device.transport_mut().program_output =
@@ -1212,7 +1265,7 @@ mod tests {
     fn stops_a_running_program_without_soft_resetting_it() {
         let mut device = device();
         device.transport_mut().program_never_finishes = true;
-        device.transport_mut().program_output = b"blink\r\n".to_vec();
+        device.transport_mut().program_output = b"blink 1\r\nblink 2\r\n".to_vec();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_flag = Arc::clone(&cancel);
         let mut streamed = String::new();
@@ -1229,7 +1282,8 @@ mod tests {
             .expect("run succeeds");
 
         assert_eq!(outcome.status, RunStatus::Interrupted);
-        assert!(streamed.contains("soft reboot"));
+        // 停止之前程序输出已经流给主机；结尾几个字节被留着判断结束标记，所以只比对整行前缀。
+        assert!(streamed.contains("blink 1"));
         assert_eq!(device.transport_mut().interrupt_count, 1);
         assert!(!device.transport_mut().running);
         // 停止不做软复位：只有“连接时”的那一次软复位。

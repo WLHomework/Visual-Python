@@ -116,6 +116,9 @@ export function useHardwareDevice(options: HardwareDeviceOptions): HardwareDevic
       logId.current += Math.max(1, next.length - lines.length);
       return next;
     });
+    // 设备打印（stdout）已经由事件回调转发到「输出」页签；系统消息和错误也必须送过去，
+    // 否则用户只看得到设备的 print，看不到“开始运行/上传完成/运行结束/失败原因”，界面像是没反应。
+    if (stream !== "stdout") optionsRef.current.onOutput?.(stream, text);
   }, []);
 
   const resolveWaiter = useCallback((payload: HardwareRunFinishedPayload) => {

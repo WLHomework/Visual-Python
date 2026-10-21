@@ -11,6 +11,8 @@ export type HardwarePin = {
   pwm?: boolean;
   /** 支持模拟输入（ADC）。 */
   analog?: boolean;
+  /** 支持电容触摸（MicroPython 的 machine.TouchPad）。 */
+  touch?: boolean;
   /** 支持数字输入时的内置上拉。 */
   pullUp?: boolean;
   /** 支持数字输入时的内置下拉。 */
@@ -24,7 +26,7 @@ export type HardwarePin = {
 };
 
 /** 积木上会出现的引脚用法。 */
-export type HardwarePinUse = "digital-output" | "digital-input" | "pwm" | "analog";
+export type HardwarePinUse = "digital-output" | "digital-input" | "pwm" | "analog" | "touch";
 export type HardwarePinPull = "none" | "up" | "down";
 
 export type BoardProfile = {
@@ -43,6 +45,12 @@ export type BoardProfile = {
   pwmDutyMax: number;
   /** 板载 LED 低电平点亮时为 true（ESP8266 常见）。 */
   builtinLedActiveLow?: boolean;
+  /** 板载可寻址 RGB 灯（WS2812）的数据引脚；没有该字段的板卡不提供板载 RGB 积木。 */
+  builtinRgb?: { pin: string };
+  /** 用户可用的 UART 编号；UART0 被 REPL 占用不列入，没有该字段的板卡不提供串口积木。 */
+  uartIds?: readonly number[];
+  /** 是否支持 esp32.mcu_temperature()；经典 ESP32 只有 raw_temperature()，ESP8266 没有 esp32 模块。 */
+  mcuTemperature?: boolean;
   pins: HardwarePin[];
 };
 
@@ -54,17 +62,19 @@ const esp32Wroom: BoardProfile = {
   defaultI2c: { sda: "21", scl: "22" },
   pwmFrequencyHz: 1000,
   pwmDutyMax: 1023,
+  // 经典 ESP32 有三个 UART，UART0 接 REPL；tx/rx 由积木下拉选择（任意 GPIO）。
+  uartIds: [1, 2],
   pins: [
-    { id: "0", label: "GPIO0（启动按键）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "0", label: "GPIO0（启动按键）", digital: true, pwm: true, pullUp: true, pullDown: true, touch: true, reserved: true },
     { id: "1", label: "GPIO1（串口 TX）", digital: true, pullUp: true, pullDown: true, reserved: true },
-    { id: "2", label: "GPIO2（板载 LED）", digital: true, pwm: true, pullUp: true, pullDown: true, builtinLed: true },
+    { id: "2", label: "GPIO2（板载 LED）", digital: true, pwm: true, pullUp: true, pullDown: true, touch: true, builtinLed: true },
     { id: "3", label: "GPIO3（串口 RX）", digital: true, pullUp: true, pullDown: true, reserved: true },
-    { id: "4", label: "GPIO4", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "4", label: "GPIO4", digital: true, pwm: true, pullUp: true, pullDown: true, touch: true },
     { id: "5", label: "GPIO5", digital: true, pwm: true, pullUp: true, pullDown: true },
-    { id: "12", label: "GPIO12", digital: true, pwm: true, pullUp: true, pullDown: true },
-    { id: "13", label: "GPIO13", digital: true, pwm: true, pullUp: true, pullDown: true },
-    { id: "14", label: "GPIO14", digital: true, pwm: true, pullUp: true, pullDown: true },
-    { id: "15", label: "GPIO15", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "12", label: "GPIO12", digital: true, pwm: true, pullUp: true, pullDown: true, touch: true },
+    { id: "13", label: "GPIO13", digital: true, pwm: true, pullUp: true, pullDown: true, touch: true },
+    { id: "14", label: "GPIO14", digital: true, pwm: true, pullUp: true, pullDown: true, touch: true },
+    { id: "15", label: "GPIO15", digital: true, pwm: true, pullUp: true, pullDown: true, touch: true },
     { id: "16", label: "GPIO16", digital: true, pwm: true, pullUp: true, pullDown: true },
     { id: "17", label: "GPIO17", digital: true, pwm: true, pullUp: true, pullDown: true },
     { id: "18", label: "GPIO18", digital: true, pwm: true, pullUp: true, pullDown: true },
@@ -74,9 +84,9 @@ const esp32Wroom: BoardProfile = {
     { id: "23", label: "GPIO23", digital: true, pwm: true, pullUp: true, pullDown: true },
     { id: "25", label: "GPIO25（DAC）", digital: true, pwm: true, pullUp: true, pullDown: true },
     { id: "26", label: "GPIO26（DAC）", digital: true, pwm: true, pullUp: true, pullDown: true },
-    { id: "27", label: "GPIO27", digital: true, pwm: true, pullUp: true, pullDown: true },
-    { id: "32", label: "GPIO32（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "33", label: "GPIO33（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
+    { id: "27", label: "GPIO27", digital: true, pwm: true, pullUp: true, pullDown: true, touch: true },
+    { id: "32", label: "GPIO32（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true, touch: true },
+    { id: "33", label: "GPIO33（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true, touch: true },
     { id: "34", label: "GPIO34（仅输入/模拟）", analog: true, inputOnly: true },
     { id: "35", label: "GPIO35（仅输入/模拟）", analog: true, inputOnly: true },
     { id: "36", label: "GPIO36（部分板卡占用）", analog: true, inputOnly: true, reserved: true },
@@ -118,22 +128,27 @@ const esp32S3: BoardProfile = {
   defaultI2c: { sda: "8", scl: "9" },
   pwmFrequencyHz: 1000,
   pwmDutyMax: 1023,
+  // DevKitC-1 v1.0 的板载 RGB 灯接 GPIO48；v1.1 改成 GPIO38，这里以用户手上的 v1.0 为准。
+  builtinRgb: { pin: "48" },
+  // ESP32-S3 有三个 UART，UART0 接板载 USB 串口（REPL）；tx/rx 由积木下拉选择（任意 GPIO）。
+  uartIds: [1, 2],
+  mcuTemperature: true,
   pins: [
     { id: "0", label: "GPIO0（启动配置）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
-    { id: "1", label: "GPIO1（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "2", label: "GPIO2（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "3", label: "GPIO3（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "4", label: "GPIO4（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "5", label: "GPIO5（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "6", label: "GPIO6（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "7", label: "GPIO7（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "8", label: "GPIO8（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "9", label: "GPIO9（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "10", label: "GPIO10（模拟输入）", digital: true, pwm: true, analog: true, pullUp: true, pullDown: true },
-    { id: "11", label: "GPIO11", digital: true, pwm: true, pullUp: true, pullDown: true },
-    { id: "12", label: "GPIO12", digital: true, pwm: true, pullUp: true, pullDown: true },
-    { id: "13", label: "GPIO13", digital: true, pwm: true, pullUp: true, pullDown: true },
-    { id: "14", label: "GPIO14", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "1", label: "GPIO1（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
+    { id: "2", label: "GPIO2（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
+    { id: "3", label: "GPIO3（启动配置）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "4", label: "GPIO4（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
+    { id: "5", label: "GPIO5（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
+    { id: "6", label: "GPIO6（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
+    { id: "7", label: "GPIO7（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
+    { id: "8", label: "GPIO8（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
+    { id: "9", label: "GPIO9（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
+    { id: "10", label: "GPIO10（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
+    { id: "11", label: "GPIO11", digital: true, pwm: true, touch: true, pullUp: true, pullDown: true },
+    { id: "12", label: "GPIO12", digital: true, pwm: true, touch: true, pullUp: true, pullDown: true },
+    { id: "13", label: "GPIO13", digital: true, pwm: true, touch: true, pullUp: true, pullDown: true },
+    { id: "14", label: "GPIO14", digital: true, pwm: true, touch: true, pullUp: true, pullDown: true },
     { id: "15", label: "GPIO15", digital: true, pwm: true, pullUp: true, pullDown: true },
     { id: "16", label: "GPIO16", digital: true, pwm: true, pullUp: true, pullDown: true },
     { id: "17", label: "GPIO17", digital: true, pwm: true, pullUp: true, pullDown: true },
@@ -141,6 +156,29 @@ const esp32S3: BoardProfile = {
     { id: "19", label: "GPIO19（USB D-）", digital: true, reserved: true },
     { id: "20", label: "GPIO20（USB D+）", digital: true, reserved: true },
     { id: "21", label: "GPIO21", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "26", label: "GPIO26（Flash/PSRAM）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "27", label: "GPIO27（Flash/PSRAM）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "28", label: "GPIO28（Flash/PSRAM）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "29", label: "GPIO29（Flash/PSRAM）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "30", label: "GPIO30（Flash/PSRAM）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "31", label: "GPIO31（Flash/PSRAM）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "32", label: "GPIO32（Flash/PSRAM）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "33", label: "GPIO33（Flash/PSRAM，部分模组）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "34", label: "GPIO34（Flash/PSRAM，部分模组）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "35", label: "GPIO35（Flash/PSRAM，部分模组）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "36", label: "GPIO36（Flash/PSRAM，部分模组）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "37", label: "GPIO37（Flash/PSRAM，部分模组）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "38", label: "GPIO38", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "39", label: "GPIO39", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "40", label: "GPIO40", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "41", label: "GPIO41", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "42", label: "GPIO42", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "43", label: "GPIO43（串口 TX）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "44", label: "GPIO44（串口 RX）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "45", label: "GPIO45（启动配置）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "46", label: "GPIO46（启动配置）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
+    { id: "47", label: "GPIO47", digital: true, pwm: true, pullUp: true, pullDown: true },
+    { id: "48", label: "GPIO48", digital: true, pwm: true, pullUp: true, pullDown: true },
   ],
 };
 
@@ -169,6 +207,8 @@ function supportsPinUse(pin: HardwarePin, use: HardwarePinUse): boolean {
       return Boolean(pin.pwm) && !pin.inputOnly;
     case "analog":
       return Boolean(pin.analog);
+    case "touch":
+      return Boolean(pin.touch);
   }
 }
 
@@ -187,6 +227,7 @@ export function validateBoardPin(profile: BoardProfile | undefined, use: Hardwar
   if (pin.reserved) return `引脚 ${pin.label} 会影响设备启动，暂不支持使用`;
   if (!supportsPinUse(pin, use)) {
     if (use === "analog") return `引脚 ${pin.label} 不支持模拟输入`;
+    if (use === "touch") return `引脚 ${pin.label} 不支持电容触摸`;
     if (use === "digital-input") return `引脚 ${pin.label} 不能作为数字输入使用`;
     return `引脚 ${pin.label} 只能作为输入使用`;
   }
@@ -260,6 +301,17 @@ export function collectBoardProfileIssues(profiles: readonly BoardProfile[]): st
     for (const pinId of [profile.defaultI2c.sda, profile.defaultI2c.scl]) {
       if (!pinIds.has(pinId)) issues.push(`${prefix} 的默认 I2C 引脚 ${pinId} 不存在`);
     }
+
+    const rgbPinId = profile.builtinRgb?.pin;
+    if (rgbPinId !== undefined) {
+      const rgbPin = profile.pins.find((pin) => pin.id === rgbPinId);
+      if (!rgbPin) issues.push(`${prefix} 的板载 RGB 引脚 ${rgbPinId} 不存在`);
+      else if (!supportsPinUse(rgbPin, "digital-output")) issues.push(`${prefix} 的板载 RGB 引脚 ${rgbPinId} 不能作为输出使用`);
+    }
+
+    const uartIds = profile.uartIds ?? [];
+    if (new Set(uartIds).size !== uartIds.length) issues.push(`${prefix} 的串口编号重复`);
+    if (uartIds.includes(0)) issues.push(`${prefix} 的串口 0 被 REPL 占用，不能作为用户串口`);
   }
   for (const boardId of supportedHardwareBoards) {
     if (!seen.has(boardId)) issues.push(`缺少板卡档案：${boardId}`);

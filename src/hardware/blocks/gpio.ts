@@ -42,6 +42,15 @@ const definitions = [
     extensions: ["hardware_board_pin"],
   },
   {
+    type: "hardware_touch_read",
+    message0: "读取触摸引脚 %1",
+    args0: [{ type: "field_dropdown", name: "PIN", options: [["（请先选择硬件板卡）", ""]] }],
+    output: "Number",
+    colour: hardwareColours.pin,
+    tooltip: "读取电容触摸引脚的原始数值。触摸时数值会明显变化：ESP32 变小，ESP32-S3 变大；建议先记录未触摸时的读数再比较。",
+    extensions: ["hardware_board_pin"],
+  },
+  {
     type: "hardware_builtin_led",
     message0: "板载 LED %1",
     args0: [{ type: "field_dropdown", name: "STATE", options: [["点亮", "on"], ["熄灭", "off"]] }],
@@ -70,6 +79,12 @@ export function register(): void {
     const pullMode = pull === "up" ? ", machine.Pin.PULL_UP" : pull === "down" ? ", machine.Pin.PULL_DOWN" : "";
     return [`machine.Pin(${target.pinId}, machine.Pin.IN${pullMode}).value()`, pythonOrder.FUNCTION_CALL];
   };
+  hardwareGenerator.forBlock.hardware_touch_read = (block) => {
+    const target = pinTarget(block, "touch");
+    if (typeof target === "string") return ["None", pythonOrder.ATOMIC];
+    ensureImport("machine");
+    return [`machine.TouchPad(machine.Pin(${target.pinId})).read()`, pythonOrder.FUNCTION_CALL];
+  };
   hardwareGenerator.forBlock.hardware_builtin_led = (block) => {
     const profile = getActiveHardwareBoard();
     if (!profile) return unavailable("请先选择硬件板卡");
@@ -96,5 +111,13 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
     { kind: "block", type: "hardware_pin_write", fields: { PIN: boardPinChoices(profile, "digital-output")[0]?.id ?? "", LEVEL: "1" } },
     { kind: "block", type: "hardware_pin_read", fields: { PIN: boardPinChoices(profile, "digital-input")[0]?.id ?? "", PULL: "none" } },
   );
+  const touchPin = boardPinChoices(profile, "touch")[0]?.id;
+  if (touchPin) {
+    contents.push(
+      { kind: "sep", gap: 20 } as unknown as Blockly.utils.toolbox.FlyoutItemInfo,
+      hardwareSectionLabel("电容触摸"),
+      { kind: "block", type: "hardware_touch_read", fields: { PIN: touchPin } },
+    );
+  }
   return contents;
 }

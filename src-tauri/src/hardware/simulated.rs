@@ -83,6 +83,8 @@ pub struct SimulatedDevice {
     pub hang_after_scripts: Option<usize>,
     /// 在第 N 个脚本之后模拟拔线：所有后续读写都失败。
     pub unplug_after_scripts: Option<usize>,
+    /// true：软复位不打印 “soft reboot” 横幅，用于测试复位确认超时。
+    pub missing_soft_reboot_banner: bool,
     /// 自定义脚本应答：(标记, stdout, stderr)，优先于内置处理。
     pub script_responses: Vec<(String, String, String)>,
 }
@@ -112,6 +114,7 @@ impl Default for SimulatedDevice {
             interrupt_count: 0,
             hang_after_scripts: None,
             unplug_after_scripts: None,
+            missing_soft_reboot_banner: false,
             script_responses: Vec::new(),
         }
     }
@@ -205,7 +208,7 @@ impl SimulatedDevice {
                     // 空行 + CTRL-D = 软复位
                     self.push_output(b"OK\r\n");
                     self.soft_reset_count += 1;
-                    self.push_output(b"soft reboot\r\n");
+                    self.push_soft_reboot_banner();
                     self.push_output(RAW_REPL_BANNER);
                     self.push_output(b">");
                     return;
@@ -278,6 +281,12 @@ impl SimulatedDevice {
                 self.pending.push(CTRL_E);
                 self.state = SimState::PastingCommand;
             }
+            // 空行的回车：readline 回显换行，REPL 回到 input_restart 并重新打印提示符。
+            // 主机在这里多发一个回车，就会在程序输出之前先看到一个 “>>> ” 提示符。
+            b'\r' | b'\n' => {
+                self.push_output(b"\r\n");
+                self.push_output(FRIENDLY_PROMPT);
+            }
             _ => {}
         }
     }
@@ -324,10 +333,18 @@ impl SimulatedDevice {
         }
     }
 
+    /// 软复位横幅：真机在跑 boot.py/main.py 之前一定会打印（ports/*/main.c）。
+    fn push_soft_reboot_banner(&mut self) {
+        if !self.missing_soft_reboot_banner {
+            self.push_output(b"soft reboot\r\n");
+        }
+    }
+
     /// 友好 REPL 的 CTRL-D：软复位并运行 boot.py + main.py，最后打印横幅和提示符。
     fn soft_reset_and_run_main(&mut self) {
         self.soft_reset_count += 1;
-        self.push_output(b"\r\nsoft reboot\r\n");
+        self.push_output(b"\r\n");
+        self.push_soft_reboot_banner();
         self.push_output(&self.program_output.clone());
         if self.program_never_finishes {
             self.running = true;

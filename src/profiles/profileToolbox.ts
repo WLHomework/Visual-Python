@@ -1,6 +1,8 @@
 import * as Blockly from "blockly/core";
 import { toolbox as baseToolbox } from "../pythonBlocks";
 import { hardwareToolboxCategory, isHardwareToolboxCategoryName, setActiveHardwareBoard } from "../hardware/hardwareBlocks";
+import { boardToolboxSpec, hardwareBlockEntries } from "../hardware/toolboxes";
+import { resolveBoardToolbox } from "../hardware/toolboxes/resolve";
 import { isHardwareWorkbench, type WorkbenchProfile } from "./workbenchProfile";
 
 const baseCategoryNames = new Set(
@@ -83,11 +85,16 @@ export function activateWorkbenchProfile(profile: WorkbenchProfile): void {
 /**
  * 按 Profile 组装工具箱。
  *
- * Python Profile 保持工具箱原样（含插件分类）；硬件 Profile 只保留内置 Python 分类并把「硬件」分类放在最前，
- * 插件带来的宿主专属分类（Manim、绘图、数值库等）不会出现。
+ * Python Profile 保持工具箱原样（含插件分类）；硬件 Profile 里：
+ * - 有专属工具箱声明的板卡按声明组装，传入的工具箱（可能已被插件扩展）被完全忽略；
+ * - 还没有声明的板卡沿用旧的隐藏名单：只保留内置 Python 分类并把「硬件」分类放在最前。
  */
 export function buildProfileToolbox(toolbox: Blockly.utils.toolbox.ToolboxDefinition, profile: WorkbenchProfile): Blockly.utils.toolbox.ToolboxDefinition {
   if (!isHardwareWorkbench(profile)) return toolbox;
+  const spec = boardToolboxSpec(profile.boardId);
+  if (spec) {
+    return resolveBoardToolbox(spec, { baseToolbox, hardwareEntries: hardwareBlockEntries(profile.boardId) });
+  }
   const definition = toolbox as unknown as { kind?: string; contents?: Array<{ kind?: string; name?: string }> };
   if (!Array.isArray(definition.contents)) return toolbox;
   const kept = definition.contents.filter((item) => {

@@ -127,7 +127,8 @@ describe("Visual Python Agent Core", () => {
     });
     const hardwareSystem = ((mocks.streamAiChat.mock.calls[0][0] as AiChatMessage[]).find((message) => message.role === "system")?.content || "");
     expect(hardwareSystem).toContain("MicroPython");
-    expect(hardwareSystem).toContain("硬件积木");
+    expect(hardwareSystem).toContain("当前工具箱里的积木");
+    expect(hardwareSystem).toContain("get_task_block_directory");
     expect(hardwareSystem).toContain("引脚");
 
     mocks.streamAiChat.mockReset();
@@ -139,7 +140,7 @@ describe("Visual Python Agent Core", () => {
       signal: new AbortController().signal,
     });
     const pythonSystem = ((mocks.streamAiChat.mock.calls[0][0] as AiChatMessage[]).find((message) => message.role === "system")?.content || "");
-    expect(pythonSystem).not.toContain("只使用当前工具箱中的硬件积木");
+    expect(pythonSystem).not.toContain("当前是 MicroPython 硬件工作台");
   });
 
   it("filters Python-only and Manim tools from a MicroPython workbench", async () => {
