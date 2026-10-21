@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
 import { buildDefinedClassConstructorToolbox, buildDefinedFunctionCallToolbox, defaultVisualThemeId, deferHeavyStatementInputs, findWorkspaceBlockCodeRange, generatePython, generateWorkspacePython, generateWorkspacePythonWithBlockMap, hydrateDeferredInputs, loadWorkspaceFast, markHeavyStacksCollapsed, pushWorkspaceUndoSnapshot, restoreDeferredIntoState, saveWorkspaceState, starterState, toolbox, visualPythonTheme, visualPythonThemes } from "./pythonBlocks";
 import { getManimVoiceoverContextWarning, getPythonCollectionTypeWarning, getPythonContextWarning, getPythonIdentifierWarning, getPythonImportWarning, getPythonRequiredInputWarning, uniqueIssueMessages, validatePythonBlockContexts } from "./pythonSyntaxBlocks";
+import { setActiveHardwareBoard } from "./hardware/hardwareBlocks";
 
 const variableFields: Record<string, string[]> = {
   variables_set: ["VAR"], variables_get: ["VAR"],
@@ -890,6 +891,20 @@ describe("Python block generators", () => {
     expect(randomCode).toContain("import random");
     expect(randomCode).toContain("result = random.randint(1, 10)");
     expect(randomCode).not.toContain("result = None");
+  });
+
+  it("does not generate random module extras on ESP8266", () => {
+    setActiveHardwareBoard("esp8266-esp12e");
+    try {
+      const randint = generatePython(state({ type: "python_random_randint", inputs: { A: number(1), B: number(10) } }));
+      const uniform = generatePython(state({ type: "python_random_uniform", inputs: { A: number(0), B: number(1) } }));
+      expect(randint.trim()).toBe("None");
+      expect(uniform.trim()).toBe("None");
+      expect(randint).not.toContain("random");
+      expect(uniform).not.toContain("random");
+    } finally {
+      setActiveHardwareBoard(undefined);
+    }
   });
 
   it("generates common Python utility, collection, and file operations", () => {

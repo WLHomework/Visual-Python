@@ -1,19 +1,24 @@
 import { describe, expect, it } from "vitest";
 import * as Blockly from "blockly/core";
 import "blockly/blocks";
+import * as ZhHans from "blockly/msg/zh-hans";
 import { pythonGenerator } from "blockly/python";
 import { createBlockSearchIndex, searchBlockIndex } from "../blockSearch";
 import { buildBlockOutline, filterBlockOutline } from "../blockOutline";
 import {
   collectHardwareBlockIssues,
   countIncompatiblePins,
-  hardwareToolboxCategory,
   hardwareToolboxContents,
   refreshHardwareBlocks,
   registerHardwareBlocks,
   setActiveHardwareBoard,
 } from "./hardwareBlocks";
 import type { HardwareBoardId } from "./firmwareCatalog";
+
+const locale = Object.fromEntries(
+  Object.entries(ZhHans).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+);
+Blockly.setLocale(locale);
 
 registerHardwareBlocks();
 
@@ -204,6 +209,41 @@ describe("hardware code generation", () => {
     expect(code).not.toContain("machine.Pin.PULL_DOWN");
   });
 
+  it("does not generate random extras on ESP8266", () => {
+    const esp8266Int = generate([{ type: "math_random_int", inputs: { FROM: number(1), TO: number(6) } }], "esp8266-esp12e");
+    const esp8266Float = generate([{ type: "math_random_float" }], "esp8266-esp12e");
+    expect(esp8266Int.trim()).toBe("None");
+    expect(esp8266Float.trim()).toBe("None");
+    expect(esp8266Int).not.toContain("random");
+    expect(esp8266Float).not.toContain("random");
+
+    const esp32Int = generate([{ type: "math_random_int", inputs: { FROM: number(1), TO: number(6) } }], "esp32-wroom");
+    const s3Float = generate([{ type: "math_random_float" }], "esp32-s3");
+    expect(esp32Int).toContain("import random");
+    expect(esp32Int).toContain("random.randint(1, 6)");
+    expect(s3Float).toContain("random.random()");
+  });
+
+  it("reports random blocks that ESP8266 cannot run", () => {
+    const intWorkspace = loadWorkspace([
+      { type: "math_random_int", inputs: { FROM: number(1), TO: number(6) } },
+    ], "esp8266-esp12e");
+    expect(collectHardwareBlockIssues(intWorkspace, "esp8266-esp12e").map((issue) => issue.message)).toEqual([
+      "「随机整数」积木：ESP8266 固件没有 random.randint，请改用 ESP32 / ESP32-S3，或删除该积木",
+    ]);
+    intWorkspace.dispose();
+
+    const floatWorkspace = loadWorkspace([{ type: "math_random_float" }], "esp8266-esp12e");
+    expect(collectHardwareBlockIssues(floatWorkspace, "esp8266-esp12e").map((issue) => issue.message)).toEqual([
+      "「随机小数」积木：ESP8266 固件没有 random.random，请改用 ESP32 / ESP32-S3，或删除该积木",
+    ]);
+    floatWorkspace.dispose();
+
+    const s3Workspace = loadWorkspace([{ type: "math_random_float" }], "esp32-s3");
+    expect(collectHardwareBlockIssues(s3Workspace, "esp32-s3")).toEqual([]);
+    s3Workspace.dispose();
+  });
+
   it("generates a 50 Hz servo signal with a clamped 0.5-2.5 ms pulse", () => {
     const esp32 = generate([{ type: "hardware_servo_write", fields: { PIN: "2" }, inputs: { ANGLE: number(90) } }], "esp32-wroom");
     const esp8266 = generate([{ type: "hardware_servo_write", fields: { PIN: "14" }, inputs: { ANGLE: number(180) } }], "esp8266-esp12e");
@@ -387,6 +427,7 @@ describe("hardware code generation", () => {
 
     expect(code).toContain("import machine");
     expect(code).toContain("import ssd1306");
+    expect(code).toContain('_oled_i2c = globals().get("_i2c")');
     expect(code).toContain("machine.I2C(0, scl=machine.Pin(22), sda=machine.Pin(21), freq=400000)");
     expect(code).toContain("ssd1306.SSD1306_I2C(int(128), int(64), _oled_i2c, addr=0x3C)");
     expect(code).toContain("_oled.fill(0)");
@@ -397,6 +438,71 @@ describe("hardware code generation", () => {
     const esp8266 = generate([{ type: "hardware_oled_init", fields: { ADDRESS: "0x3D" }, inputs: { WIDTH: number(128), HEIGHT: number(32) } }], "esp8266-esp12e");
     expect(esp8266).toContain("machine.I2C(scl=machine.Pin(5), sda=machine.Pin(4), freq=100000)");
     expect(esp8266).toContain("ssd1306.SSD1306_I2C(int(128), int(32), _oled_i2c, addr=0x3D)");
+  });
+
+  it("generates I2C init, scan, register write and read", () => {
+    const wroom = generate([chain(
+      { type: "hardware_i2c_init", fields: { SDA: "21", SCL: "22" } },
+      { type: "hardware_i2c_write_register", inputs: { ADDRESS: number(0x3C), REGISTER: number(0x10), DATA: number(0xAB) } },
+    )], "esp32-wroom");
+
+    expect(wroom).toContain("import machine");
+    expect(wroom).toContain("_i2c = machine.I2C(0, scl=machine.Pin(22), sda=machine.Pin(21), freq=400000)");
+    expect(wroom).toContain("_i2c.writeto_mem(int(60), int(16), bytes([int(171) & 0xFF]))");
+
+    const read = generate([{ type: "hardware_i2c_read_register", inputs: { ADDRESS: number(0x3C), REGISTER: number(0) } }], "esp32-s3");
+    expect(read).toContain("_i2c.readfrom_mem(int(60), int(0), 1)[0]");
+
+    const scan = generate([{ type: "hardware_i2c_scan" }], "esp32-s3");
+    expect(scan).toContain("_i2c.scan()");
+
+    const esp8266 = generate([{ type: "hardware_i2c_init", fields: { SDA: "4", SCL: "5" } }], "esp8266-esp12e");
+    expect(esp8266).toContain("machine.I2C(scl=machine.Pin(5), sda=machine.Pin(4), freq=100000)");
+  });
+
+  it("does not generate I2C register calls for out-of-range literals", () => {
+    const code = generate([{
+      type: "hardware_i2c_write_register",
+      inputs: { ADDRESS: number(0x80), REGISTER: number(0), DATA: number(1) },
+    }], "esp32-s3");
+
+    expect(code).toContain("I2C 地址必须在 0x08–0x77 之间");
+    expect(code).not.toContain("writeto_mem");
+  });
+
+  it("generates Wi-Fi connect, disconnect, status and IP blocks", () => {
+    const wroom = generate([chain(
+      {
+        type: "hardware_wifi_connect",
+        inputs: {
+          SSID: { block: { type: "text", fields: { TEXT: "TestNet" } } },
+          PASSWORD: { block: { type: "text", fields: { TEXT: "secret123" } } },
+        },
+      },
+      { type: "hardware_wifi_disconnect" },
+    )], "esp32-wroom");
+
+    expect(wroom).toContain("import network");
+    expect(wroom).toContain("_wlan = network.WLAN(network.STA_IF)");
+    expect(wroom).toContain("_wlan.active(True)");
+    expect(wroom).toContain("_wlan.connect(str('TestNet'), str('secret123'))");
+    expect(wroom).toContain("if _wlan.isconnected():");
+    expect(wroom).toContain("_wlan.disconnect()");
+    expect(wroom).toContain("_wlan.active(False)");
+
+    const connected = generate([{ type: "hardware_wifi_connected" }], "esp32-s3");
+    expect(connected).toContain("_wlan.isconnected()");
+
+    const ip = generate([{ type: "hardware_wifi_ip" }], "esp8266-esp12e");
+    expect(ip).toContain("_wlan.ifconfig()[0]");
+
+    const wait = generate([{ type: "hardware_wifi_wait", inputs: { SECONDS: number(10) } }], "esp32-s3");
+    expect(wait).toContain("import time");
+    expect(wait).toContain("def hardware_wifi_wait(timeout_ms):");
+    expect(wait).toContain("time.ticks_ms()");
+    expect(wait).toContain("time.ticks_diff");
+    expect(wait).toContain("time.sleep_ms(100)");
+    expect(wait).toContain("hardware_wifi_wait(int(10) * 1000)");
   });
 });
 
@@ -545,6 +651,60 @@ describe("hardware block validation", () => {
     expect(collectHardwareBlockIssues(s3, "esp32-s3")).toEqual([]);
     s3.dispose();
   });
+
+  it("reports invalid I2C pins and literal ranges", () => {
+    const samePin = loadWorkspace([{ type: "hardware_i2c_init", fields: { SDA: "4", SCL: "4" } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(samePin, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「初始化 I2C」积木：SDA 和 SCL 不能使用同一个引脚",
+    ]);
+    samePin.dispose();
+
+    const badAddress = loadWorkspace([{ type: "hardware_i2c_read_register", inputs: { ADDRESS: number(0x80), REGISTER: number(0) } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(badAddress, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「I2C 读寄存器」积木：I2C 地址必须是 0x08–0x77 之间的整数",
+    ]);
+    badAddress.dispose();
+
+    const badData = loadWorkspace([{ type: "hardware_i2c_write_register", inputs: { ADDRESS: number(0x3C), REGISTER: number(0), DATA: number(256) } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(badData, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「I2C 写寄存器」积木：写入数据必须是 0–255 之间的整数",
+    ]);
+    badData.dispose();
+
+    const valid = loadWorkspace([{ type: "hardware_i2c_write_register", inputs: { ADDRESS: number(0x3C), REGISTER: number(0), DATA: number(255) } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(valid, "esp32-s3")).toEqual([]);
+    valid.dispose();
+  });
+
+  it("reports an empty Wi-Fi name", () => {
+    const empty = loadWorkspace([{
+      type: "hardware_wifi_connect",
+      inputs: {
+        SSID: { block: { type: "text", fields: { TEXT: "  " } } },
+        PASSWORD: { block: { type: "text", fields: { TEXT: "" } } },
+      },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(empty, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「连接 Wi-Fi」积木：Wi-Fi 名称不能为空",
+    ]);
+    empty.dispose();
+
+    const valid = loadWorkspace([{
+      type: "hardware_wifi_connect",
+      inputs: {
+        SSID: { block: { type: "text", fields: { TEXT: "TestNet" } } },
+        PASSWORD: { block: { type: "text", fields: { TEXT: "" } } },
+      },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(valid, "esp32-s3")).toEqual([]);
+    valid.dispose();
+
+    const badWait = loadWorkspace([{ type: "hardware_wifi_wait", inputs: { SECONDS: number(0) } }], "esp32-s3");
+    expect(collectHardwareBlockIssues(badWait, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「等待 Wi-Fi 连接」积木：等待时间必须是大于 0 的整数秒",
+    ]);
+    badWait.dispose();
+  });
 });
 
 describe("hardware pin compatibility count", () => {
@@ -581,7 +741,11 @@ describe("hardware pin compatibility count", () => {
 
 describe("hardware block discovery", () => {
   it("exposes the current hardware toolbox to search and the block outline", () => {
-    const index = createBlockSearchIndex(hardwareToolboxCategory("esp32-wroom") as unknown as Blockly.utils.toolbox.ToolboxDefinition, (type) => type);
+    const definition = {
+      kind: "flyoutToolbox",
+      contents: hardwareToolboxContents("esp32-wroom"),
+    } as unknown as Blockly.utils.toolbox.ToolboxDefinition;
+    const index = createBlockSearchIndex(definition, (type) => type);
     expect(searchBlockIndex(index, "neopixel").map((entry) => entry.type)).toEqual(expect.arrayContaining([
       "hardware_neopixel_init",
       "hardware_neopixel_set_pixel",
@@ -618,22 +782,16 @@ describe("hardware toolbox category", () => {
     expect(pinOf(esp32, "hardware_servo_write")?.fields?.PIN).toBe("2");
     expect(pinOf(esp32, "hardware_tone")?.fields?.PIN).toBe("2");
 
-    const category = hardwareToolboxCategory("esp32-wroom") as { name: string; colour: string; contents: unknown[] };
-    expect(category.name).toBe("ESP32 硬件");
-    expect(category.contents.length).toBeGreaterThan(5);
+    expect(hardwareToolboxContents("esp32-wroom").length).toBeGreaterThan(5);
   });
 
-  it("builds a named toolbox for each board and omits unsupported S3 blocks", () => {
-    const esp8266 = hardwareToolboxCategory("esp8266-esp12e") as { name: string; contents: unknown[] };
-    const esp32s3 = hardwareToolboxCategory("esp32-s3") as { name: string; contents: unknown[] };
-    const blockTypes = (contents: unknown[]) => contents
+  it("offers board-specific blocks only on boards that support them", () => {
+    const types = (boardId: HardwareBoardId) => hardwareToolboxContents(boardId)
       .map((item) => (item as { type?: string }).type)
       .filter((type): type is string => type !== undefined);
 
-    expect(esp8266.name).toBe("ESP8266 硬件");
-    expect(esp32s3.name).toBe("ESP32-S3 硬件");
-    expect(blockTypes(esp8266.contents)).toContain("hardware_builtin_led");
-    expect(blockTypes(esp32s3.contents)).not.toContain("hardware_builtin_led");
+    expect(types("esp8266-esp12e")).toContain("hardware_builtin_led");
+    expect(types("esp32-s3")).not.toContain("hardware_builtin_led");
   });
 
   it("offers the range mapping block on every board", () => {

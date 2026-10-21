@@ -52,7 +52,7 @@ export const logicCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpe
   items: ["controls_if", "logic_compare", "logic_operation", "logic_negate", "logic_boolean", "python_conditional", ...extra],
 });
 
-export const mathCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
+export const mathCategory = (extra: ToolboxItemSpec[] = [], options: { random?: boolean } = {}): ToolboxCategorySpec => ({
   id: "math",
   name: "数学",
   colour: baseCategoryColour("数学"),
@@ -64,8 +64,8 @@ export const mathCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec
     "math_round",
     "math_constrain",
     "math_constant",
-    "math_random_int",
-    "math_random_float",
+    // ESP8266 固件关闭了 random 的扩展函数，没有 randint/random，只能按板卡去掉。
+    ...(options.random === false ? [] : ["math_random_int", "math_random_float"]),
     "python_floor_divide",
     "python_bitwise",
     "python_bitwise_not",

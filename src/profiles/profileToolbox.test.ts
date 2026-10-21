@@ -26,20 +26,22 @@ describe("profile toolbox", () => {
     expect(categoryNames(buildProfileToolbox(fakeToolbox, python))).toEqual(["输入输出", "循环", "Manim 动画"]);
   });
 
-  it("puts the hardware category first and hides plugin categories on a hardware profile", () => {
+  it("returns the board declaration and drops plugin categories on a hardware profile", () => {
     const toolbox = buildProfileToolbox(fakeToolbox, getWorkbenchProfile("esp8266-esp12e"));
-    expect(categoryNames(toolbox)).toEqual(["ESP8266 硬件", "输入输出", "循环"]);
-    const contents = (toolbox as unknown as { contents: Array<{ kind?: string }> }).contents;
-    expect(contents.some((item) => item.kind === "sep")).toBe(true);
-    const hardware = contents[0] as { contents: Array<{ kind?: string; text?: string; fields?: Record<string, string> }> };
-    expect(hardware.contents[0].text).toContain("NodeMCU");
-    expect(hardware.contents.find((item) => item.fields && "PIN" in item.fields && item.text === undefined)).toBeTruthy();
+    const names = categoryNames(toolbox);
+
+    expect(names).toEqual([
+      "输入/输出", "控制", "逻辑", "数学", "文本", "列表", "赋值", "变量", "函数", "调用", "串口", "通信", "网络", "传感器", "执行器", "灯光", "显示",
+    ]);
+    expect(names).not.toContain("Manim 动画");
   });
 
-  it("replaces a previously injected hardware category instead of duplicating it", () => {
+  it("ignores the passed toolbox and stays stable when rebuilt", () => {
     const profile = getWorkbenchProfile("esp32-wroom");
-    const twice = buildProfileToolbox(buildProfileToolbox(fakeToolbox, profile), profile);
-    expect(categoryNames(twice)).toEqual(["ESP32 硬件", "输入输出", "循环"]);
+    const once = buildProfileToolbox(fakeToolbox, profile);
+    const twice = buildProfileToolbox(once, profile);
+
+    expect(categoryNames(twice)).toEqual(categoryNames(once));
   });
 
   it("activates the board only for a hardware profile", () => {
@@ -50,7 +52,7 @@ describe("profile toolbox", () => {
     expect(getActiveHardwareBoard()).toBeUndefined();
   });
 
-  it("removes Python-only filesystem, input, module and async blocks on hardware profiles", () => {
+  it("only offers the board declaration, not Python-only blocks from the passed toolbox", () => {
     const toolbox = buildProfileToolbox(
       {
         kind: "categoryToolbox",
@@ -64,18 +66,19 @@ describe("profile toolbox", () => {
             ],
           },
           { kind: "category", name: "文件", contents: [{ kind: "block", type: "python_file_read_text" }] },
-          { kind: "category", name: "标准库", contents: [{ kind: "block", type: "python_json_loads" }, { kind: "block", type: "python_datetime_now" }] },
           { kind: "category", name: "异步", contents: [{ kind: "block", type: "python_asyncio_run" }] },
         ],
       } as unknown as Blockly.utils.toolbox.ToolboxDefinition,
       getWorkbenchProfile("esp32-wroom"),
     );
     const categories = (toolbox as unknown as { contents: Array<{ name?: string; contents?: Array<{ type?: string }> }> }).contents;
-    const io = categories.find((item) => item.name === "输入输出");
-    const standard = categories.find((item) => item.name === "标准库");
-    expect(io?.contents?.map((item) => item.type)).toEqual(["python_print"]);
-    expect(standard?.contents?.map((item) => item.type)).toEqual(["python_json_loads"]);
+    const types = categories.flatMap((item) => item.contents?.map((entry) => entry.type) ?? []);
+
     expect(categories.some((item) => item.name === "文件")).toBe(false);
     expect(categories.some((item) => item.name === "异步")).toBe(false);
+    expect(types).not.toContain("python_input");
+    expect(types).not.toContain("python_file_read_text");
+    expect(types).not.toContain("python_asyncio_run");
+    expect(types).toContain("python_print");
   });
 });

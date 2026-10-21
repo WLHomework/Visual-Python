@@ -21,7 +21,7 @@ type ResolvedCategory = {
 type ResolvedDefinition = { kind?: string; contents: ResolvedCategory[] };
 
 const expectedCategoryNames = [
-  "输入/输出", "控制", "逻辑", "数学", "文本", "列表", "赋值", "变量", "函数", "调用", "串口", "传感器", "执行器", "灯光", "显示",
+  "输入/输出", "控制", "逻辑", "数学", "文本", "列表", "赋值", "变量", "函数", "调用", "串口", "通信", "网络", "传感器", "执行器", "灯光", "显示",
 ];
 
 /** 第 2 节 v1 清单里明确允许出现的 python_* 积木。 */
@@ -65,8 +65,6 @@ afterEach(() => {
 describe("esp32S3Toolbox", () => {
   it("is wired into boardToolboxSpec and keeps the section-2 category order", () => {
     expect(boardToolboxSpec("esp32-s3")).toBe(esp32S3Toolbox);
-    expect(boardToolboxSpec("esp32-wroom")).toBeUndefined();
-    expect(boardToolboxSpec("esp8266-esp12e")).toBeUndefined();
 
     const definition = resolveS3();
     expect(definition.contents.map((category) => category.name)).toEqual(expectedCategoryNames);
@@ -233,6 +231,29 @@ describe("esp32S3Toolbox", () => {
     expect(serial?.contents?.map((entry) => entry.type)).toEqual(
       expect.arrayContaining(["hardware_uart_init", "hardware_uart_write", "hardware_uart_read"]),
     );
+  });
+
+  it("offers the I2C blocks in the communication category", () => {
+    const communication = resolveS3().contents.find((category) => category.name === "通信");
+
+    expect(communication?.contents?.map((entry) => entry.type)).toEqual([
+      "hardware_i2c_init",
+      "hardware_i2c_scan",
+      "hardware_i2c_write_register",
+      "hardware_i2c_read_register",
+    ]);
+  });
+
+  it("offers the Wi-Fi blocks in the network category", () => {
+    const network = resolveS3().contents.find((category) => category.name === "网络");
+
+    expect(network?.contents?.map((entry) => entry.type)).toEqual([
+      "hardware_wifi_connect",
+      "hardware_wifi_wait",
+      "hardware_wifi_connected",
+      "hardware_wifi_ip",
+      "hardware_wifi_disconnect",
+    ]);
   });
 
   it("offers the MCU temperature block in the sensor category", () => {

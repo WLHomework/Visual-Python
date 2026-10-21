@@ -50,6 +50,23 @@ describe("ESP32-S3 工具箱的积木搜索", () => {
     expect(searchBlockIndex(index, "引脚").map((entry) => entry.type)).toEqual(
       expect.arrayContaining(["hardware_pin_write", "hardware_pin_read"]),
     );
+    expect(searchBlockIndex(index, "I2C").map((entry) => entry.type)).toEqual(
+      expect.arrayContaining([
+        "hardware_i2c_init",
+        "hardware_i2c_scan",
+        "hardware_i2c_write_register",
+        "hardware_i2c_read_register",
+      ]),
+    );
+    expect(searchBlockIndex(index, "wifi").map((entry) => entry.type)).toEqual(
+      expect.arrayContaining([
+        "hardware_wifi_connect",
+        "hardware_wifi_wait",
+        "hardware_wifi_disconnect",
+        "hardware_wifi_connected",
+        "hardware_wifi_ip",
+      ]),
+    );
   });
 
   it("搜不到工具箱外的 Python 积木", () => {

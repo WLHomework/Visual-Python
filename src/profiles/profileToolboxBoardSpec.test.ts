@@ -3,7 +3,7 @@ import { toolbox as pythonToolbox } from "../pythonBlocks";
 import { buildProfileToolbox } from "./profileToolbox";
 import { getWorkbenchProfile } from "./workbenchProfile";
 
-// 用测试替身注入一份假声明：T1.3 时生产代码里还没有任何板卡声明。
+// 用测试替身注入一份假声明，只验证 buildProfileToolbox 对声明的接线。
 const { fakeSpec } = vi.hoisted(() => ({
   fakeSpec: {
     boardId: "esp32-s3",
@@ -31,9 +31,7 @@ describe("buildProfileToolbox with a board toolbox spec", () => {
     expect(definition.contents.some((category) => category.name === "输入输出")).toBe(false);
   });
 
-  it("keeps the hidden-list path for boards without a spec", () => {
-    const definition = buildProfileToolbox(pythonToolbox, getWorkbenchProfile("esp32-wroom")) as unknown as ResolvedDefinition;
-
-    expect(definition.contents.some((category) => category.name === "输入输出")).toBe(true);
+  it("throws for boards without a spec instead of falling back to the passed toolbox", () => {
+    expect(() => buildProfileToolbox(pythonToolbox, getWorkbenchProfile("esp32-wroom"))).toThrow(/缺少专属工具箱声明/);
   });
 });

@@ -35,6 +35,7 @@ Visual Python: a Blockly-based Python/Manim workbench. Vite + React + TypeScript
 
 - `src/profiles/workbenchProfile.ts` is the source of truth for the active workbench (`python` or a `micropython` board) and its `features`.
 - Build profile-specific toolboxes through `src/profiles/profileToolbox.ts`; UI differences in `App.tsx` must read `profile.features.*` instead of checking board IDs directly.
+- Each hardware board's toolbox is declared in `src/hardware/toolboxes/` (whitelist). Adding a general Python block does **not** automatically add it to a board's toolbox.
 - Keep board-specific generation and device behavior in `src/hardware/` and `src/profiles/useHardwareRunner.ts`. Add a profile field and tests before introducing a new UI difference.
 
 ## Commits and PRs

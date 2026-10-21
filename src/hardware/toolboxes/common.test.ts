@@ -110,4 +110,16 @@ describe("common 分类声明", () => {
     expect(first.type).toBe("python_sequence_collection");
     expect((first.fields as { KIND?: string } | undefined)?.KIND).toBe("list");
   });
+
+  it("drops the random blocks when the firmware lacks randint/random", () => {
+    const types = (spec: ToolboxCategorySpec) => {
+      const [math] = resolveCategories([spec]).contents;
+      return math.contents?.map((entry) => entry.type) ?? [];
+    };
+
+    expect(types(mathCategory())).toEqual(expect.arrayContaining(["math_random_int", "math_random_float"]));
+    const withoutRandom = types(mathCategory([], { random: false }));
+    expect(withoutRandom).not.toContain("math_random_int");
+    expect(withoutRandom).not.toContain("math_random_float");
+  });
 });

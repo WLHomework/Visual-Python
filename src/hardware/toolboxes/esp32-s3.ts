@@ -1,68 +1,36 @@
-import { hardwareColours } from "../blocks/shared";
 import {
   assignmentCategory,
   callsCategory,
-  controlCategory,
   functionCategory,
   listCategory,
   logicCategory,
-  mathCategory,
   serialCategory,
   textCategory,
   variablesCategory,
 } from "./common";
-import type { BoardToolboxSpec, ToolboxCategorySpec } from "./types";
+import {
+  actuatorCategory,
+  boardControlCategory,
+  boardMathCategory,
+  communicationCategory,
+  displayCategory,
+  inputOutputCategory,
+  lightCategory,
+  networkCategory,
+  sensorCategory,
+} from "./hardwareCategories";
+import type { BoardToolboxSpec } from "./types";
 
-const inputOutputCategory: ToolboxCategorySpec = {
-  id: "input-output",
-  name: "输入/输出",
-  colour: hardwareColours.pin,
-  items: ["hardware_pin_write", "hardware_pin_read", "hardware_analog_read", "hardware_pwm_write", "hardware_touch_read"],
-};
-
-const sensorCategory: ToolboxCategorySpec = {
-  id: "sensor",
-  name: "传感器",
-  colour: hardwareColours.sensor,
-  items: ["hardware_dht_temperature", "hardware_dht_humidity", "hardware_ultrasonic_distance", "hardware_mcu_temperature"],
-};
-
-const actuatorCategory: ToolboxCategorySpec = {
-  id: "actuator",
-  name: "执行器",
-  colour: hardwareColours.pwm,
-  items: ["hardware_servo_write", "hardware_tone"],
-};
-
-const lightCategory: ToolboxCategorySpec = {
-  id: "light",
-  name: "灯光",
-  colour: hardwareColours.light,
-  // S3 没有普通板载 LED，hardware_builtin_led 会被解析器静默跳过；板载 RGB 灯由内置 RGB 积木控制。
-  items: [
-    "hardware_builtin_led",
-    "hardware_onboard_rgb",
-    "hardware_neopixel_init",
-    "hardware_neopixel_set_pixel",
-    "hardware_neopixel_clear",
-    "hardware_neopixel_write",
-  ],
-};
-
-const displayCategory: ToolboxCategorySpec = {
-  id: "display",
-  name: "显示",
-  colour: hardwareColours.display,
-  items: ["hardware_oled_init", "hardware_oled_clear", "hardware_oled_text", "hardware_oled_pixel", "hardware_oled_write"],
-};
-
+/**
+ * ESP32-S3 的工具箱：有电容触摸、芯片温度和板载 RGB 灯，没有普通板载 LED。
+ */
 export const esp32S3Toolbox: BoardToolboxSpec = {
   boardId: "esp32-s3",
   categories: [
-    inputOutputCategory,
-    controlCategory(["hardware_ticks_ms", "hardware_ticks_diff", "hardware_reset", "hardware_deepsleep"]),
+    inputOutputCategory(["hardware_touch_read"]),
+    boardControlCategory(),
     logicCategory(),
-    mathCategory(["hardware_map_range"]),
+    boardMathCategory(),
     textCategory(),
     listCategory(),
     assignmentCategory(),
@@ -70,9 +38,11 @@ export const esp32S3Toolbox: BoardToolboxSpec = {
     functionCategory(),
     callsCategory,
     serialCategory(["hardware_uart_init", "hardware_uart_write", "hardware_uart_read"]),
-    sensorCategory,
-    actuatorCategory,
-    lightCategory,
-    displayCategory,
+    communicationCategory(),
+    networkCategory(),
+    sensorCategory(["hardware_mcu_temperature"]),
+    actuatorCategory(),
+    lightCategory(["hardware_onboard_rgb"]),
+    displayCategory(),
   ],
 };

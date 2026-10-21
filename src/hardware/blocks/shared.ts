@@ -11,32 +11,16 @@ import {
 } from "../boardProfiles";
 import type { HardwareBoardId } from "../firmwareCatalog";
 
-export const hardwareToolboxCategoryName = "硬件";
-
-const hardwareToolboxShortNames: Record<HardwareBoardId, string> = {
-  "esp32-wroom": "ESP32",
-  "esp8266-esp12e": "ESP8266",
-  "esp32-s3": "ESP32-S3",
-};
-
-export function hardwareToolboxCategoryLabel(boardId?: HardwareBoardId): string {
-  const profile = getBoardProfile(boardId);
-  if (!profile) return hardwareToolboxCategoryName;
-  return `${hardwareToolboxShortNames[profile.boardId] ?? profile.displayName} 硬件`;
-}
-
-export function isHardwareToolboxCategoryName(name: unknown): boolean {
-  return name === hardwareToolboxCategoryName || (typeof name === "string" && name.endsWith(" 硬件"));
-}
-
 export const hardwareColours = {
-  // 每个分类一种颜色：分类色条与积木同色，15 个分类互不重复（见 toolboxes/esp32-s3.test.ts）。
+  // 每个分类一种颜色：分类色条与积木同色，所有分类互不重复（见 toolboxes/esp32-s3.test.ts）。
   pin: "#9e2f3f",
   pwm: "#9e5018",
   sensor: "#3f7a3f",
   light: "#b8912f",
   display: "#4a5568",
   board: "#2f9e8f",
+  communication: "#1f6f7f",
+  network: "#5f6b2f",
   loop: "#4b9b62",
   // 与 Python 界面的数学积木同色（见 pythonBlocks.ts 的 blockStyles.math_blocks）。
   math: "#4f72b8",
@@ -63,6 +47,10 @@ export const pinUseByBlockField: Record<string, Record<string, HardwarePinUse>> 
   hardware_uart_init: {
     TX: "digital-output",
     RX: "digital-input",
+  },
+  hardware_i2c_init: {
+    SDA: "digital-output",
+    SCL: "digital-output",
   },
 };
 
@@ -91,6 +79,15 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_uart_init: "初始化串口",
   hardware_uart_write: "串口发送",
   hardware_uart_read: "串口读取",
+  hardware_i2c_init: "初始化 I2C",
+  hardware_i2c_scan: "扫描 I2C 设备",
+  hardware_i2c_write_register: "I2C 写寄存器",
+  hardware_i2c_read_register: "I2C 读寄存器",
+  hardware_wifi_connect: "连接 Wi-Fi",
+  hardware_wifi_wait: "等待 Wi-Fi 连接",
+  hardware_wifi_disconnect: "断开 Wi-Fi",
+  hardware_wifi_connected: "Wi-Fi 已连接",
+  hardware_wifi_ip: "Wi-Fi IP 地址",
   hardware_mcu_temperature: "芯片温度",
   hardware_sleep_ms: "等待毫秒",
   hardware_forever: "永远重复",
@@ -218,6 +215,25 @@ export const ensureDhtHelper = (): string => {
   ]);
 };
 
+/** Wi-Fi 接口只创建一次：状态和 IP 积木即使没先运行连接积木也能安全使用。 */
+export const ensureWlan = (): string => {
+  ensureImport("network");
+  hardwareInternals().definitions_.hardware_wlan = "_wlan = network.WLAN(network.STA_IF)";
+  return "_wlan";
+};
+
+/** 轮询等待连接，避免在积木里展开循环；超时后返回当前连接状态。 */
+export const ensureWifiWaitHelper = (): string => {
+  const internals = hardwareInternals();
+  return internals.provideFunction_("hardware_wifi_wait", [
+    `def ${internals.FUNCTION_NAME_PLACEHOLDER_}(timeout_ms):`,
+    "  start = time.ticks_ms()",
+    "  while not _wlan.isconnected() and time.ticks_diff(time.ticks_ms(), start) < timeout_ms:",
+    "    time.sleep_ms(100)",
+    "  return _wlan.isconnected()",
+  ]);
+};
+
 export const ensureUartReadLineHelper = (): string => {
   const internals = hardwareInternals();
   return internals.provideFunction_("hardware_uart_readline", [
@@ -234,6 +250,12 @@ export const ensureUartReadAllHelper = (): string => {
     "  data = _uart.read()",
     '  return data.decode() if data else ""',
   ]);
+};
+
+/** I²C 总线构造表达式：ESP8266 只有软件 I²C，ESP32 系列用硬件 I²C 0。 */
+export const i2cBusExpression = (profile: BoardProfile, sda: string, scl: string): string => {
+  if (profile.chipFamily === "esp8266") return `machine.I2C(scl=machine.Pin(${scl}), sda=machine.Pin(${sda}), freq=100000)`;
+  return `machine.I2C(0, scl=machine.Pin(${scl}), sda=machine.Pin(${sda}), freq=400000)`;
 };
 
 export type PinTarget = { profile: BoardProfile; pinId: string };

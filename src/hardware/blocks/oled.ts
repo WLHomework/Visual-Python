@@ -1,6 +1,5 @@
 import * as Blockly from "blockly/core";
-import { getActiveHardwareBoard, defineHardwareBlocks, ensureImport, hardwareColours, hardwareGenerator, hardwareSectionLabel, numberShadow, pythonOrder, unavailable } from "./shared";
-import { getBoardProfile } from "../boardProfiles";
+import { getActiveHardwareBoard, defineHardwareBlocks, ensureImport, hardwareColours, hardwareGenerator, hardwareSectionLabel, i2cBusExpression, numberShadow, pythonOrder, unavailable } from "./shared";
 import type { HardwareBoardId } from "../firmwareCatalog";
 
 const definitions = [
@@ -16,7 +15,7 @@ const definitions = [
     previousStatement: null,
     nextStatement: null,
     colour: hardwareColours.display,
-    tooltip: "使用当前板卡的默认 I2C 引脚初始化 SSD1306 OLED。常见地址为 0x3C；请先运行此积木。",
+    tooltip: "使用当前板卡的默认 I2C 引脚初始化 SSD1306 OLED。之前运行过「初始化 I2C」时会复用同一条总线。常见地址为 0x3C；请先运行此积木。",
   },
   {
     type: "hardware_oled_clear",
@@ -64,14 +63,6 @@ const definitions = [
   },
 ];
 
-function i2cExpression(boardId: string): string {
-  const profile = getBoardProfile(boardId as HardwareBoardId);
-  if (!profile) return "";
-  const { sda, scl } = profile.defaultI2c;
-  if (profile.chipFamily === "esp8266") return `machine.I2C(scl=machine.Pin(${scl}), sda=machine.Pin(${sda}), freq=100000)`;
-  return `machine.I2C(0, scl=machine.Pin(${scl}), sda=machine.Pin(${sda}), freq=400000)`;
-}
-
 export function register(): void {
   defineHardwareBlocks(definitions);
   hardwareGenerator.forBlock.hardware_oled_init = (block, generator) => {
@@ -82,8 +73,12 @@ export function register(): void {
     const width = generator.valueToCode(block, "WIDTH", pythonOrder.NONE) || "128";
     const height = generator.valueToCode(block, "HEIGHT", pythonOrder.NONE) || "64";
     const address = String(block.getFieldValue("ADDRESS") || "0x3C");
+    const bus = i2cBusExpression(profile, profile.defaultI2c.sda, profile.defaultI2c.scl);
     return [
-      `_oled_i2c = ${i2cExpression(profile.boardId)}\n`,
+      // 先运行过「初始化 I2C」时复用同一条总线，避免在相同引脚上重复建 I2C。
+      `_oled_i2c = globals().get("_i2c")\n`,
+      "if _oled_i2c is None:\n",
+      `  _oled_i2c = ${bus}\n`,
       `_oled = ssd1306.SSD1306_I2C(int(${width}), int(${height}), _oled_i2c, addr=${address})\n`,
     ].join("");
   };

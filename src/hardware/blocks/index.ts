@@ -5,17 +5,18 @@ import * as analog from "./analog";
 import * as dht from "./dht";
 import * as flow from "./flow";
 import * as gpio from "./gpio";
+import * as i2c from "./i2c";
 import * as math from "./math";
 import * as neopixel from "./neopixel";
 import * as oled from "./oled";
 import * as pwm from "./pwm";
+import { esp8266RandomBlockIssue, installEsp8266RandomGuards } from "./randomCompat";
 import * as temperature from "./temperature";
 import * as uart from "./uart";
 import * as ultrasonic from "./ultrasonic";
+import * as wifi from "./wifi";
 import {
   hardwareBlockLabels,
-  hardwareColours,
-  hardwareToolboxCategoryLabel,
   hardwareSectionLabel,
   pinUseByBlockType,
   pinUsesForBlock,
@@ -29,9 +30,6 @@ export {
   countIncompatiblePins,
   getActiveHardwareBoard,
   hardwareBlockTypes,
-  hardwareToolboxCategoryLabel,
-  hardwareToolboxCategoryName,
-  isHardwareToolboxCategoryName,
   isHardwareBlockType,
   refreshHardwareBlocks,
   setActiveHardwareBoard,
@@ -55,7 +53,10 @@ export function registerHardwareBlocks(): void {
   flow.register();
   math.register();
   uart.register();
+  i2c.register();
+  wifi.register();
   temperature.register();
+  installEsp8266RandomGuards();
 }
 
 export function hardwareToolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbox.FlyoutItemInfo[] {
@@ -71,19 +72,12 @@ export function hardwareToolboxContents(boardId?: HardwareBoardId): Blockly.util
     ...ultrasonic.toolboxContents(boardId),
     ...oled.toolboxContents(boardId),
     ...uart.toolboxContents(boardId),
+    ...i2c.toolboxContents(boardId),
+    ...wifi.toolboxContents(boardId),
     ...temperature.toolboxContents(boardId),
     ...flow.toolboxContents(),
     ...math.toolboxContents(),
   ];
-}
-
-export function hardwareToolboxCategory(boardId?: HardwareBoardId): Blockly.utils.toolbox.ToolboxItemInfo {
-  return {
-    kind: "category",
-    name: hardwareToolboxCategoryLabel(boardId),
-    colour: hardwareColours.board,
-    contents: hardwareToolboxContents(boardId),
-  } as unknown as Blockly.utils.toolbox.ToolboxItemInfo;
 }
 
 export function collectHardwareBlockIssues(workspace: Blockly.Workspace, boardId?: HardwareBoardId): HardwareBlockIssue[] {
@@ -93,6 +87,10 @@ export function collectHardwareBlockIssues(workspace: Blockly.Workspace, boardId
     if (!issues.has(key)) issues.set(key, issue);
   };
   for (const block of workspace.getAllBlocks(false)) {
+    if (profile?.boardId === "esp8266-esp12e") {
+      const randomIssue = esp8266RandomBlockIssue(block.type);
+      if (randomIssue) record(`esp8266-random-${block.id}`, { blockId: block.id, message: randomIssue });
+    }
     const label = hardwareBlockLabels[block.type];
     if (!label) continue;
     if (!profile) {
@@ -144,6 +142,41 @@ export function collectHardwareBlockIssues(workspace: Blockly.Workspace, boardId
       const rx = String(block.getFieldValue("RX") ?? "");
       if (tx && tx === rx) {
         record(`uart-pins-${block.id}`, { blockId: block.id, message: `「${label}」积木：发送和接收不能使用同一个引脚` });
+      }
+    }
+    if (block.type === "hardware_i2c_init") {
+      const sda = String(block.getFieldValue("SDA") ?? "");
+      const scl = String(block.getFieldValue("SCL") ?? "");
+      if (sda && sda === scl) {
+        record(`i2c-pins-${block.id}`, { blockId: block.id, message: `「${label}」积木：SDA 和 SCL 不能使用同一个引脚` });
+      }
+    }
+    if (block.type === "hardware_i2c_write_register" || block.type === "hardware_i2c_read_register") {
+      const address = numericInputValue(block, "ADDRESS");
+      if (address !== undefined && (!Number.isInteger(address) || address < 0x08 || address > 0x77)) {
+        record(`i2c-address-${block.id}`, { blockId: block.id, message: `「${label}」积木：I2C 地址必须是 0x08–0x77 之间的整数` });
+      }
+      const register = numericInputValue(block, "REGISTER");
+      if (register !== undefined && (!Number.isInteger(register) || register < 0 || register > 0xFF)) {
+        record(`i2c-register-${block.id}`, { blockId: block.id, message: `「${label}」积木：寄存器地址必须是 0–255 之间的整数` });
+      }
+      if (block.type === "hardware_i2c_write_register") {
+        const data = numericInputValue(block, "DATA");
+        if (data !== undefined && (!Number.isInteger(data) || data < 0 || data > 0xFF)) {
+          record(`i2c-data-${block.id}`, { blockId: block.id, message: `「${label}」积木：写入数据必须是 0–255 之间的整数` });
+        }
+      }
+    }
+    if (block.type === "hardware_wifi_connect") {
+      const ssid = block.getInputTargetBlock("SSID");
+      if (ssid?.type === "text" && !String(ssid.getFieldValue("TEXT") ?? "").trim()) {
+        record(`wifi-ssid-${block.id}`, { blockId: block.id, message: `「${label}」积木：Wi-Fi 名称不能为空` });
+      }
+    }
+    if (block.type === "hardware_wifi_wait") {
+      const seconds = numericInputValue(block, "SECONDS");
+      if (seconds !== undefined && (!Number.isInteger(seconds) || seconds <= 0)) {
+        record(`wifi-wait-${block.id}`, { blockId: block.id, message: `「${label}」积木：等待时间必须是大于 0 的整数秒` });
       }
     }
     if (block.type === "hardware_mcu_temperature" && !profile.mcuTemperature) {

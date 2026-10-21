@@ -451,12 +451,13 @@ AI 现在对 Profile 一无所知（见遗留问题 7）。分四步，**每一�
 
 1. `src/hardware/firmwareCatalog.ts`：`supportedHardwareBoards` 加入新 ID；`boardChipFamilies` 加映射；如是新芯片族，扩 `HardwareChipFamily`。
 2. `src/hardware/boardProfiles.ts`：新增 `BoardProfile`（引脚表、`analogRead` 形式、默认 I2C、PWM 参数、板载 LED），加入 `hardwareBoardProfiles`；`boardProfiles.test.ts` 里的 `collectBoardProfileIssues` 校验必须通过。
-3. `src-tauri/src/hardware/firmware.rs`：固件目录（约第 58–72 行）加入新板卡的固件文件名、官方下载地址、SHA-256（从 micropython.org 下载后自行计算，**不要凭记忆填**）；同文件里相应测试更新。
-4. `src-tauri/src/hardware/micropython.rs`：`default_upload_chunk_size(board_id)` 为新板卡指定分块大小（内存小的板子用小块）。
-5. `src/profiles/workbenchProfile.test.ts`：Profile 列表断言加上新 ID。
-6. `src/projectFile.test.ts`：加一条新 `profile` 值可被接受的用例。
-7. 若新板卡的 ADC / PWM 行为与现有两块不同，在 `hardwareBlocks` 的校验里补对应问题（并加测试）。
-8. 真机验收：走一遍第 P7 节的 2–9 项。
+3. `src/hardware/toolboxes/`：新增该板卡的声明，并在 `index.ts` 的 `boardToolboxSpec` 注册；对照 `esp32-s3.ts` 只写与其他板卡的差异。
+4. `src-tauri/src/hardware/firmware.rs`：固件目录（约第 58–72 行）加入新板卡的固件文件名、官方下载地址、SHA-256（从 micropython.org 下载后自行计算，**不要凭记忆填**）；同文件里相应测试更新。
+5. `src-tauri/src/hardware/micropython.rs`：`default_upload_chunk_size(board_id)` 为新板卡指定分块大小（内存小的板子用小块）。
+6. `src/profiles/workbenchProfile.test.ts`：Profile 列表断言加上新 ID。
+7. `src/projectFile.test.ts`：加一条新 `profile` 值可被接受的用例。
+8. 若新板卡的 ADC / PWM 行为与现有两块不同，在 `hardwareBlocks` 的校验里补对应问题（并加测试）。
+9. 真机验收：走一遍第 P7 节的 2–9 项。
 
 **不需要改的**：`App.tsx`、`HardwareWorkbenchBar.tsx`、`NewProjectDialog.tsx`——它们都从 Profile 列表读数据。如果新增板卡时发现要改这些文件，说明前面的任务没做对，回去修。
 
@@ -468,7 +469,7 @@ AI 现在对 Profile 一无所知（见遗留问题 7）。分四步，**每一�
 | --- | --- |
 | 某套界面显示 / 隐藏什么 | `src/profiles/workbenchProfile.ts`（`features`）+ `App.tsx` 里读 `profile.features.*` 的地方 |
 | 硬件工具箱内容 | `src/hardware/hardwareBlocks.ts`（P3.0 后在 `src/hardware/blocks/`） |
-| 硬件界面里隐藏哪些 Python 分类 | `src/profiles/profileToolbox.ts` 的 `buildProfileToolbox` |
+| 硬件工具箱里有哪些分类与积木 | `src/hardware/toolboxes/`（每块板卡一份声明，`index.ts` 里注册） |
 | 积木的引脚来源 | `src/hardware/boardProfiles.ts` |
 | 运行 / 停止 / 上传逻辑 | `src/profiles/useHardwareRunner.ts` → `src/hardware/useHardwareDevice.ts` → Rust `commands.rs` |
 | 设备连接、文件、日志状态 | `src/hardware/useHardwareDevice.ts`、`hardwareDeviceApi.ts`、`hardwareDeviceLog.ts` |
