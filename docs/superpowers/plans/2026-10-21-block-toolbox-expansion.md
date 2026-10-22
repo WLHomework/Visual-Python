@@ -1,6 +1,7 @@
 # 积木工具箱扩展清单
 
 > 盘点日期：2026-10-21  
+> 更新：2026-10-22 已完成 H1 P0-A、H2 P0-B、H3 P1-A 与 H4 P1-B；ESP32-S3 条目更新为 130（硬件专属 88），WROOM 更新为 84，ESP8266 更新为 76；网络分类 S3 为 20。  
 > 范围：内置的 Python、ESP32-S3、ESP32-WROOM、ESP8266-ESP12E 四套工具箱。  
 > 不包含：Manim、数学等插件在运行时动态注册的分类。  
 > 数据来源：按当前工作区实际调用 `buildProfileToolbox` 解析各 Profile 的工具箱得到；计数包含同名积木的不同预设条目，所以“条目数”可能大于“唯一类型数”。  
@@ -9,10 +10,12 @@
 ## 1. 结论
 
 1. **Python 工具箱已经不是短板**：18 个分类、207 个条目、201 个唯一类型。继续大幅增加语法积木的收益不高，优先补“类方法、文本方法、常用标准库”即可。
-2. **ESP32-S3 是最值得扩展的工具箱**：101 个条目中只有 59 个硬件专属积木；传感器只有 4 个，执行器只有 2 个，显示只有 OLED 的 5 个积木，模块层明显偏薄。
+2. **ESP32-S3 是最值得扩展的工具箱**：130 个条目中有 88 个硬件专属积木；传感器 8 个，执行器 4 个，显示 8 个，P0/P1 的存储、串口辅助、SPI 与网络增强已补齐，但仍明显少于底层原语。
 3. **WROOM 和 ESP8266 技术上能复用大量通用外设积木，但按当前 D6 决策暂不批量下放**。先在 S3 验证，再把不依赖 S3 特性的 P0 积木同步过去。
 4. **不要按 Mixly 的积木数量 1:1 复刻**。Mixly 的很多积木是“某块扩展板/某个芯片”的薄封装；我们应优先做高频、可组合、能在多个项目里复用的模块。
-5. **第一批建议只做 12 个**：按键消抖、PIR、光敏百分比、土壤湿度百分比、继电器、直流电机、音调持续、NeoPixel 填充、LCD1602 初始化/显示/清屏、BH1750 光照。用这一批同时验证 GPIO、ADC、PWM、I2C、设备库上传五条路径。
+5. **第一批 12 个已静态完成（2026-10-22）**：按键消抖、PIR、光敏百分比、土壤湿度百分比、继电器、直流电机、音调持续、NeoPixel 填充、LCD1602 初始化/显示/清屏、BH1750 光照。当前只进入 S3 工具箱，M3 真机通过前不下放 WROOM/ESP8266。
+6. **H3 P1-A 已静态完成（2026-10-22）**：存储补追加/存在/删除/列表/NVS 删除，串口补可读字节与关闭，I2C 补关闭，SPI 补初始化/字节收发/文本收发。SPI 和存储仍只进 S3；串口辅助进 S3/WROOM；I2C 关闭三块板卡都有。尚未做真机验收。
+7. **H4 P1-B 已静态完成（2026-10-22）**：新增 Wi-Fi 热点开/关/IP、RSSI、HTTP POST、NTP 本地时间和 MQTT 断开，仍只进 S3；同时把 v1.29 已移除的 `network.STA_IF/AP_IF` 改为 `network.WLAN.IF_STA/IF_AP`，并给 HTTP/NTP/MQTT 增加失败保护。尚未做真机验收。
 
 ## 2. 当前规模
 
@@ -21,9 +24,9 @@
 | 工具箱 | 分类数 | 条目数 | 唯一类型数 | 硬件专属类型 | 主要特点 |
 | --- | ---: | ---: | ---: | ---: | --- |
 | Python | 18 | 207 | 201 | 0 | 完整 Python，含字典、异常、类、文件、标准库、异步 |
-| ESP32-S3 | 18 | 101 | 101 | 59 | 有触摸、芯片温度、板载 RGB；有 HTTP/NTP、BLE/ESP-NOW、MQTT、存储 |
-| ESP32-WROOM | 17 | 81 | 81 | 39 | 有触摸、板载 LED、串口；无 S3 的高级无线和存储 |
-| ESP8266-ESP12E | 17 | 75 | 75 | 35 | 无触摸、无串口积木、无随机数；ADC 只有 A0 |
+| ESP32-S3 | 18 | 130 | 130 | 88 | 有触摸、芯片温度、板载 RGB；有热点/RSSI、HTTP/NTP、BLE/ESP-NOW、MQTT、存储、SPI；H1/H2/H3/H4 积木 |
+| ESP32-WROOM | 17 | 84 | 84 | 42 | 有触摸、板载 LED、串口辅助；无 S3 的高级无线、存储和 SPI |
+| ESP8266-ESP12E | 17 | 76 | 76 | 36 | 无触摸、无串口辅助、无随机数；ADC 只有 A0 |
 
 > “硬件专属类型”只统计 `hardware_*`，不含 `python_*`、Blockly 内置控制/数学/文本/列表积木。
 
@@ -31,7 +34,7 @@
 
 | 分类 | ESP32-S3 | ESP32-WROOM | ESP8266-ESP12E |
 | --- | ---: | ---: | ---: |
-| 输入/输出 | 5 | 5 | 4 |
+| 输入/输出 | 6 | 5 | 4 |
 | 控制 | 10 | 10 | 10 |
 | 逻辑 | 6 | 6 | 6 |
 | 数学 | 13 | 13 | 11 |
@@ -41,46 +44,46 @@
 | 变量 | 动态 | 动态 | 动态 |
 | 函数 | 3 | 3 | 3 |
 | 调用 | 动态 | 动态 | 动态 |
-| 串口 | 5 | 5 | 2 |
-| 通信 | 11 | 4 | 4 |
-| 网络 | 13 | 5 | 5 |
-| 存储 | 4 | — | — |
-| 传感器 | 4 | 3 | 3 |
-| 执行器 | 2 | 2 | 2 |
-| 灯光 | 5 | 5 | 5 |
-| 显示 | 5 | 5 | 5 |
+| 串口 | 7 | 7 | 2 |
+| 通信 | 15 | 5 | 5 |
+| 网络 | 20 | 5 | 5 |
+| 存储 | 9 | — | — |
+| 传感器 | 8 | 3 | 3 |
+| 执行器 | 4 | 2 | 2 |
+| 灯光 | 6 | 5 | 5 |
+| 显示 | 8 | 5 | 5 |
 
 说明：
 
 - “控制”“逻辑”“数学”“文本”“列表”等分类里混有通用 Python/Blockly 积木，所以数量不等于硬件专属积木数。
-- ESP32-S3 的“通信”包含 BLE 和 ESP-NOW，“网络”包含 HTTP、NTP、MQTT。
-- ESP32-WROOM、ESP8266 的“通信/网络”只有 I2C 和 Wi-Fi 基础积木。
-- ESP8266 的“串口”只有两条打印积木，没有 UART 初始化/读写。
+- ESP32-S3 的“通信”包含 I2C、BLE、ESP-NOW 和 SPI，“网络”包含 Wi-Fi 热点/RSSI、HTTP、NTP、MQTT。
+- ESP32-WROOM、ESP8266 的“通信/网络”只有 I2C 和 Wi-Fi 基础积木；I2C 关闭三块板卡都有。
+- ESP8266 的“串口”只有两条打印积木，没有 UART 初始化/读写/关闭。
 
 ### 2.3 ESP32-S3 当前硬件专属积木
 
 | 分类 | 当前积木 |
 | --- | --- |
-| 输入/输出（5） | 设置数字引脚、读取数字引脚、读取模拟输入、设置 PWM 输出、触摸读数 |
+| 输入/输出（6） | 设置数字引脚、读取数字引脚、读取模拟输入、设置 PWM 输出、触摸读数、读取按键 |
 | 控制（6 个硬件积木） | 永远重复、等待毫秒、毫秒计时器、计时差值、重启开发板、深度睡眠 |
 | 数学（1 个硬件积木） | 数值映射 |
-| 串口（3 个硬件积木） | 初始化串口、串口发送、串口读取 |
-| 通信（11） | 初始化 I2C、扫描 I2C、I2C 写寄存器、I2C 读寄存器、开启/停止 BLE 广播、初始化 ESP-NOW、本机 MAC、发送、接收、最近发送者 |
-| 网络（13） | Wi-Fi 连接/等待/状态/IP/断开、HTTP GET、NTP 校时、设备当前时间、MQTT 连接/发布/订阅/等待消息/最近主题 |
-| 存储（4） | 写入设备文件、读取设备文件、写入 NVS、读取 NVS |
-| 传感器（4） | DHT 温度、DHT 湿度、超声波测距、芯片温度 |
-| 执行器（2） | 舵机角度、音调 |
-| 灯光（5） | 板载 RGB、初始化 NeoPixel、设置像素颜色、清空、刷新 |
-| 显示（5） | 初始化 OLED、清屏、显示文字、像素、刷新 |
+| 串口（5 个硬件积木） | 初始化串口、串口发送、串口读取、可读字节数、关闭串口 |
+| 通信（15） | 初始化 I2C、扫描 I2C、I2C 写寄存器、I2C 读寄存器、关闭 I2C、开启/停止 BLE 广播、初始化 ESP-NOW、本机 MAC、发送、接收、最近发送者、初始化 SPI、SPI 收发字节、SPI 收发文本 |
+| 网络（20） | Wi-Fi 连接/等待/状态/IP/断开、热点开/关/IP、Wi-Fi 信号强度、HTTP GET/POST、NTP 校时、设备当前时间、设备本地时间、MQTT 连接/发布/订阅/等待消息/最近主题/断开 |
+| 存储（9） | 写入设备文件、追加设备文件、读取设备文件、判断文件存在、删除设备文件、列出目录、写入 NVS、读取 NVS、删除 NVS |
+| 传感器（8） | DHT 温度、DHT 湿度、超声波测距、芯片温度、PIR 人体感应、光敏百分比、土壤湿度百分比、BH1750 光照 |
+| 执行器（4） | 舵机角度、音调、继电器开关、直流电机 |
+| 灯光（6） | 板载 RGB、初始化 NeoPixel、设置像素颜色、清空、填充、刷新 |
+| 显示（8） | 初始化 OLED、清屏、显示文字、像素、刷新、初始化 LCD1602、LCD1602 显示文字、清空 LCD1602 |
 
 ### 2.4 当前最明显的空洞
 
-- **传感器**：只有 DHT、超声波和芯片温度；没有光敏、土壤、PIR、声音、火焰、气体、I2C 环境传感器。
-- **执行器**：只有舵机和蜂鸣器；没有继电器、直流电机、步进电机。
-- **显示**：只有 OLED；没有 LCD1602、TM1637 数码管、OLED 图形。
-- **通信**：没有 SPI，无法支撑 SD 卡、RFID、部分显示屏。
-- **网络**：有 HTTP GET，没有 POST、状态码、热点模式、Wi-Fi 信号强度、MQTT 断开。
-- **存储**：只有整文件读写和 NVS 读写；没有追加、存在性检查、删除、列表。
+- **传感器**：已有 DHT、超声波、芯片温度、PIR、光敏、土壤和 BH1750；仍缺声音、火焰、气体、更多 I2C 环境传感器。
+- **执行器**：已有舵机、蜂鸣器、继电器和直流电机；仍缺步进电机。
+- **显示**：已有 OLED 和 LCD1602；仍缺 TM1637 数码管、OLED 图形。
+- **通信**：已有 I2C 和 SPI 基础积木；仍缺 BLE GATT、红外收发、RFID 驱动。
+- **网络**：HTTP GET/POST、热点模式、Wi-Fi 信号强度、NTP 本地时间和 MQTT 断开已补齐；仍缺 HTTP 状态码、MQTT 连接状态、Web 服务器和 HTTP 下载。
+- **存储**：文件追加/存在性/删除/列表与 NVS 删除已补齐；仍缺文件大小、SD 卡挂载。
 - **Python**：文本方法只有 5 个；对象分类缺少“定义方法”的核心积木；标准库覆盖集中在少量模块。
 
 ## 3. 扩展原则
@@ -188,9 +191,11 @@ Python 侧不建议继续堆语法糖。下面按“值得做”的程度排序�
 | --- | --- | --- | --- | --- |
 | `hardware_uart_available` | 串口当前可读字节数 | `UART.any()` | S3/W | P1 |
 | `hardware_uart_readline` | 串口读取一行文本 | `UART.readline()` | S3/W | P1 |
-| `hardware_uart_deinit` | 关闭串口，释放引脚 | `UART.deinit()` | S3/W | P2 |
+| `hardware_uart_deinit` | 关闭串口，释放引脚 | `UART.deinit()` | S3/W | P1 |
 
 ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放 UART0（通常被 REPL 占用）。
+
+> H3.3 已完成（2026-10-22）：新增 `hardware_uart_available` 与 `hardware_uart_deinit`；“读取一行”复用现有 `hardware_uart_read` 的 line 模式，没有新增重复类型。S3/WROOM 可见，ESP8266 不提供。`UART.any()`、`UART.deinit()` 已对照 v1.29.0 文档。
 
 ### 5.4 通信
 
@@ -198,23 +203,25 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 | --- | --- | --- | --- | --- |
 | `hardware_spi_init` | 初始化 SPI；SCK/MOSI/MISO | `machine.SPI` | S3/W/8266* | P1 |
 | `hardware_spi_transfer` | SPI 写入并读回一个字节/缓冲区 | `SPI.write_readinto` | S3/W/8266* | P1 |
-| `hardware_i2c_deinit` | 关闭 I2C 总线 | `I2C.deinit` | S3/W/8266 | P2 |
+| `hardware_i2c_deinit` | 关闭 I2C 总线 | `I2C.deinit` | S3/W/8266 | P1 |
 | `hardware_ble_gatt_start` | 启动 BLE GATT 服务 | `bluetooth` | S3 | P2 |
 | `hardware_ble_gatt_notify` | 向已连接中心设备发送通知 | `bluetooth` | S3 | P2 |
 | `hardware_ir_receive` | 读取红外遥控键值 | 纯 Python 红外驱动 | S3/W/8266 | P2 |
 | `hardware_rc522_uid` | 读取 RFID 卡号 | SPI + 纯 Python RC522 驱动 | S3/W/8266* | P2 |
 
 > 目前 BLE 只做广播，没有 GATT 连接。GATT 是独立的一批工作，不要和现有“开启/停止广播”混在一起。
+>
+> H3.4/H3.5 已完成（2026-10-22）：SPI 初始化、单字节收发、文本收发进入 S3“通信”分类，使用 `SPI.write_readinto`；默认 SCK 12 / MOSI 11 / MISO 13（ESP32-S3 SPI2 IOMUX），波特率静态限制 1000–80000000。`hardware_i2c_deinit` 三块板卡都有，关闭后下一次初始化会重建共享总线；已缓存的 OLED/LCD/传感器对象需要重新初始化。
 
 ### 5.5 网络（当前仅建议 S3）
 
 | 建议积木 | 作用与关键字段 | 依赖 | 板卡 | 优先级 |
 | --- | --- | --- | --- | --- |
-| `hardware_wifi_ap_start` | 开启热点；SSID、密码、信道 | `network.WLAN(AP_IF)` | S3 | P1 |
-| `hardware_wifi_ap_stop` | 关闭热点 | `network.WLAN(AP_IF)` | S3 | P1 |
-| `hardware_wifi_ap_ip` | 读取热点 IP | `network.WLAN(AP_IF)` | S3 | P1 |
+| `hardware_wifi_ap_start` | 开启热点；SSID、密码、信道 | `network.WLAN.IF_AP` | S3 | P1 |
+| `hardware_wifi_ap_stop` | 关闭热点 | `network.WLAN.IF_AP` | S3 | P1 |
+| `hardware_wifi_ap_ip` | 读取热点 IP | `network.WLAN.IF_AP` | S3 | P1 |
 | `hardware_wifi_rssi` | 读取 Wi-Fi 信号强度 | `WLAN.status` / `rssi` | S3 | P1 |
-| `hardware_http_post` | HTTP POST；URL、正文 | `requests.post`，需核对冻结版本 | S3 | P1 |
+| `hardware_http_post` | HTTP POST；URL、正文 | `requests.post` | S3 | P1 |
 | `hardware_http_status` | 最近一次 HTTP 状态码 | 需为 HTTP 请求保存状态 | S3 | P2 |
 | `hardware_ntp_local` | NTP 校时后的本地时间；时区偏移小时 | `ntptime` + `time` | S3 | P1 |
 | `hardware_mqtt_connected` | MQTT 是否已连接 | 检查 `_mqtt.sock`，需实测 | S3 | P2 |
@@ -222,6 +229,8 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 | `hardware_http_download` | 下载 URL 到设备文件 | `requests` + 文件写入 | S3 | P2 |
 | `hardware_webserver_start` | 启动最小 HTTP 服务 | `socket` | S3 | P2 |
 
+> H4.1/H4.2/H4.3 已完成（2026-10-22）：`hardware_wifi_ap_start`（SSID 1–32 字节、密码 8–63 个 ASCII 字符、信道 1–13）、`hardware_wifi_ap_stop`、`hardware_wifi_ap_ip`、`hardware_wifi_rssi`、`hardware_http_post`、`hardware_ntp_local`、`hardware_mqtt_disconnect` 已进入 S3“网络”；HTTP GET/POST、NTP 和 MQTT 增加失败保护，STA/AP 常量改为 v1.29 的 `network.WLAN.IF_STA/IF_AP`。这些 P1 行已静态实现，P2 行仍未开始。
+>
 > WROOM 也具备 Wi-Fi AP/HTTP/MQTT 的硬件能力，但按 T6 决策，这些高级无线积木只给 S3。
 
 ### 5.6 存储（当前仅建议 S3）
@@ -238,6 +247,8 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 | `hardware_sd_unmount` | 卸载 SD 卡 | `os.umount`，需核对 | S3/W | P2 |
 
 > 现有文件积木只能整文件覆盖；追加、存在性、删除是最常用的三个缺口，建议和存储分类一起补。
+>
+> H3.1/H3.2 已完成（2026-10-22）：新增追加、存在、删除、列表和 NVS 删除；路径为空以及写入/追加/删除 `/main.py` 会在问题面板提示；`os.stat`/`os.remove`/`os.listdir` 失败返回假/空列表。`esp32.NVS.erase_key` 已对照 v1.29.0 文档，删除后调用 `commit()`；`erase_key` 是否必须再 `commit()`、键不存在时是否抛 `OSError` 仍需 M5 真机确认。
 
 ### 5.7 传感器
 
@@ -263,6 +274,8 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 | `hardware_gps_read` | GPS NMEA 解析 | UART + 驱动 | S3/W | P3 |
 
 > 模拟传感器在 ESP8266 上只有 A0，输入范围通常为 0–1.0 V，必须提醒用户使用分压/校准；不要把它当成和 ESP32 一样的 12 位 ADC。
+>
+> 2026-10-22 状态：`hardware_bh1750_lux` 已随 H2 静态实现，当前只进入 S3 工具箱；驱动为 `device-libraries/bh1750.py`，连续高分辨率模式。
 
 ### 5.8 执行器
 
@@ -275,6 +288,8 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 | `hardware_servo_sweep` | 舵机从 A 角转到 B 角 | PWM | S3/W/8266 | P2 |
 
 > ESP8266 的 PWM 占空比范围和 ESP32 不同；`hardware_dc_motor` 必须在生成器里按板卡做归一化，不能直接复用 `duty_u16`。
+>
+> 2026-10-22 状态：继电器、直流电机已静态实现；`hardware_tone_duration` 不单独新增，现有 `hardware_tone` 已包含持续时间和结束后静音。
 
 ### 5.9 灯光
 
@@ -300,22 +315,24 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 | `hardware_tm1637_brightness` | 设置数码管亮度 | 纯 Python 驱动 | S3/W/8266 | P2 |
 
 > LCD1602 的 I2C 背板常见工作电压是 5 V；ESP32 的 I2C 是 3.3 V，接线时必须确认模块是否自带电平转换，否则应加电平转换器。这个限制要写进积木提示。
+>
+> 2026-10-22 状态：LCD1602 初始化/显示/清屏已静态实现；背光通过初始化积木的开关字段控制，暂不单独提供 P2 的背光积木。
 
 ## 6. 各硬件工具箱的落地差异
 
 ### 6.1 ESP32-S3（优先）
 
-当前 59 个硬件专属积木。建议分三批：
+当前 88 个硬件专属积木。建议分三批：
 
-- **第一批（12 个）**：按键、PIR、光敏、土壤、继电器、直流电机、音调持续、NeoPixel 填充、LCD1602 初始化/显示/清屏、BH1750。
-- **第二批（P1）**：模拟电压、串口辅助、SPI、Wi-Fi 热点/RSSI、HTTP POST、NTP 本地时间、MQTT 断开、文件追加/存在/删除、DS18B20、BMP280、SHT30、MPU6050、OLED 画线/画矩形、TM1637、步进电机。
+- **第一批（12 个，已静态完成）**：按键、PIR、光敏、土壤、继电器、直流电机、音调持续、NeoPixel 填充、LCD1602 初始化/显示/清屏、BH1750。当前仅 S3 工具箱，M3 真机通过前不下放。
+- **第二批（P1，部分已完成）**：模拟电压、串口辅助、SPI、Wi-Fi 热点/RSSI、HTTP POST、NTP 本地时间、MQTT 断开、文件追加/存在/删除已完成静态实现（其中 Wi-Fi 热点/RSSI、HTTP POST、NTP 本地时间、MQTT 断开属于 H4）；DS18B20、BMP280、SHT30、MPU6050、OLED 画线/画矩形、TM1637、步进电机仍待 H5。
 - **第三批（P2）**：中断/定时器、BLE GATT、红外、RFID、SD 卡、DS3231、VL53L0X、Web 服务器、HTTP 下载、OLED 进度条。
 
-预计第一批后 S3 硬件专属积木约 71 个，总工具箱条目约 113 个；第二批后约 95–100 个硬件专属积木。不要一次冲到 150 个以上，否则分类内滚动和查找会明显变差。
+预计第一批后 S3 硬件专属积木约 71 个，总工具箱条目约 113 个；H3/H4 后当前为 88 个硬件专属积木、130 个条目。不要一次冲到 150 个以上，否则分类内滚动和查找会明显变差。
 
 ### 6.2 ESP32-WROOM
 
-当前 39 个硬件专属积木。技术上可复用 P0 的通用外设包，但按 D6 暂不批量加入：
+当前 42 个硬件专属积木。技术上可复用 P0 的通用外设包，但按 D6 暂不批量加入：
 
 - **可复用**：按键、PIR、光敏/土壤、继电器、直流电机、音调持续、NeoPixel 填充、LCD1602、BH1750、BMP280、SHT30、MPU6050、DS18B20、TM1637。
 - **不支持/不加入**：芯片温度、板载 RGB、S3 的 HTTP/NTP/BLE/ESP-NOW/MQTT、设备文件/NVS。
@@ -324,7 +341,7 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 
 ### 6.3 ESP8266-ESP12E
 
-当前 35 个硬件专属积木，限制最多：
+当前 36 个硬件专属积木，限制最多：
 
 - **可考虑**：按键、PIR、光敏/土壤（A0 + 分压/校准）、继电器、直流电机（PWM 范围需适配）、音调持续、NeoPixel 填充、LCD1602、BH1750、TM1637、DS18B20。
 - **不建议**：SPI 大驱动、SD 卡、I2C 多设备大驱动、BLE/ESP-NOW/MQTT/HTTP/NTP、设备文件/NVS。
@@ -346,7 +363,7 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 | 5 | 传感器 | BH1750 光照 | 第一个 I2C 驱动试点，验证 `/lib` 上传 |
 | 6 | 执行器 | 继电器 | 纯 GPIO，覆盖家电控制场景 |
 | 7 | 执行器 | 直流电机 | 覆盖方向 + PWM 调速 |
-| 8 | 执行器 | 音调持续 | 补足现有“音调”只能持续响的缺口 |
+| 8 | 执行器 | 音调持续 | 现有 `hardware_tone` 已包含持续时间并在结束后静音；H1 只做回归验证，不新增重复积木 |
 | 9 | 灯光 | NeoPixel 填充 | 比逐像素设置更适合快速做效果 |
 | 10 | 显示 | LCD1602 初始化 | 第二个显示设备，覆盖 I2C 文本显示 |
 | 11 | 显示 | LCD1602 显示文字 | 最常用的显示操作 |
@@ -355,6 +372,8 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 这一批的共同点：**不依赖高级网络、不改变现有 T6 积木语义、能用现有 GPIO/ADC/PWM/I2C 基础能力实现**。完成后 S3 的传感器、执行器、显示三个分类会有明显改善。
 
 ## 8. 技术落地顺序
+
+> 执行状态（2026-10-22）：H0 基础设施、H1 P0-A 与 H2 P0-B 已静态完成（新增按键、PIR、光敏、土壤、继电器、直流电机、NeoPixel 填充、LCD1602、BH1750；既有音调已带持续时间）。当前只进入 S3 工具箱，真机验收见 M3。详见 `2026-10-22-hardware-block-expansion-plan.md`。
 
 1. **先统一 I2C 总线助手**
    - 现有代码用全局 `_i2c`，OLED 会复用 `globals().get("_i2c")`。
@@ -368,7 +387,7 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
    - 先用 BH1750 做一个最小驱动，验证“积木 → 代码 → 上传 → 运行”完整链路。
 
 3. **补 P0 积木并写测试**
-   - 新文件按模块拆：例如 `sensors_analog.ts`、`sensors_i2c.ts`、`display_lcd1602.ts`。
+   - 新文件按模块拆：例如 `sensorsAnalog.ts`、`sensorsDigital.ts`、`sensorsI2c.ts`、`lcd1602.ts`。
    - 每个积木补：默认工具箱条目、字段校验、生成代码快照、无板卡/不支持板卡的 fallback。
    - 更新 `hardwareBlockLabels`、分类声明、覆盖测试；不要在 `App.tsx` 里写板卡 ID 判断。
 
@@ -426,3 +445,4 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 - `src/profiles/useHardwareRunner.ts`：运行前按 import 上传 `/lib` 驱动。
 - `src/pythonBlocks.ts`、`src/pythonSyntaxBlocks.ts`：Python 积木定义与工具箱。
 - `docs/superpowers/plans/2026-10-19-board-toolboxes.md`：T6 完成状态和 T7 验收清单。
+- `docs/superpowers/plans/2026-10-22-hardware-block-expansion-plan.md`：本清单的滚动实施计划与进度表。

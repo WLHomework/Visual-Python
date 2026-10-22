@@ -47,6 +47,10 @@ describe("ESP32-S3 工具箱的积木搜索", () => {
     expect(searchBlockIndex(index, "OLED").map((entry) => entry.type)).toEqual(
       expect.arrayContaining(["hardware_oled_init", "hardware_oled_write"]),
     );
+    expect(searchBlockIndex(index, "LCD").map((entry) => entry.type)).toEqual(
+      expect.arrayContaining(["hardware_lcd1602_init", "hardware_lcd1602_text", "hardware_lcd1602_clear"]),
+    );
+    expect(searchBlockIndex(index, "BH1750").map((entry) => entry.type)).toContain("hardware_bh1750_lux");
     expect(searchBlockIndex(index, "引脚").map((entry) => entry.type)).toEqual(
       expect.arrayContaining(["hardware_pin_write", "hardware_pin_read"]),
     );
@@ -56,7 +60,14 @@ describe("ESP32-S3 工具箱的积木搜索", () => {
         "hardware_i2c_scan",
         "hardware_i2c_write_register",
         "hardware_i2c_read_register",
+        "hardware_i2c_deinit",
       ]),
+    );
+    expect(searchBlockIndex(index, "SPI").map((entry) => entry.type)).toEqual(
+      expect.arrayContaining(["hardware_spi_init", "hardware_spi_transfer", "hardware_spi_transfer_text"]),
+    );
+    expect(searchBlockIndex(index, "NVS").map((entry) => entry.type)).toEqual(
+      expect.arrayContaining(["hardware_nvs_set", "hardware_nvs_get", "hardware_nvs_delete"]),
     );
     expect(searchBlockIndex(index, "wifi").map((entry) => entry.type)).toEqual(
       expect.arrayContaining([
@@ -65,8 +76,17 @@ describe("ESP32-S3 工具箱的积木搜索", () => {
         "hardware_wifi_disconnect",
         "hardware_wifi_connected",
         "hardware_wifi_ip",
+        "hardware_wifi_ap_start",
+        "hardware_wifi_ap_stop",
+        "hardware_wifi_ap_ip",
+        "hardware_wifi_rssi",
       ]),
     );
+    expect(searchBlockIndex(index, "热点").map((entry) => entry.type)).toEqual(
+      expect.arrayContaining(["hardware_wifi_ap_start", "hardware_wifi_ap_stop", "hardware_wifi_ap_ip"]),
+    );
+    expect(searchBlockIndex(index, "POST").map((entry) => entry.type)).toContain("hardware_http_post");
+    expect(searchBlockIndex(index, "断开").map((entry) => entry.type)).toContain("hardware_mqtt_disconnect");
   });
 
   it("搜不到工具箱外的 Python 积木", () => {

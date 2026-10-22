@@ -17,7 +17,7 @@ export const boardControlCategory = (): ToolboxCategorySpec =>
 export const boardMathCategory = (options: { random?: boolean } = {}): ToolboxCategorySpec =>
   mathCategory(["hardware_map_range"], options);
 
-/** 输入/输出：数字引脚、模拟输入和 PWM；支持电容触摸的板卡再传 hardware_touch_read。 */
+/** 输入/输出：数字引脚、模拟输入和 PWM；S3 再传按键，支持电容触摸的板卡再传 hardware_touch_read。 */
 export const inputOutputCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
   id: "input-output",
   name: "输入/输出",
@@ -25,7 +25,7 @@ export const inputOutputCategory = (extra: ToolboxItemSpec[] = []): ToolboxCateg
   items: ["hardware_pin_write", "hardware_pin_read", "hardware_analog_read", "hardware_pwm_write", ...extra],
 });
 
-/** 传感器：DHT 与超声波；能读芯片温度的板卡再传 hardware_mcu_temperature。 */
+/** 传感器：DHT 与超声波；S3 再传 PIR、模拟百分比、BH1750，能读芯片温度的板卡再传 hardware_mcu_temperature。 */
 export const sensorCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
   id: "sensor",
   name: "传感器",
@@ -33,43 +33,45 @@ export const sensorCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySp
   items: ["hardware_dht_temperature", "hardware_dht_humidity", "hardware_ultrasonic_distance", ...extra],
 });
 
-export const actuatorCategory = (): ToolboxCategorySpec => ({
+/** 执行器：舵机与音调三块板卡都有；S3 再传继电器和直流电机。 */
+export const actuatorCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
   id: "actuator",
   name: "执行器",
   colour: hardwareColours.pwm,
-  items: ["hardware_servo_write", "hardware_tone"],
+  items: ["hardware_servo_write", "hardware_tone", ...extra],
 });
 
-/** 灯光：extra 是这块板卡的板载灯（板载 RGB 或普通 LED），排在灯带积木前面。 */
-export const lightCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
+/** 灯光：`before` 是这块板卡的板载灯，排在灯带积木前面；`after` 是填充等板卡专属灯带积木，排在刷新前面。 */
+export const lightCategory = (options: { before?: ToolboxItemSpec[]; after?: ToolboxItemSpec[] } = {}): ToolboxCategorySpec => ({
   id: "light",
   name: "灯光",
   colour: hardwareColours.light,
   items: [
-    ...extra,
+    ...(options.before ?? []),
     "hardware_neopixel_init",
     "hardware_neopixel_set_pixel",
     "hardware_neopixel_clear",
+    ...(options.after ?? []),
     "hardware_neopixel_write",
   ],
 });
 
-export const displayCategory = (): ToolboxCategorySpec => ({
+export const displayCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
   id: "display",
   name: "显示",
   colour: hardwareColours.display,
-  items: ["hardware_oled_init", "hardware_oled_clear", "hardware_oled_text", "hardware_oled_pixel", "hardware_oled_write"],
+  items: ["hardware_oled_init", "hardware_oled_clear", "hardware_oled_text", "hardware_oled_pixel", "hardware_oled_write", ...extra],
 });
 
-/** 通信：I2C 三块板卡都有；ESP32-S3 再追加 BLE 与 ESP-NOW 积木。 */
+/** 通信：I2C 三块板卡都有；ESP32-S3 再追加 BLE、ESP-NOW 与 SPI 积木。 */
 export const communicationCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
   id: "communication",
   name: "通信",
   colour: hardwareColours.communication,
-  items: ["hardware_i2c_init", "hardware_i2c_scan", "hardware_i2c_write_register", "hardware_i2c_read_register", ...extra],
+  items: ["hardware_i2c_init", "hardware_i2c_scan", "hardware_i2c_write_register", "hardware_i2c_read_register", "hardware_i2c_deinit", ...extra],
 });
 
-/** 网络：Wi-Fi 三块板卡都有（仅 2.4 GHz）；ESP32-S3 再追加 HTTP、NTP 与 MQTT。 */
+/** 网络：Wi-Fi 三块板卡都有（仅 2.4 GHz）；ESP32-S3 再追加热点、RSSI、HTTP、NTP 与 MQTT。 */
 export const networkCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
   id: "network",
   name: "网络",
@@ -82,5 +84,15 @@ export const storageCategory = (): ToolboxCategorySpec => ({
   id: "storage",
   name: "存储",
   colour: hardwareColours.storage,
-  items: ["hardware_file_write", "hardware_file_read", "hardware_nvs_set", "hardware_nvs_get"],
+  items: [
+    "hardware_file_write",
+    "hardware_file_append",
+    "hardware_file_read",
+    "hardware_file_exists",
+    "hardware_file_delete",
+    "hardware_file_list",
+    "hardware_nvs_set",
+    "hardware_nvs_get",
+    "hardware_nvs_delete",
+  ],
 });

@@ -3,6 +3,8 @@ import { getBoardProfile } from "../boardProfiles";
 import type { HardwareBoardId } from "../firmwareCatalog";
 import {
   defineHardwareBlocks,
+  ensureI2cBus,
+  ensureI2cCloseHelper,
   ensureImport,
   getActiveHardwareBoard,
   hardwareColours,
@@ -28,7 +30,7 @@ const definitions = [
     previousStatement: null,
     nextStatement: null,
     colour: hardwareColours.communication,
-    tooltip: "按当前板卡的默认引脚初始化 I2C。ESP8266 使用软件 I2C；先运行此积木后，OLED 会复用这条总线。",
+    tooltip: "按当前板卡的默认引脚初始化 I2C。ESP8266 使用软件 I2C；OLED、传感器会复用这条总线。未运行此积木时，相关积木会按默认引脚自动创建。",
     extensions: ["hardware_board_pin"],
   },
   {
@@ -36,7 +38,7 @@ const definitions = [
     message0: "扫描 I2C 设备地址",
     output: "Array",
     colour: hardwareColours.communication,
-    tooltip: "返回总线上响应的 7 位地址列表（0x08–0x77）。请先运行「初始化 I2C」积木。",
+    tooltip: "返回总线上响应的 7 位地址列表（0x08–0x77）。未运行「初始化 I2C」时，会先按当前板卡默认引脚创建总线。",
   },
   {
     type: "hardware_i2c_write_register",
@@ -64,6 +66,14 @@ const definitions = [
     colour: hardwareColours.communication,
     tooltip: "读取 7 位地址设备某个寄存器的 1 个字节（0–255）。地址和寄存器号用十进制填写。",
   },
+  {
+    type: "hardware_i2c_deinit",
+    message0: "关闭 I2C",
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.communication,
+    tooltip: "关闭共享 I2C 总线并释放引脚；关闭后请重新初始化 OLED、LCD 或传感器，或再次运行「初始化 I2C」积木。",
+  },
 ];
 
 const literalProblem = (block: Blockly.Block, input: string, min: number, max: number, message: string): string | undefined => {
@@ -88,32 +98,44 @@ export function register(): void {
   };
 
   hardwareGenerator.forBlock.hardware_i2c_scan = () => {
-    if (!getActiveHardwareBoard()) return ["[]", pythonOrder.ATOMIC];
-    return ["_i2c.scan()", pythonOrder.FUNCTION_CALL];
+    const profile = getActiveHardwareBoard();
+    if (!profile) return ["[]", pythonOrder.ATOMIC];
+    const bus = ensureI2cBus(profile);
+    return [`${bus}().scan()`, pythonOrder.FUNCTION_CALL];
   };
 
   hardwareGenerator.forBlock.hardware_i2c_write_register = (block, generator) => {
-    if (!getActiveHardwareBoard()) return unavailable("请先选择硬件板卡");
+    const profile = getActiveHardwareBoard();
+    if (!profile) return unavailable("请先选择硬件板卡");
     const problem =
       literalProblem(block, "ADDRESS", 0x08, 0x77, "I2C 地址必须在 0x08–0x77 之间") ??
       literalProblem(block, "REGISTER", 0, 0xFF, "寄存器地址必须在 0–255 之间") ??
       literalProblem(block, "DATA", 0, 0xFF, "写入数据必须在 0–255 之间");
     if (problem) return unavailable(problem);
+    const bus = ensureI2cBus(profile);
     const address = generator.valueToCode(block, "ADDRESS", pythonOrder.NONE) || "0";
     const register = generator.valueToCode(block, "REGISTER", pythonOrder.NONE) || "0";
     const data = generator.valueToCode(block, "DATA", pythonOrder.NONE) || "0";
-    return `_i2c.writeto_mem(int(${address}), int(${register}), bytes([int(${data}) & 0xFF]))\n`;
+    return `${bus}().writeto_mem(int(${address}), int(${register}), bytes([int(${data}) & 0xFF]))\n`;
   };
 
   hardwareGenerator.forBlock.hardware_i2c_read_register = (block, generator) => {
-    if (!getActiveHardwareBoard()) return ["None", pythonOrder.ATOMIC];
+    const profile = getActiveHardwareBoard();
+    if (!profile) return ["None", pythonOrder.ATOMIC];
     const problem =
       literalProblem(block, "ADDRESS", 0x08, 0x77, "I2C 地址必须在 0x08–0x77 之间") ??
       literalProblem(block, "REGISTER", 0, 0xFF, "寄存器地址必须在 0–255 之间");
     if (problem) return ["None", pythonOrder.ATOMIC];
+    const bus = ensureI2cBus(profile);
     const address = generator.valueToCode(block, "ADDRESS", pythonOrder.NONE) || "0";
     const register = generator.valueToCode(block, "REGISTER", pythonOrder.NONE) || "0";
-    return [`_i2c.readfrom_mem(int(${address}), int(${register}), 1)[0]`, pythonOrder.FUNCTION_CALL];
+    return [`${bus}().readfrom_mem(int(${address}), int(${register}), 1)[0]`, pythonOrder.FUNCTION_CALL];
+  };
+
+  hardwareGenerator.forBlock.hardware_i2c_deinit = () => {
+    const profile = getActiveHardwareBoard();
+    if (!profile) return unavailable("请先选择硬件板卡");
+    return `${ensureI2cCloseHelper()}()\n`;
   };
 }
 
@@ -139,5 +161,6 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
       type: "hardware_i2c_read_register",
       inputs: { ADDRESS: numberShadow(0x3C), REGISTER: numberShadow(0) },
     },
+    { kind: "block", type: "hardware_i2c_deinit" },
   ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
 }

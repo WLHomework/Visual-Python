@@ -6,6 +6,7 @@ import {
   ensureImport,
   ensureWifiWaitHelper,
   ensureWlan,
+  ensureWlanAp,
   getActiveHardwareBoard,
   hardwareColours,
   hardwareGenerator,
@@ -62,7 +63,51 @@ const definitions = [
     colour: hardwareColours.network,
     tooltip: "返回当前 IP 地址；未连接时通常是 0.0.0.0。",
   },
+  {
+    type: "hardware_wifi_ap_start",
+    message0: "开启 Wi-Fi 热点 名称 %1 密码 %2 信道 %3",
+    args0: [
+      { type: "input_value", name: "SSID", check: "String" },
+      { type: "input_value", name: "PASSWORD", check: "String" },
+      { type: "input_value", name: "CHANNEL", check: "Number" },
+    ],
+    inputsInline: false,
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.network,
+    tooltip:
+      "开启 2.4 GHz 热点（设备作为 AP），信道 1–13。密码必须是 8–63 个 ASCII 字符，会明文写入 .vpy 工程文件和设备上的 main.py，请勿使用重要密码。热点与 Wi-Fi 连接共用射频；热点开启时 ADC2 引脚不可用。",
+  },
+  {
+    type: "hardware_wifi_ap_stop",
+    message0: "关闭 Wi-Fi 热点",
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.network,
+    tooltip: "关闭热点，已连接的客户端会断开。",
+  },
+  {
+    type: "hardware_wifi_ap_ip",
+    message0: "热点 IP 地址",
+    output: "String",
+    colour: hardwareColours.network,
+    tooltip: "返回热点接口 IP 地址；热点未开启时通常是 0.0.0.0。",
+  },
+  {
+    type: "hardware_wifi_rssi",
+    message0: "Wi-Fi 信号强度（dBm）",
+    output: "Number",
+    colour: hardwareColours.network,
+    tooltip: "返回当前 Wi-Fi 连接的信号强度，典型值约 -30（强）到 -90（弱）；未连接时返回 0。",
+  },
 ];
+
+const advancedGuard = (): string | undefined => {
+  const profile = getActiveHardwareBoard();
+  if (!profile) return "请先选择硬件板卡";
+  if (!profile.advancedWireless) return `${profile.displayName} 不支持热点 / Wi-Fi 信号强度积木（仅 ESP32-S3）`;
+  return undefined;
+};
 
 export function register(): void {
   defineHardwareBlocks(definitions);
@@ -104,10 +149,60 @@ export function register(): void {
     ensureWlan();
     return ["_wlan.ifconfig()[0]", pythonOrder.FUNCTION_CALL];
   };
+
+  hardwareGenerator.forBlock.hardware_wifi_ap_start = (block, generator) => {
+    const problem = advancedGuard();
+    if (problem) return unavailable(problem);
+    ensureWlanAp();
+    const ssid = generator.valueToCode(block, "SSID", pythonOrder.NONE) || '""';
+    const password = generator.valueToCode(block, "PASSWORD", pythonOrder.NONE) || '""';
+    const channel = generator.valueToCode(block, "CHANNEL", pythonOrder.NONE) || "1";
+    return [
+      `_ap.config(essid=str(${ssid}), password=str(${password}), authmode=network.WLAN.SEC_WPA_WPA2, channel=int(${channel}))`,
+      "_ap.active(True)",
+      "",
+    ].join("\n");
+  };
+
+  hardwareGenerator.forBlock.hardware_wifi_ap_stop = () => {
+    const problem = advancedGuard();
+    if (problem) return unavailable(problem);
+    ensureWlanAp();
+    return "_ap.active(False)\n";
+  };
+
+  hardwareGenerator.forBlock.hardware_wifi_ap_ip = () => {
+    if (advancedGuard()) return ['""', pythonOrder.ATOMIC];
+    ensureWlanAp();
+    return ["_ap.ifconfig()[0]", pythonOrder.FUNCTION_CALL];
+  };
+
+  hardwareGenerator.forBlock.hardware_wifi_rssi = () => {
+    if (advancedGuard()) return ["0", pythonOrder.ATOMIC];
+    ensureWlan();
+    return ['_wlan.status("rssi") if _wlan.isconnected() else 0', pythonOrder.FUNCTION_CALL];
+  };
 }
 
 export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbox.FlyoutItemInfo[] {
-  if (!getBoardProfile(boardId)) return [];
+  const profile = getBoardProfile(boardId);
+  if (!profile) return [];
+  const apBlocks: Blockly.utils.toolbox.FlyoutItemInfo[] = profile.advancedWireless
+    ? [
+        {
+          kind: "block",
+          type: "hardware_wifi_ap_start",
+          inputs: {
+            SSID: { shadow: { type: "text", fields: { TEXT: "VisualPython" } } },
+            PASSWORD: { shadow: { type: "text", fields: { TEXT: "12345678" } } },
+            CHANNEL: numberShadow(1),
+          },
+        },
+        { kind: "block", type: "hardware_wifi_ap_stop" },
+        { kind: "block", type: "hardware_wifi_ap_ip" },
+        { kind: "block", type: "hardware_wifi_rssi" },
+      ]
+    : [];
   return [
     { kind: "sep", gap: 20 },
     hardwareSectionLabel("Wi-Fi"),
@@ -123,5 +218,6 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
     { kind: "block", type: "hardware_wifi_connected" },
     { kind: "block", type: "hardware_wifi_ip" },
     { kind: "block", type: "hardware_wifi_disconnect" },
+    ...apBlocks,
   ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
 }

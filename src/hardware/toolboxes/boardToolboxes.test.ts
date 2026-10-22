@@ -3,7 +3,7 @@ import * as Blockly from "blockly/core";
 import { toolbox as baseToolbox } from "../../pythonBlocks";
 import { buildProfileToolbox } from "../../profiles/profileToolbox";
 import { getWorkbenchProfile } from "../../profiles/workbenchProfile";
-import { setActiveHardwareBoard } from "../blocks/shared";
+import { p0ModuleBlockTypes, setActiveHardwareBoard } from "../blocks/shared";
 import type { HardwareBoardId } from "../firmwareCatalog";
 import { esp8266Esp12eToolbox } from "./esp8266-esp12e";
 import { esp32S3Toolbox } from "./esp32-s3";
@@ -34,6 +34,8 @@ type BoardCase = {
   wifi: boolean;
   advancedWireless: boolean;
   storage: boolean;
+  p0Modules: boolean;
+  spi: boolean;
 };
 
 const boards: BoardCase[] = [
@@ -50,6 +52,8 @@ const boards: BoardCase[] = [
     wifi: true,
     advancedWireless: true,
     storage: true,
+    p0Modules: true,
+    spi: true,
   },
   {
     boardId: "esp32-wroom",
@@ -64,6 +68,8 @@ const boards: BoardCase[] = [
     wifi: true,
     advancedWireless: false,
     storage: false,
+    p0Modules: false,
+    spi: false,
   },
   {
     boardId: "esp8266-esp12e",
@@ -78,6 +84,8 @@ const boards: BoardCase[] = [
     wifi: true,
     advancedWireless: false,
     storage: false,
+    p0Modules: false,
+    spi: false,
   },
 ];
 
@@ -167,6 +175,8 @@ for (const board of boards) {
 
       expect(types.has("hardware_touch_read")).toBe(board.touch);
       expect(types.has("hardware_uart_init")).toBe(board.uart);
+      expect(types.has("hardware_uart_available")).toBe(board.uart);
+      expect(types.has("hardware_uart_deinit")).toBe(board.uart);
       expect(types.has("hardware_mcu_temperature")).toBe(board.mcuTemperature);
       expect(types.has("hardware_onboard_rgb")).toBe(board.onboardRgb);
       expect(types.has("hardware_builtin_led")).toBe(board.builtinLed);
@@ -174,13 +184,28 @@ for (const board of boards) {
       expect(types.has("math_random_float")).toBe(board.random);
       expect(types.has("hardware_i2c_init")).toBe(board.i2c);
       expect(types.has("hardware_wifi_connect")).toBe(board.wifi);
+      expect(types.has("hardware_wifi_ap_start")).toBe(board.advancedWireless);
+      expect(types.has("hardware_wifi_ap_ip")).toBe(board.advancedWireless);
+      expect(types.has("hardware_wifi_rssi")).toBe(board.advancedWireless);
       expect(types.has("hardware_http_get")).toBe(board.advancedWireless);
+      expect(types.has("hardware_http_post")).toBe(board.advancedWireless);
       expect(types.has("hardware_ntp_sync")).toBe(board.advancedWireless);
+      expect(types.has("hardware_ntp_local")).toBe(board.advancedWireless);
       expect(types.has("hardware_ble_start")).toBe(board.advancedWireless);
       expect(types.has("hardware_espnow_init")).toBe(board.advancedWireless);
       expect(types.has("hardware_mqtt_connect")).toBe(board.advancedWireless);
+      expect(types.has("hardware_mqtt_disconnect")).toBe(board.advancedWireless);
       expect(types.has("hardware_file_write")).toBe(board.storage);
+      expect(types.has("hardware_file_append")).toBe(board.storage);
+      expect(types.has("hardware_file_list")).toBe(board.storage);
       expect(types.has("hardware_nvs_set")).toBe(board.storage);
+      expect(types.has("hardware_nvs_delete")).toBe(board.storage);
+      expect(types.has("hardware_i2c_deinit")).toBe(board.i2c);
+      expect(types.has("hardware_spi_init")).toBe(board.spi);
+      expect(types.has("hardware_spi_transfer")).toBe(board.spi);
+      for (const type of p0ModuleBlockTypes) {
+        expect(types.has(type), `${board.boardId} 的 ${type}`).toBe(board.p0Modules);
+      }
     });
 
     it("instantiates every toolbox entry in a headless workspace", () => {

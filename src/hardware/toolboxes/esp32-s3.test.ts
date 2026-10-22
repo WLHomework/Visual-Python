@@ -219,6 +219,26 @@ describe("esp32S3Toolbox", () => {
     expect(inputOutput?.contents?.map((entry) => entry.type)).toContain("hardware_touch_read");
   });
 
+  it("offers the H1 button, PIR, analog sensors, relay, motor and NeoPixel fill blocks", () => {
+    const categories = resolveS3().contents;
+    const typesIn = (name: string) => categories.find((category) => category.name === name)?.contents?.map((entry) => String(entry.type)) ?? [];
+
+    expect(typesIn("输入/输出")).toContain("hardware_button_read");
+    expect(typesIn("传感器")).toEqual(expect.arrayContaining(["hardware_pir_motion", "hardware_light_percent", "hardware_soil_percent"]));
+    expect(typesIn("执行器")).toEqual(expect.arrayContaining(["hardware_relay_set", "hardware_dc_motor", "hardware_tone"]));
+    const light = typesIn("灯光");
+    expect(light).toContain("hardware_neopixel_fill");
+    expect(light.indexOf("hardware_neopixel_fill")).toBeLessThan(light.indexOf("hardware_neopixel_write"));
+  });
+
+  it("offers the H2 LCD1602 and BH1750 blocks", () => {
+    const categories = resolveS3().contents;
+    const typesIn = (name: string) => categories.find((category) => category.name === name)?.contents?.map((entry) => String(entry.type)) ?? [];
+
+    expect(typesIn("显示")).toEqual(expect.arrayContaining(["hardware_lcd1602_init", "hardware_lcd1602_text", "hardware_lcd1602_clear"]));
+    expect(typesIn("传感器")).toContain("hardware_bh1750_lux");
+  });
+
   it("offers the onboard RGB block in the light category", () => {
     const light = resolveS3().contents.find((category) => category.name === "灯光");
 
@@ -229,7 +249,13 @@ describe("esp32S3Toolbox", () => {
     const serial = resolveS3().contents.find((category) => category.name === "串口");
 
     expect(serial?.contents?.map((entry) => entry.type)).toEqual(
-      expect.arrayContaining(["hardware_uart_init", "hardware_uart_write", "hardware_uart_read"]),
+      expect.arrayContaining([
+        "hardware_uart_init",
+        "hardware_uart_write",
+        "hardware_uart_read",
+        "hardware_uart_available",
+        "hardware_uart_deinit",
+      ]),
     );
   });
 
@@ -241,6 +267,10 @@ describe("esp32S3Toolbox", () => {
       "hardware_i2c_scan",
       "hardware_i2c_write_register",
       "hardware_i2c_read_register",
+      "hardware_i2c_deinit",
+      "hardware_spi_init",
+      "hardware_spi_transfer",
+      "hardware_spi_transfer_text",
       "hardware_ble_start",
       "hardware_ble_stop",
       "hardware_espnow_init",
@@ -260,14 +290,21 @@ describe("esp32S3Toolbox", () => {
       "hardware_wifi_connected",
       "hardware_wifi_ip",
       "hardware_wifi_disconnect",
+      "hardware_wifi_ap_start",
+      "hardware_wifi_ap_stop",
+      "hardware_wifi_ap_ip",
+      "hardware_wifi_rssi",
       "hardware_http_get",
+      "hardware_http_post",
       "hardware_ntp_sync",
       "hardware_ntp_now",
+      "hardware_ntp_local",
       "hardware_mqtt_connect",
       "hardware_mqtt_publish",
       "hardware_mqtt_subscribe",
       "hardware_mqtt_wait",
       "hardware_mqtt_last_topic",
+      "hardware_mqtt_disconnect",
     ]);
   });
 
@@ -276,9 +313,14 @@ describe("esp32S3Toolbox", () => {
 
     expect(storage?.contents?.map((entry) => entry.type)).toEqual([
       "hardware_file_write",
+      "hardware_file_append",
       "hardware_file_read",
+      "hardware_file_exists",
+      "hardware_file_delete",
+      "hardware_file_list",
       "hardware_nvs_set",
       "hardware_nvs_get",
+      "hardware_nvs_delete",
     ]);
   });
 

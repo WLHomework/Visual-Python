@@ -28,6 +28,20 @@ const definitions = [
       "写入设备闪存里的文本文件。路径以 / 开头，例如 /data.txt，和「设备」面板看到的是同一份文件；不要写 /main.py，否则会影响程序启动。",
   },
   {
+    type: "hardware_file_append",
+    message0: "追加设备文件 %1 内容 %2",
+    args0: [
+      { type: "input_value", name: "PATH", check: "String" },
+      { type: "input_value", name: "TEXT", check: "String" },
+    ],
+    inputsInline: true,
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.storage,
+    tooltip:
+      "在设备文本文件末尾追加内容；文件不存在时会自动创建。路径以 / 开头，例如 /log.txt；不要写 /main.py。",
+  },
+  {
     type: "hardware_file_read",
     message0: "读取设备文件 %1",
     args0: [{ type: "input_value", name: "PATH", check: "String" }],
@@ -35,6 +49,34 @@ const definitions = [
     output: "String",
     colour: hardwareColours.storage,
     tooltip: "读取设备上的文本文件；文件不存在或无法读取时返回空字符串。",
+  },
+  {
+    type: "hardware_file_exists",
+    message0: "设备文件 %1 存在",
+    args0: [{ type: "input_value", name: "PATH", check: "String" }],
+    inputsInline: true,
+    output: "Boolean",
+    colour: hardwareColours.storage,
+    tooltip: "检查设备上是否存在这个文件或目录；路径不存在时返回假，不会抛异常。",
+  },
+  {
+    type: "hardware_file_delete",
+    message0: "删除设备文件 %1",
+    args0: [{ type: "input_value", name: "PATH", check: "String" }],
+    inputsInline: true,
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.storage,
+    tooltip: "删除设备上的文件；文件不存在时不会抛异常。不要删除 /main.py，否则程序无法继续运行。",
+  },
+  {
+    type: "hardware_file_list",
+    message0: "列出设备目录 %1",
+    args0: [{ type: "input_value", name: "PATH", check: "String" }],
+    inputsInline: true,
+    output: "Array",
+    colour: hardwareColours.storage,
+    tooltip: "返回目录里的文件名列表，例如 / 或 /lib；目录不存在时返回空列表。",
   },
   {
     type: "hardware_nvs_set",
@@ -58,6 +100,16 @@ const definitions = [
     output: "String",
     colour: hardwareColours.storage,
     tooltip: "读取 NVS 里的文本；键不存在或内容超过约 1 KB 时返回空字符串。",
+  },
+  {
+    type: "hardware_nvs_delete",
+    message0: "删除 NVS 键 %1",
+    args0: [{ type: "input_value", name: "KEY", check: "String" }],
+    inputsInline: true,
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.storage,
+    tooltip: "删除 NVS 里的键；键不存在时不会抛异常。删除后立即提交到闪存。",
   },
 ];
 
@@ -91,6 +143,46 @@ const ensureFileReadHelper = (): string =>
     '    return ""',
   ]);
 
+const ensureFileAppendHelper = (): string =>
+  internals().provideFunction_("hardware_file_append", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(path, text):`,
+    "  try:",
+    "    with open(str(path), \"a\") as file:",
+    "      file.write(str(text))",
+    "    return True",
+    "  except OSError:",
+    "    return False",
+  ]);
+
+const ensureFileExistsHelper = (): string =>
+  internals().provideFunction_("hardware_file_exists", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(path):`,
+    "  try:",
+    "    os.stat(str(path))",
+    "    return True",
+    "  except OSError:",
+    "    return False",
+  ]);
+
+const ensureFileDeleteHelper = (): string =>
+  internals().provideFunction_("hardware_file_delete", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(path):`,
+    "  try:",
+    "    os.remove(str(path))",
+    "    return True",
+    "  except OSError:",
+    "    return False",
+  ]);
+
+const ensureFileListHelper = (): string =>
+  internals().provideFunction_("hardware_file_list", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(path):`,
+    "  try:",
+    "    return os.listdir(str(path))",
+    "  except OSError:",
+    "    return []",
+  ]);
+
 const ensureNvs = (): void => {
   ensureImport("esp32");
   internals().definitions_.hardware_nvs = '_nvs = esp32.NVS("visual_python")';
@@ -117,6 +209,17 @@ const ensureNvsGetHelper = (): string =>
     "    return bytes(data[:length]).hex()",
   ]);
 
+const ensureNvsDeleteHelper = (): string =>
+  internals().provideFunction_("hardware_nvs_delete", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(key):`,
+    "  try:",
+    "    _nvs.erase_key(str(key))",
+    "    _nvs.commit()",
+    "    return True",
+    "  except OSError:",
+    "    return False",
+  ]);
+
 export function register(): void {
   defineHardwareBlocks(definitions);
 
@@ -134,6 +237,36 @@ export function register(): void {
     return [`${ensureFileReadHelper()}(${path})`, pythonOrder.FUNCTION_CALL];
   };
 
+  hardwareGenerator.forBlock.hardware_file_append = (block, generator) => {
+    const problem = storageGuard();
+    if (problem) return unavailable(problem);
+    const path = generator.valueToCode(block, "PATH", pythonOrder.NONE) || '""';
+    const text = generator.valueToCode(block, "TEXT", pythonOrder.NONE) || '""';
+    return `${ensureFileAppendHelper()}(${path}, ${text})\n`;
+  };
+
+  hardwareGenerator.forBlock.hardware_file_exists = (block, generator) => {
+    if (storageGuard()) return ["False", pythonOrder.ATOMIC];
+    ensureImport("os");
+    const path = generator.valueToCode(block, "PATH", pythonOrder.NONE) || '""';
+    return [`${ensureFileExistsHelper()}(${path})`, pythonOrder.FUNCTION_CALL];
+  };
+
+  hardwareGenerator.forBlock.hardware_file_delete = (block, generator) => {
+    const problem = storageGuard();
+    if (problem) return unavailable(problem);
+    ensureImport("os");
+    const path = generator.valueToCode(block, "PATH", pythonOrder.NONE) || '""';
+    return `${ensureFileDeleteHelper()}(${path})\n`;
+  };
+
+  hardwareGenerator.forBlock.hardware_file_list = (block, generator) => {
+    if (storageGuard()) return ["[]", pythonOrder.ATOMIC];
+    ensureImport("os");
+    const path = generator.valueToCode(block, "PATH", pythonOrder.NONE) || '"/"';
+    return [`${ensureFileListHelper()}(${path})`, pythonOrder.FUNCTION_CALL];
+  };
+
   hardwareGenerator.forBlock.hardware_nvs_set = (block, generator) => {
     const problem = storageGuard();
     if (problem) return unavailable(problem);
@@ -149,6 +282,14 @@ export function register(): void {
     const key = generator.valueToCode(block, "KEY", pythonOrder.NONE) || '""';
     return [`${ensureNvsGetHelper()}(${key})`, pythonOrder.FUNCTION_CALL];
   };
+
+  hardwareGenerator.forBlock.hardware_nvs_delete = (block, generator) => {
+    const problem = storageGuard();
+    if (problem) return unavailable(problem);
+    ensureNvs();
+    const key = generator.valueToCode(block, "KEY", pythonOrder.NONE) || '""';
+    return `${ensureNvsDeleteHelper()}(${key})\n`;
+  };
 }
 
 export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbox.FlyoutItemInfo[] {
@@ -163,8 +304,17 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
       type: "hardware_file_write",
       inputs: { PATH: text("/data.txt"), TEXT: text("Hello") },
     },
+    {
+      kind: "block",
+      type: "hardware_file_append",
+      inputs: { PATH: text("/log.txt"), TEXT: text("line") },
+    },
     { kind: "block", type: "hardware_file_read", inputs: { PATH: text("/data.txt") } },
+    { kind: "block", type: "hardware_file_exists", inputs: { PATH: text("/data.txt") } },
+    { kind: "block", type: "hardware_file_delete", inputs: { PATH: text("/data.txt") } },
+    { kind: "block", type: "hardware_file_list", inputs: { PATH: text("/") } },
     { kind: "block", type: "hardware_nvs_set", inputs: { KEY: text("counter"), VALUE: text("1") } },
     { kind: "block", type: "hardware_nvs_get", inputs: { KEY: text("counter") } },
+    { kind: "block", type: "hardware_nvs_delete", inputs: { KEY: text("counter") } },
   ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
 }

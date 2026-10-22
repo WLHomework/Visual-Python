@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { supportedHardwareBoards } from "./firmwareCatalog";
 import {
+  analogReadMax,
   boardPinChoices,
   builtinLedPin,
   collectBoardProfileIssues,
@@ -39,6 +40,7 @@ describe("hardware board profiles", () => {
       pwmFrequencyMaxHz: 0,
       builtinRgb: { pin: "99" },
       uartIds: [0, 0],
+      spiIds: [0, 0],
       pins: [...esp8266.pins, { id: "5", label: "重复引脚", digital: true }],
     };
     const issues = collectBoardProfileIssues([broken]);
@@ -47,6 +49,8 @@ describe("hardware board profiles", () => {
     expect(issues.some((issue) => issue.includes("板载 RGB 引脚 99"))).toBe(true);
     expect(issues.some((issue) => issue.includes("串口编号重复"))).toBe(true);
     expect(issues.some((issue) => issue.includes("串口 0 被 REPL 占用"))).toBe(true);
+    expect(issues.some((issue) => issue.includes("SPI 编号重复"))).toBe(true);
+    expect(issues.some((issue) => issue.includes("SPI 0 被 Flash 占用"))).toBe(true);
     expect(issues.some((issue) => issue.includes("重复定义"))).toBe(true);
     expect(issues.some((issue) => issue.includes("缺少板卡档案：esp32-wroom"))).toBe(true);
   });
@@ -67,6 +71,7 @@ describe("hardware board profiles", () => {
       defaultI2c: { sda: "8", scl: "9" },
       builtinRgb: { pin: "48" },
       uartIds: [1, 2],
+      spiIds: [1, 2],
       mcuTemperature: true,
       advancedWireless: true,
       deviceStorage: true,
@@ -139,6 +144,15 @@ describe("board pin choices", () => {
     const outputs = pinIds(esp8266, "digital-output");
     expect(outputs).toContain("16");
     expect(outputs).toEqual(expect.arrayContaining(pwm));
+  });
+
+  it("reports ADC full scale and staged module availability", () => {
+    expect(analogReadMax(esp32s3)).toBe(4095);
+    expect(analogReadMax(esp32)).toBe(4095);
+    expect(analogReadMax(esp8266)).toBe(1023);
+    expect(esp32s3.p0Modules).toBe(true);
+    expect(esp32.p0Modules).toBeUndefined();
+    expect(esp8266.p0Modules).toBeUndefined();
   });
 
   it("marks the official capacitive touch pins on ESP32 boards only", () => {

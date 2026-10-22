@@ -49,14 +49,24 @@ export type BoardProfile = {
   builtinRgb?: { pin: string };
   /** 用户可用的 UART 编号；UART0 被 REPL 占用不列入，没有该字段的板卡不提供串口积木。 */
   uartIds?: readonly number[];
+  /** 用户可用的硬件 SPI 编号；没有该字段的板卡不提供 SPI 积木。 */
+  spiIds?: readonly number[];
   /** 是否支持 esp32.mcu_temperature()；经典 ESP32 只有 raw_temperature()，ESP8266 没有 esp32 模块。 */
   mcuTemperature?: boolean;
   /** 固件是否内置 HTTP、NTP、BLE、ESP-NOW 与 MQTT；目前只有官方 ESP32-S3 固件提供这些积木。 */
   advancedWireless?: boolean;
   /** 是否提供设备文本文件与 NVS 键值积木。 */
   deviceStorage?: boolean;
+  /**
+   * 是否开放本轮新增的基础模块积木（按键/PIR/模拟传感器/继电器/直流电机/NeoPixel 填充）。
+   * 先只在 ESP32-S3 打开；WROOM/ESP8266 等 S3 验证通过后再评估下放。
+   */
+  p0Modules?: boolean;
   pins: HardwarePin[];
 };
+
+/** ADC.read() 的满量程：ESP8266 为 10 位，ESP32 系列为 12 位。 */
+export const analogReadMax = (profile: BoardProfile): number => (profile.analogRead === "adc0" ? 1023 : 4095);
 
 const esp32Wroom: BoardProfile = {
   boardId: "esp32-wroom",
@@ -136,12 +146,16 @@ const esp32S3: BoardProfile = {
   builtinRgb: { pin: "48" },
   // ESP32-S3 有三个 UART，UART0 接板载 USB 串口（REPL）；tx/rx 由积木下拉选择（任意 GPIO）。
   uartIds: [1, 2],
+  // ESP32-S3 的通用硬件 SPI 通道；SPI 积木先只在 S3 开放，WROOM/ESP8266 等真机验证后再评估。
+  spiIds: [1, 2],
   mcuTemperature: true,
   // 官方 v1.29.0 的 S3 固件带 bluetooth / espnow，并冻结了 requests / ntptime / umqtt；
   // 这些积木只放在 S3 工具箱，WROOM 与 ESP8266 不追加。
   advancedWireless: true,
   // 设备文件系统与 esp32.NVS 都由 S3 固件提供，并与「设备」面板共用文件系统。
   deviceStorage: true,
+  // H1 模块积木先只在 S3 开放；WROOM/ESP8266 等 S3 真机验证后再评估。
+  p0Modules: true,
   pins: [
     { id: "0", label: "GPIO0（启动配置）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
     { id: "1", label: "GPIO1（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },
@@ -321,6 +335,10 @@ export function collectBoardProfileIssues(profiles: readonly BoardProfile[]): st
     const uartIds = profile.uartIds ?? [];
     if (new Set(uartIds).size !== uartIds.length) issues.push(`${prefix} 的串口编号重复`);
     if (uartIds.includes(0)) issues.push(`${prefix} 的串口 0 被 REPL 占用，不能作为用户串口`);
+
+    const spiIds = profile.spiIds ?? [];
+    if (new Set(spiIds).size !== spiIds.length) issues.push(`${prefix} 的 SPI 编号重复`);
+    if (spiIds.includes(0)) issues.push(`${prefix} 的 SPI 0 被 Flash 占用，不能作为用户 SPI`);
   }
   for (const boardId of supportedHardwareBoards) {
     if (!seen.has(boardId)) issues.push(`缺少板卡档案：${boardId}`);

@@ -47,6 +47,24 @@ describe("useHardwareRunner", () => {
     expect(device.run).toHaveBeenCalledWith("import ssd1306\n", "/main.py");
   });
 
+  it("uploads every required library before running code that imports more than one", async () => {
+    const { runner, device } = createRunner({ getCode: () => "from bh1750 import BH1750\nimport ssd1306\n" });
+    await expect(runner.run()).resolves.toEqual({ runId: 7 });
+    expect(device.uploadFile).toHaveBeenCalledTimes(2);
+    expect(device.uploadFile).toHaveBeenCalledWith("/lib/bh1750.py", expect.any(Uint8Array));
+    expect(device.uploadFile).toHaveBeenCalledWith("/lib/ssd1306.py", expect.any(Uint8Array));
+    expect(device.run).toHaveBeenCalledWith("from bh1750 import BH1750\nimport ssd1306\n", "/main.py");
+  });
+
+  it("uploads the LCD1602 and BH1750 drivers for H2 display and sensor code", async () => {
+    const { runner, device } = createRunner({ getCode: () => "import lcd1602\nfrom bh1750 import BH1750\n" });
+    await expect(runner.run()).resolves.toEqual({ runId: 7 });
+    expect(device.uploadFile).toHaveBeenCalledTimes(2);
+    expect(device.uploadFile).toHaveBeenCalledWith("/lib/lcd1602.py", expect.any(Uint8Array));
+    expect(device.uploadFile).toHaveBeenCalledWith("/lib/bh1750.py", expect.any(Uint8Array));
+    expect(device.run).toHaveBeenCalledWith("import lcd1602\nfrom bh1750 import BH1750\n", "/main.py");
+  });
+
   it("does not run when a required device library upload fails", async () => {
     const { runner, device } = createRunner({
       getCode: () => "import ssd1306\n",

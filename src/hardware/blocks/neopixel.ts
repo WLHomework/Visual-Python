@@ -77,6 +77,20 @@ const definitions = [
     tooltip: "将所有灯珠待刷新的颜色设置为黑色。",
   },
   {
+    type: "hardware_neopixel_fill",
+    message0: "NeoPixel 全部填充 RGB(%1, %2, %3)",
+    args0: [
+      { type: "input_value", name: "R", check: "Number" },
+      { type: "input_value", name: "G", check: "Number" },
+      { type: "input_value", name: "B", check: "Number" },
+    ],
+    inputsInline: true,
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.light,
+    tooltip: "把所有灯珠设置为同一种颜色，运行刷新积木后才会显示。RGB 值会限制在 0 到 255。",
+  },
+  {
     type: "hardware_neopixel_write",
     message0: "刷新 NeoPixel 显示",
     previousStatement: null,
@@ -131,6 +145,12 @@ export function register(): void {
     return `_neopixel[int(${index})] = (${colorValue(red)}, ${colorValue(green)}, ${colorValue(blue)})\n`;
   };
   hardwareGenerator.forBlock.hardware_neopixel_clear = () => "_neopixel.fill((0, 0, 0))\n";
+  hardwareGenerator.forBlock.hardware_neopixel_fill = (block, generator) => {
+    const red = generator.valueToCode(block, "R", pythonOrder.NONE) || "0";
+    const green = generator.valueToCode(block, "G", pythonOrder.NONE) || "0";
+    const blue = generator.valueToCode(block, "B", pythonOrder.NONE) || "0";
+    return `_neopixel.fill((${colorValue(red)}, ${colorValue(green)}, ${colorValue(blue)}))\n`;
+  };
   hardwareGenerator.forBlock.hardware_neopixel_write = () => "_neopixel.write()\n";
 }
 
@@ -154,6 +174,9 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
       inputs: { INDEX: numberShadow(0), R: numberShadow(255), G: numberShadow(255), B: numberShadow(255) },
     },
     { kind: "block", type: "hardware_neopixel_clear" },
+    ...(profile?.p0Modules
+      ? [{ kind: "block", type: "hardware_neopixel_fill", inputs: { R: numberShadow(255), G: numberShadow(255), B: numberShadow(255) } }]
+      : []),
     { kind: "block", type: "hardware_neopixel_write" },
   ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
 }

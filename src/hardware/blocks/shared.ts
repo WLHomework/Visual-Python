@@ -38,6 +38,11 @@ export const pinUseByBlockType: Record<string, HardwarePinUse> = {
   hardware_neopixel_init: "digital-output",
   hardware_dht_temperature: "digital-input",
   hardware_dht_humidity: "digital-input",
+  hardware_button_read: "digital-input",
+  hardware_pir_motion: "digital-input",
+  hardware_light_percent: "analog",
+  hardware_soil_percent: "analog",
+  hardware_relay_set: "digital-output",
 };
 
 export const pinUseByBlockField: Record<string, Record<string, HardwarePinUse>> = {
@@ -52,6 +57,16 @@ export const pinUseByBlockField: Record<string, Record<string, HardwarePinUse>> 
   hardware_i2c_init: {
     SDA: "digital-output",
     SCL: "digital-output",
+  },
+  hardware_dc_motor: {
+    IN1: "digital-output",
+    IN2: "digital-output",
+    PWM: "pwm",
+  },
+  hardware_spi_init: {
+    SCK: "digital-output",
+    MOSI: "digital-output",
+    MISO: "digital-input",
   },
 };
 
@@ -69,6 +84,13 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_neopixel_set_pixel: "设置 NeoPixel 颜色",
   hardware_neopixel_clear: "清空 NeoPixel",
   hardware_neopixel_write: "刷新 NeoPixel",
+  hardware_neopixel_fill: "填充 NeoPixel",
+  hardware_button_read: "读取按键",
+  hardware_pir_motion: "PIR 人体感应",
+  hardware_light_percent: "光敏百分比",
+  hardware_soil_percent: "土壤湿度百分比",
+  hardware_relay_set: "继电器开关",
+  hardware_dc_motor: "直流电机",
   hardware_dht_temperature: "读取 DHT 温度",
   hardware_dht_humidity: "读取 DHT 湿度",
   hardware_ultrasonic_distance: "超声波测距",
@@ -77,21 +99,37 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_oled_text: "OLED 显示文字",
   hardware_oled_pixel: "OLED 像素",
   hardware_oled_write: "刷新 OLED 显示",
+  hardware_lcd1602_init: "初始化 LCD1602",
+  hardware_lcd1602_text: "LCD1602 显示文字",
+  hardware_lcd1602_clear: "清空 LCD1602",
+  hardware_bh1750_lux: "BH1750 光照",
   hardware_uart_init: "初始化串口",
   hardware_uart_write: "串口发送",
   hardware_uart_read: "串口读取",
+  hardware_uart_available: "串口可读字节数",
+  hardware_uart_deinit: "关闭串口",
   hardware_i2c_init: "初始化 I2C",
   hardware_i2c_scan: "扫描 I2C 设备",
   hardware_i2c_write_register: "I2C 写寄存器",
   hardware_i2c_read_register: "I2C 读寄存器",
+  hardware_i2c_deinit: "关闭 I2C",
+  hardware_spi_init: "初始化 SPI",
+  hardware_spi_transfer: "SPI 收发字节",
+  hardware_spi_transfer_text: "SPI 收发文本",
   hardware_wifi_connect: "连接 Wi-Fi",
   hardware_wifi_wait: "等待 Wi-Fi 连接",
   hardware_wifi_disconnect: "断开 Wi-Fi",
   hardware_wifi_connected: "Wi-Fi 已连接",
   hardware_wifi_ip: "Wi-Fi IP 地址",
+  hardware_wifi_ap_start: "开启 Wi-Fi 热点",
+  hardware_wifi_ap_stop: "关闭 Wi-Fi 热点",
+  hardware_wifi_ap_ip: "热点 IP 地址",
+  hardware_wifi_rssi: "Wi-Fi 信号强度",
   hardware_http_get: "HTTP GET 请求",
+  hardware_http_post: "HTTP POST 请求",
   hardware_ntp_sync: "NTP 校时",
   hardware_ntp_now: "设备当前时间",
+  hardware_ntp_local: "设备本地时间",
   hardware_ble_start: "开启 BLE 广播",
   hardware_ble_stop: "停止 BLE 广播",
   hardware_espnow_init: "初始化 ESP-NOW",
@@ -104,10 +142,16 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_mqtt_subscribe: "MQTT 订阅",
   hardware_mqtt_wait: "等待 MQTT 消息",
   hardware_mqtt_last_topic: "最近 MQTT 主题",
+  hardware_mqtt_disconnect: "断开 MQTT",
   hardware_file_write: "写入设备文件",
+  hardware_file_append: "追加设备文件",
   hardware_file_read: "读取设备文件",
+  hardware_file_exists: "设备文件存在",
+  hardware_file_delete: "删除设备文件",
+  hardware_file_list: "列出设备目录",
   hardware_nvs_set: "写入 NVS 键值",
   hardware_nvs_get: "读取 NVS 键值",
+  hardware_nvs_delete: "删除 NVS 键值",
   hardware_mcu_temperature: "芯片温度",
   hardware_sleep_ms: "等待毫秒",
   hardware_forever: "永远重复",
@@ -122,9 +166,15 @@ export const hardwareBlockTypes: readonly string[] = Object.keys(hardwareBlockLa
 
 /** 只有 `BoardProfile.advancedWireless` 为 true 的板卡才生成这些积木。 */
 export const advancedWirelessBlockTypes: readonly string[] = [
+  "hardware_wifi_ap_start",
+  "hardware_wifi_ap_stop",
+  "hardware_wifi_ap_ip",
+  "hardware_wifi_rssi",
   "hardware_http_get",
+  "hardware_http_post",
   "hardware_ntp_sync",
   "hardware_ntp_now",
+  "hardware_ntp_local",
   "hardware_ble_start",
   "hardware_ble_stop",
   "hardware_espnow_init",
@@ -137,17 +187,45 @@ export const advancedWirelessBlockTypes: readonly string[] = [
   "hardware_mqtt_subscribe",
   "hardware_mqtt_wait",
   "hardware_mqtt_last_topic",
+  "hardware_mqtt_disconnect",
 ];
 
 /** 只有 `BoardProfile.deviceStorage` 为 true 的板卡才生成这些积木。 */
 export const deviceStorageBlockTypes: readonly string[] = [
   "hardware_file_write",
+  "hardware_file_append",
   "hardware_file_read",
+  "hardware_file_exists",
+  "hardware_file_delete",
+  "hardware_file_list",
   "hardware_nvs_set",
   "hardware_nvs_get",
+  "hardware_nvs_delete",
+];
+
+/** 只有 `BoardProfile.spiIds` 非空的板卡才生成这些积木（目前仅 ESP32-S3）。 */
+export const spiBlockTypes: readonly string[] = [
+  "hardware_spi_init",
+  "hardware_spi_transfer",
+  "hardware_spi_transfer_text",
 ];
 
 export type HardwareBlockIssue = { blockId?: string; message: string };
+
+/** P0 模块积木：先只在具备 `p0Modules` 的板卡上开放（H1 输入/执行器 + H2 显示/传感器）。 */
+export const p0ModuleBlockTypes: readonly string[] = [
+  "hardware_button_read",
+  "hardware_pir_motion",
+  "hardware_light_percent",
+  "hardware_soil_percent",
+  "hardware_relay_set",
+  "hardware_dc_motor",
+  "hardware_neopixel_fill",
+  "hardware_lcd1602_init",
+  "hardware_lcd1602_text",
+  "hardware_lcd1602_clear",
+  "hardware_bh1750_lux",
+];
 
 export function isHardwareBlockType(type: string): boolean {
   return Boolean(hardwareBlockLabels[type]);
@@ -228,6 +306,11 @@ interface HardwareGeneratorInternals {
 
 const hardwareInternals = () => pythonGenerator as unknown as HardwareGeneratorInternals;
 
+/** 提供给积木模块定义 Python 辅助函数的入口，避免每个模块强转生成器内部类型。 */
+export const hardwareFunctionPlaceholder = (): string => hardwareInternals().FUNCTION_NAME_PLACEHOLDER_;
+
+export const provideHardwareFunction = (name: string, code: string[]): string => hardwareInternals().provideFunction_(name, code);
+
 export const ensureImport = (moduleName: string) => {
   hardwareInternals().definitions_[`import_${moduleName}`] = `import ${moduleName}`;
 };
@@ -265,8 +348,16 @@ export const ensureDhtHelper = (): string => {
 /** Wi-Fi 接口只创建一次：状态和 IP 积木即使没先运行连接积木也能安全使用。 */
 export const ensureWlan = (): string => {
   ensureImport("network");
-  hardwareInternals().definitions_.hardware_wlan = "_wlan = network.WLAN(network.STA_IF)";
+  // v1.29 起接口常量移到 WLAN 类上；旧的 network.STA_IF 在 ESP32/ESP8266 固件里已不存在。
+  hardwareInternals().definitions_.hardware_wlan = "_wlan = network.WLAN(network.WLAN.IF_STA)";
   return "_wlan";
+};
+
+/** 热点接口只创建一次：热点 IP/关闭积木即使没先运行开启积木也能安全使用。 */
+export const ensureWlanAp = (): string => {
+  ensureImport("network");
+  hardwareInternals().definitions_.hardware_wlan_ap = "_ap = network.WLAN(network.WLAN.IF_AP)";
+  return "_ap";
 };
 
 /** 轮询等待连接，避免在积木里展开循环；超时后返回当前连接状态。 */
@@ -285,7 +376,10 @@ export const ensureUartReadLineHelper = (): string => {
   const internals = hardwareInternals();
   return internals.provideFunction_("hardware_uart_readline", [
     `def ${internals.FUNCTION_NAME_PLACEHOLDER_}():`,
-    "  data = _uart.readline()",
+    '  uart = globals().get("_uart")',
+    "  if uart is None:",
+    '    return ""',
+    "  data = uart.readline()",
     '  return data.decode() if data else ""',
   ]);
 };
@@ -294,8 +388,44 @@ export const ensureUartReadAllHelper = (): string => {
   const internals = hardwareInternals();
   return internals.provideFunction_("hardware_uart_readall", [
     `def ${internals.FUNCTION_NAME_PLACEHOLDER_}():`,
-    "  data = _uart.read()",
+    '  uart = globals().get("_uart")',
+    "  if uart is None:",
+    '    return ""',
+    "  data = uart.read()",
     '  return data.decode() if data else ""',
+  ]);
+};
+
+/** 串口在未初始化或已关闭时静默跳过，避免收尾代码里的发送积木抛异常。 */
+export const ensureUartWriteHelper = (): string => {
+  const internals = hardwareInternals();
+  return internals.provideFunction_("hardware_uart_write_text", [
+    `def ${internals.FUNCTION_NAME_PLACEHOLDER_}(text):`,
+    '  uart = globals().get("_uart")',
+    "  if uart is not None:",
+    "    uart.write(str(text))",
+  ]);
+};
+
+/** 返回可读字节数；未初始化或已关闭时按 0 处理，避免读空串口时抛异常。 */
+export const ensureUartAvailableHelper = (): string => {
+  const internals = hardwareInternals();
+  return internals.provideFunction_("hardware_uart_available", [
+    `def ${internals.FUNCTION_NAME_PLACEHOLDER_}():`,
+    '  uart = globals().get("_uart")',
+    "  return uart.any() if uart is not None else 0",
+  ]);
+};
+
+/** 关闭串口并清空全局对象，之后重新「初始化串口」会创建新实例。 */
+export const ensureUartDeinitHelper = (): string => {
+  const internals = hardwareInternals();
+  return internals.provideFunction_("hardware_uart_deinit", [
+    `def ${internals.FUNCTION_NAME_PLACEHOLDER_}():`,
+    '  uart = globals().get("_uart")',
+    "  if uart is not None:",
+    "    uart.deinit()",
+    '    globals()["_uart"] = None',
   ]);
 };
 
@@ -303,6 +433,38 @@ export const ensureUartReadAllHelper = (): string => {
 export const i2cBusExpression = (profile: BoardProfile, sda: string, scl: string): string => {
   if (profile.chipFamily === "esp8266") return `machine.I2C(scl=machine.Pin(${scl}), sda=machine.Pin(${sda}), freq=100000)`;
   return `machine.I2C(0, scl=machine.Pin(${scl}), sda=machine.Pin(${sda}), freq=400000)`;
+};
+
+/**
+ * 生成变量和函数：所有 I2C 设备共用一条总线。
+ *
+ * 先运行「初始化 I2C」时直接复用已有的 `_i2c`；没有初始化时按板卡默认引脚懒创建。
+ * 这样 OLED、传感器和寄存器积木无论以什么顺序拖入，都不会在同一组引脚上重复建总线。
+ */
+export const ensureI2cBus = (profile: BoardProfile): string => {
+  ensureImport("machine");
+  const internals = hardwareInternals();
+  const bus = i2cBusExpression(profile, profile.defaultI2c.sda, profile.defaultI2c.scl);
+  return internals.provideFunction_("hardware_i2c_bus", [
+    `def ${internals.FUNCTION_NAME_PLACEHOLDER_}():`,
+    '  bus = globals().get("_i2c")',
+    "  if bus is None:",
+    `    bus = ${bus}`,
+    '    globals()["_i2c"] = bus',
+    "  return bus",
+  ]);
+};
+
+/** 关闭共享 I2C 总线；下一次调用 `ensureI2cBus` 的积木会重建，已有设备对象需要重新初始化。 */
+export const ensureI2cCloseHelper = (): string => {
+  const internals = hardwareInternals();
+  return internals.provideFunction_("hardware_i2c_close", [
+    `def ${internals.FUNCTION_NAME_PLACEHOLDER_}():`,
+    '  bus = globals().get("_i2c")',
+    "  if bus is not None:",
+    "    bus.deinit()",
+    '    globals()["_i2c"] = None',
+  ]);
 };
 
 export type PinTarget = { profile: BoardProfile; pinId: string };

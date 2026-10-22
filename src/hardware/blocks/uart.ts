@@ -3,8 +3,11 @@ import { boardPinChoices, getBoardProfile } from "../boardProfiles";
 import type { HardwareBoardId } from "../firmwareCatalog";
 import {
   defineHardwareBlocks,
+  ensureUartDeinitHelper,
   ensureUartReadAllHelper,
   ensureUartReadLineHelper,
+  ensureUartAvailableHelper,
+  ensureUartWriteHelper,
   ensureImport,
   getActiveHardwareBoard,
   hardwareColours,
@@ -56,6 +59,21 @@ const definitions = [
     colour: hardwareColours.board,
     tooltip: "读取串口收到的内容；没有数据时返回空字符串，不会卡住。请先用「初始化串口」积木。",
   },
+  {
+    type: "hardware_uart_available",
+    message0: "串口可读字节数",
+    output: "Number",
+    colour: hardwareColours.board,
+    tooltip: "返回串口缓冲区里可读的字节数；没有初始化或没有数据时返回 0，不会卡住。",
+  },
+  {
+    type: "hardware_uart_deinit",
+    message0: "关闭串口",
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.board,
+    tooltip: "关闭串口并释放引脚。关闭后再发送或读取会返回空内容，不会抛异常；需要重新「初始化串口」。",
+  },
 ];
 
 export function register(): void {
@@ -80,13 +98,25 @@ export function register(): void {
     if (!profile) return unavailable("请先选择硬件板卡");
     if (!profile.uartIds?.length) return unavailable(`${profile.displayName} 没有可用的串口`);
     const text = generator.valueToCode(block, "TEXT", pythonOrder.NONE) || '""';
-    return `_uart.write(str(${text}))\n`;
+    return `${ensureUartWriteHelper()}(${text})\n`;
   };
   hardwareGenerator.forBlock.hardware_uart_read = (block) => {
     const profile = getActiveHardwareBoard();
     if (!profile?.uartIds?.length) return ["None", pythonOrder.ATOMIC];
     const helper = block.getFieldValue("MODE") === "all" ? ensureUartReadAllHelper() : ensureUartReadLineHelper();
     return [`${helper}()`, pythonOrder.FUNCTION_CALL];
+  };
+  hardwareGenerator.forBlock.hardware_uart_available = () => {
+    const profile = getActiveHardwareBoard();
+    if (!profile?.uartIds?.length) return ["0", pythonOrder.ATOMIC];
+    const helper = ensureUartAvailableHelper();
+    return [`${helper}()`, pythonOrder.FUNCTION_CALL];
+  };
+  hardwareGenerator.forBlock.hardware_uart_deinit = () => {
+    const profile = getActiveHardwareBoard();
+    if (!profile) return unavailable("请先选择硬件板卡");
+    if (!profile.uartIds?.length) return unavailable(`${profile.displayName} 没有可用的串口`);
+    return `${ensureUartDeinitHelper()}()\n`;
   };
 }
 
@@ -109,5 +139,7 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
     },
     { kind: "block", type: "hardware_uart_write", inputs: { TEXT: { shadow: { type: "text", fields: { TEXT: "Hello" } } } } },
     { kind: "block", type: "hardware_uart_read", fields: { MODE: "line" } },
+    { kind: "block", type: "hardware_uart_available" },
+    { kind: "block", type: "hardware_uart_deinit" },
   ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
 }

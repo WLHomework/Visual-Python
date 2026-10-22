@@ -45,7 +45,7 @@ export const esp8266Esp12eToolbox: BoardToolboxSpec = {
     networkCategory(),
     sensorCategory(),
     actuatorCategory(),
-    lightCategory(["hardware_builtin_led"]),
+    lightCategory({ before: ["hardware_builtin_led"] }),
     displayCategory(),
   ],
 };

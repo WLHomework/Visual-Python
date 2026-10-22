@@ -71,6 +71,14 @@ const definitions = [
     colour: hardwareColours.network,
     tooltip: "返回最近一次由「等待 MQTT 消息」取出的主题；还没取出消息时为空字符串。",
   },
+  {
+    type: "hardware_mqtt_disconnect",
+    message0: "断开 MQTT",
+    previousStatement: null,
+    nextStatement: null,
+    colour: hardwareColours.network,
+    tooltip: "断开 MQTT 连接并清空未读消息和最近主题；未连接时不会抛未捕获异常。",
+  },
 ];
 
 const advancedGuard = (): string | undefined => {
@@ -105,20 +113,59 @@ const ensureMqttState = (): void => {
 const ensureWaitHelper = (): string =>
   internals().provideFunction_("hardware_mqtt_wait", [
     `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(timeout_ms):`,
-    "  global _mqtt_last_topic",
+    "  global _mqtt, _mqtt_last_topic",
     "  if _mqtt is None:",
     '    return ""',
     "  start = time.ticks_ms()",
     "  while not _mqtt_messages and time.ticks_diff(time.ticks_ms(), start) < timeout_ms:",
-    "    _mqtt.check_msg()",
+    "    try:",
+    "      _mqtt.check_msg()",
+    "    except (OSError, AttributeError):",
+    "      _mqtt = None",
+    '      return ""',
     "    time.sleep_ms(20)",
-    "  if not _mqtt_messages:",
-    "    _mqtt.check_msg()",
     "  if _mqtt_messages:",
     "    item = _mqtt_messages.pop(0)",
     "    _mqtt_last_topic = item[0]",
     "    return item[1]",
     '  return ""',
+  ]);
+
+const ensurePublishHelper = (): string =>
+  internals().provideFunction_("hardware_mqtt_publish", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(topic, message):`,
+    "  if _mqtt is None:",
+    "    return",
+    "  try:",
+    "    _mqtt.publish(str(topic).encode(), str(message).encode())",
+    "  except (OSError, AttributeError):",
+    "    pass",
+  ]);
+
+const ensureSubscribeHelper = (): string =>
+  internals().provideFunction_("hardware_mqtt_subscribe", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(topic):`,
+    "  if _mqtt is None:",
+    "    return",
+    "  try:",
+    "    _mqtt.subscribe(str(topic).encode())",
+    "  except (OSError, AttributeError):",
+    "    pass",
+  ]);
+
+/** 断开连接并清空队列；未连接或 socket 已失效时都静默处理。 */
+const ensureDisconnectHelper = (): string =>
+  internals().provideFunction_("hardware_mqtt_disconnect", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}():`,
+    "  global _mqtt, _mqtt_messages, _mqtt_last_topic",
+    "  if _mqtt is not None:",
+    "    try:",
+    "      _mqtt.disconnect()",
+    "    except (OSError, AttributeError):",
+    "      pass",
+    "  _mqtt = None",
+    "  _mqtt_messages = []",
+    '  _mqtt_last_topic = ""',
   ]);
 
 export function register(): void {
@@ -133,10 +180,14 @@ export function register(): void {
     const clientId = generator.valueToCode(block, "CLIENT_ID", pythonOrder.NONE) || '"visual-python-s3"';
     const user = generator.valueToCode(block, "USER", pythonOrder.NONE) || '""';
     const password = generator.valueToCode(block, "PASSWORD", pythonOrder.NONE) || '""';
+    // 连接失败时清空 `_mqtt`，后续发布/订阅/等待积木会安全跳过。
     return [
-      `_mqtt = umqtt.simple.MQTTClient(str(${clientId}), str(${server}), port=int(${port}), user=(str(${user}) or None), password=str(${password}))`,
-      "_mqtt.set_callback(_mqtt_on_message)",
-      "_mqtt.connect()",
+      "try:",
+      `  _mqtt = umqtt.simple.MQTTClient(str(${clientId}), str(${server}), port=int(${port}), user=(str(${user}) or None), password=str(${password}))`,
+      "  _mqtt.set_callback(_mqtt_on_message)",
+      "  _mqtt.connect()",
+      "except (OSError, ValueError):",
+      "  _mqtt = None",
       "",
     ].join("\n");
   };
@@ -147,7 +198,7 @@ export function register(): void {
     ensureMqttState();
     const topic = generator.valueToCode(block, "TOPIC", pythonOrder.NONE) || '""';
     const message = generator.valueToCode(block, "MESSAGE", pythonOrder.NONE) || '""';
-    return `_mqtt.publish(str(${topic}).encode(), str(${message}).encode())\n`;
+    return `${ensurePublishHelper()}(${topic}, ${message})\n`;
   };
 
   hardwareGenerator.forBlock.hardware_mqtt_subscribe = (block, generator) => {
@@ -155,7 +206,7 @@ export function register(): void {
     if (problem) return unavailable(problem);
     ensureMqttState();
     const topic = generator.valueToCode(block, "TOPIC", pythonOrder.NONE) || '""';
-    return `_mqtt.subscribe(str(${topic}).encode())\n`;
+    return `${ensureSubscribeHelper()}(${topic})\n`;
   };
 
   hardwareGenerator.forBlock.hardware_mqtt_wait = (block, generator) => {
@@ -170,6 +221,13 @@ export function register(): void {
     if (advancedGuard()) return ['""', pythonOrder.ATOMIC];
     ensureMqttState();
     return ["_mqtt_last_topic", pythonOrder.ATOMIC];
+  };
+
+  hardwareGenerator.forBlock.hardware_mqtt_disconnect = () => {
+    const problem = advancedGuard();
+    if (problem) return unavailable(problem);
+    ensureMqttState();
+    return `${ensureDisconnectHelper()}()\n`;
   };
 }
 
@@ -199,5 +257,6 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
     { kind: "block", type: "hardware_mqtt_subscribe", inputs: { TOPIC: text("visual-python/test") } },
     { kind: "block", type: "hardware_mqtt_wait", inputs: { TIMEOUT: numberShadow(1000) } },
     { kind: "block", type: "hardware_mqtt_last_topic" },
+    { kind: "block", type: "hardware_mqtt_disconnect" },
   ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
 }
