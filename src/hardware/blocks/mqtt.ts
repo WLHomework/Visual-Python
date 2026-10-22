@@ -72,6 +72,13 @@ const definitions = [
     tooltip: "返回最近一次由「等待 MQTT 消息」取出的主题；还没取出消息时为空字符串。",
   },
   {
+    type: "hardware_mqtt_connected",
+    message0: "MQTT 已连接",
+    output: "Boolean",
+    colour: hardwareColours.network,
+    tooltip: "检查 MQTT 客户端是否仍持有连接；未连接、连接失败或 socket 已失效时返回假。",
+  },
+  {
     type: "hardware_mqtt_disconnect",
     message0: "断开 MQTT",
     previousStatement: null,
@@ -168,6 +175,17 @@ const ensureDisconnectHelper = (): string =>
     '  _mqtt_last_topic = ""',
   ]);
 
+const ensureConnectedHelper = (): string =>
+  internals().provideFunction_("hardware_mqtt_connected", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}():`,
+    "  if _mqtt is None:",
+    "    return False",
+    "  try:",
+    "    return _mqtt.sock is not None",
+    "  except AttributeError:",
+    "    return False",
+  ]);
+
 export function register(): void {
   defineHardwareBlocks(definitions);
 
@@ -229,13 +247,19 @@ export function register(): void {
     ensureMqttState();
     return `${ensureDisconnectHelper()}()\n`;
   };
+
+  hardwareGenerator.forBlock.hardware_mqtt_connected = () => {
+    if (advancedGuard()) return ["False", pythonOrder.ATOMIC];
+    ensureMqttState();
+    return [`${ensureConnectedHelper()}()`, pythonOrder.FUNCTION_CALL];
+  };
 }
 
 export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbox.FlyoutItemInfo[] {
   const profile = getBoardProfile(boardId);
   if (!profile?.advancedWireless) return [];
   const text = (value: string) => ({ shadow: { type: "text", fields: { TEXT: value } } });
-  return [
+  const contents: unknown[] = [
     { kind: "sep", gap: 20 },
     hardwareSectionLabel("MQTT"),
     {
@@ -257,6 +281,8 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
     { kind: "block", type: "hardware_mqtt_subscribe", inputs: { TOPIC: text("visual-python/test") } },
     { kind: "block", type: "hardware_mqtt_wait", inputs: { TIMEOUT: numberShadow(1000) } },
     { kind: "block", type: "hardware_mqtt_last_topic" },
-    { kind: "block", type: "hardware_mqtt_disconnect" },
-  ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
+  ];
+  if (profile.p2Modules) contents.push({ kind: "block", type: "hardware_mqtt_connected" });
+  contents.push({ kind: "block", type: "hardware_mqtt_disconnect" });
+  return contents as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
 }

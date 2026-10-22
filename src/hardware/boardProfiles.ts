@@ -62,6 +62,16 @@ export type BoardProfile = {
    * 先只在 ESP32-S3 打开；WROOM/ESP8266 等 S3 验证通过后再评估下放。
    */
   p0Modules?: boolean;
+  /**
+   * 是否开放 H5 的驱动类模块积木（DS18B20/I2C 传感器/TM1637/步进电机/OLED 图形）。
+   * 先只在 ESP32-S3 打开；WROOM/ESP8266 等 S3 真机验证后再评估下放。
+   */
+  p1Modules?: boolean;
+  /**
+   * 是否开放 P2 模块积木（DS3231 时钟/VL53L0X 测距/OLED 进度条/HTTP 下载）。
+   * 先只在 ESP32-S3 打开；WROOM/ESP8266 等 S3 真机验证后再评估下放。
+   */
+  p2Modules?: boolean;
   pins: HardwarePin[];
 };
 
@@ -76,6 +86,9 @@ const esp32Wroom: BoardProfile = {
   defaultI2c: { sda: "21", scl: "22" },
   pwmFrequencyHz: 1000,
   pwmDutyMax: 1023,
+  // H6.1：S3 上已验证的 P0 通用包下放到 WROOM（GPIO/ADC/PWM/I2C 驱动语义一致）。
+  // 仍建议在 WROOM 真机上复核 ADC 校准、PWM 占空比与 I2C 驱动时序。
+  p0Modules: true,
   // 经典 ESP32 有三个 UART，UART0 接 REPL；tx/rx 由积木下拉选择（任意 GPIO）。
   uartIds: [1, 2],
   pins: [
@@ -118,6 +131,9 @@ const esp8266Esp12e: BoardProfile = {
   pwmFrequencyMaxHz: 1000,
   pwmDutyMax: 1023,
   builtinLedActiveLow: true,
+  // H6.2：P0 通用包下放到 ESP8266；A0 只有 0–1023、PWM 上限 1 kHz，
+  // 生成器已按 analogReadMax/pwmDutyMax 归一化，仍建议在 8266 真机上复核分压与占空比。
+  p0Modules: true,
   pins: [
     { id: "A0", label: "A0（模拟输入）", analog: true, inputOnly: true },
     { id: "0", label: "GPIO0（D3，启动）", digital: true, pwm: true, pullUp: true, reserved: true },
@@ -156,6 +172,10 @@ const esp32S3: BoardProfile = {
   deviceStorage: true,
   // H1 模块积木先只在 S3 开放；WROOM/ESP8266 等 S3 真机验证后再评估。
   p0Modules: true,
+  // H5 的驱动类模块积木同样先只在 S3 开放。
+  p1Modules: true,
+  // P2 的时钟/测距/进度条/下载积木同样先只在 S3 开放。
+  p2Modules: true,
   pins: [
     { id: "0", label: "GPIO0（启动配置）", digital: true, pwm: true, pullUp: true, pullDown: true, reserved: true },
     { id: "1", label: "GPIO1（模拟输入）", digital: true, pwm: true, analog: true, touch: true, pullUp: true, pullDown: true },

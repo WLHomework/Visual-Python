@@ -928,7 +928,7 @@ describe("hardware toolbox category", () => {
     expect(block("hardware_oled_init")?.inputs?.HEIGHT?.shadow?.fields?.NUM).toBe(64);
   });
 
-  it("offers H1 module blocks with S3 pin and calibration defaults", () => {
+  it("offers H1 module blocks with board-appropriate pin and calibration defaults", () => {
     const contents = hardwareToolboxContents("esp32-s3");
     const block = (type: string) => contents.find((item) => (item as { type?: string }).type === type) as {
       fields?: Record<string, string>;
@@ -952,10 +952,22 @@ describe("hardware toolbox category", () => {
     expect(block("hardware_neopixel_fill")?.inputs?.G?.shadow?.fields?.NUM).toBe(255);
     expect(block("hardware_neopixel_fill")?.inputs?.B?.shadow?.fields?.NUM).toBe(255);
 
-    const wroomTypes = hardwareToolboxContents("esp32-wroom").map((item) => (item as { type?: string }).type);
-    for (const type of ["hardware_button_read", "hardware_pir_motion", "hardware_relay_set", "hardware_neopixel_fill"]) {
-      expect(wroomTypes).not.toContain(type);
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
+      const types = hardwareToolboxContents(boardId).map((item) => (item as { type?: string }).type);
+      for (const type of ["hardware_button_read", "hardware_pir_motion", "hardware_relay_set", "hardware_neopixel_fill"]) {
+        expect(types, `${boardId} 缺少 ${type}`).toContain(type);
+      }
     }
+
+    const analogDefaults = (boardId: "esp32-wroom" | "esp8266-esp12e") => {
+      const contents = hardwareToolboxContents(boardId);
+      const light = contents.find((item) => (item as { type?: string }).type === "hardware_light_percent") as {
+        inputs?: Record<string, { shadow?: { fields?: Record<string, number> } }>;
+      } | undefined;
+      return light?.inputs?.BRIGHT?.shadow?.fields?.NUM;
+    };
+    expect(analogDefaults("esp32-wroom")).toBe(4095);
+    expect(analogDefaults("esp8266-esp12e")).toBe(1023);
   });
 
   it("validates both ultrasonic pins against their board-specific uses", () => {
@@ -1389,7 +1401,7 @@ describe("H1 P0 module blocks", () => {
     expect(code).toContain("_neopixel.fill((int(max(0, min(255, 10))), int(max(0, min(255, 20))), int(max(0, min(255, 30)))))");
   });
 
-  it("reports H1 blocks on the other boards and validates their ranges", () => {
+  it("keeps H1 blocks available on the other boards and validates their ranges", () => {
     const valid = loadWorkspace([
       { type: "hardware_button_read", fields: { PIN: "1", ACTIVE: "low" }, inputs: { DEBOUNCE: number(30) } },
       { type: "hardware_pir_motion", fields: { PIN: "2" }, inputs: { HOLD: number(2) } },
@@ -1407,9 +1419,8 @@ describe("H1 P0 module blocks", () => {
       fields: { PIN: "4", ACTIVE: "low" },
       inputs: { DEBOUNCE: number(30) },
     }], "esp32-wroom");
-    expect(collectHardwareBlockIssues(wroom, "esp32-wroom").map((issue) => issue.message)).toEqual([
-      "「读取按键」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
-    ]);
+    // H6：P0 通用包已下放到 WROOM，不再按板卡报告“暂未开放”。
+    expect(collectHardwareBlockIssues(wroom, "esp32-wroom")).toEqual([]);
     wroom.dispose();
 
     const button = loadWorkspace([{
@@ -1738,11 +1749,11 @@ describe("H2 P0 LCD1602 and BH1750 blocks", () => {
     expect(code.match(/hardware_bh1750_read\(0x23\)/g)).toHaveLength(2);
   });
 
-  it("keeps the H2 blocks off WROOM and ESP8266", () => {
+  it("offers the H2 blocks on WROOM and ESP8266 after H6 down-channeling", () => {
     for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
       const types = hardwareToolboxContents(boardId).map((item) => (item as { type?: string }).type);
       for (const type of ["hardware_lcd1602_init", "hardware_lcd1602_text", "hardware_lcd1602_clear", "hardware_bh1750_lux"]) {
-        expect(types, `${boardId} 不应出现 ${type}`).not.toContain(type);
+        expect(types, `${boardId} 缺少 ${type}`).toContain(type);
       }
     }
   });
@@ -1803,7 +1814,7 @@ describe("H2 P0 LCD1602 and BH1750 blocks", () => {
     textBlock.dispose();
   });
 
-  it("reports H2 blocks on WROOM through the P0 gate", () => {
+  it("does not report H2 blocks as unsupported on WROOM after H6", () => {
     const workspace = loadWorkspace([
       { type: "hardware_lcd1602_init", fields: { ADDRESS: "0x27" }, inputs: { COLS: number(16), ROWS: number(2) } },
       { type: "hardware_lcd1602_text", inputs: { ROW: number(1), COL: number(1), TEXT: text("Hi") } },
@@ -1811,12 +1822,603 @@ describe("H2 P0 LCD1602 and BH1750 blocks", () => {
       { type: "hardware_bh1750_lux", fields: { ADDRESS: "0x23" } },
     ], "esp32-wroom");
 
+    expect(collectHardwareBlockIssues(workspace, "esp32-wroom")).toEqual([]);
+    workspace.dispose();
+  });
+
+  it("adapts the P0 analog percentage blocks to each board ADC", () => {
+    const wroom = generate([{ type: "hardware_light_percent", fields: { PIN: "32" } }], "esp32-wroom");
+    expect(wroom).toContain("value = machine.ADC(machine.Pin(pin)).read()");
+    expect(wroom).toContain("hardware_adc_percent(32, 0, 4095)");
+
+    const esp8266 = generate([{ type: "hardware_light_percent", fields: { PIN: "A0" } }], "esp8266-esp12e");
+    expect(esp8266).toContain("value = machine.ADC(0).read()");
+    expect(esp8266).toContain("hardware_adc_percent(0, 0, 1023)");
+    expect(esp8266).not.toContain("hardware_adc_percent(A0");
+  });
+});
+
+describe("H5 P1-C sensor, display and actuator driver blocks", () => {
+  it("reads DS18B20 through one cached one-wire helper", () => {
+    const code = generate([
+      { type: "hardware_ds18b20_temperature", fields: { PIN: "4" }, inputs: { INDEX: number(2) } },
+      { type: "hardware_ds18b20_temperature", fields: { PIN: "4" }, inputs: { INDEX: number(1) } },
+    ], "esp32-s3");
+
+    expect(code).toContain("import onewire");
+    expect(code).toContain("import ds18x20");
+    expect(code).toContain("_ds18b20_sensors = {}");
+    expect(code).toContain("def hardware_ds18b20_read(pin, index):");
+    expect(code).toContain("sensor = ds18x20.DS18X20(onewire.OneWire(machine.Pin(pin)))");
+    expect(code).toContain("sensor.convert_temp()");
+    expect(code).toContain("time.sleep_ms(750)");
+    expect(code).toContain("return -127.0");
+    expect(code.match(/def hardware_ds18b20_read\(/g)).toHaveLength(1);
+    expect(code.match(/hardware_ds18b20_read\(4, int\(2\)\)/g)).toHaveLength(1);
+    expect(code.match(/hardware_ds18b20_read\(4, int\(1\)\)/g)).toHaveLength(1);
+  });
+
+  it("shares one lazy I2C bus across BH1750, BMP280, SHT30 and MPU6050", () => {
+    const code = generate([
+      { type: "hardware_bh1750_lux", fields: { ADDRESS: "0x23" } },
+      { type: "hardware_bmp280_read", fields: { FIELD: "pressure", ADDRESS: "0x77" } },
+      { type: "hardware_sht30_read", fields: { FIELD: "humidity", ADDRESS: "0x45" } },
+      { type: "hardware_mpu6050_read", fields: { READING: "gyro_z", ADDRESS: "0x69" } },
+    ], "esp32-s3");
+
+    expect(code).toContain("import bmp280");
+    expect(code).toContain("import sht30");
+    expect(code).toContain("import mpu6050");
+    expect(code).toContain("_bmp280_sensors = {}");
+    expect(code).toContain("_sht30_sensors = {}");
+    expect(code).toContain("_mpu6050_sensors = {}");
+    expect(code).toContain("def hardware_bmp280_read(address, field):");
+    expect(code).toContain("def hardware_sht30_read(address, field):");
+    expect(code).toContain("def hardware_mpu6050_read(address, reading):");
+    expect(code).toContain('hardware_bmp280_read(0x77, "pressure")');
+    expect(code).toContain('hardware_sht30_read(0x45, "humidity")');
+    expect(code).toContain('hardware_mpu6050_read(0x69, "gyro_z")');
+    expect(code).toContain("def hardware_i2c_bus():");
+    expect(code.match(/def hardware_i2c_bus\(/g)).toHaveLength(1);
+    expect(code.match(/machine\.I2C\(/g)).toHaveLength(1);
+    expect(code.match(/return -999\.0/g)).toHaveLength(3);
+  });
+
+  it("initializes TM1637 and shows a number with decimals and colon", () => {
+    const code = generate([
+      { type: "hardware_tm1637_init", fields: { CLK: "4", DIO: "5", BRIGHTNESS: "3" } },
+      { type: "hardware_tm1637_number", fields: { COLON: "on" }, inputs: { VALUE: number(12.5), DECIMALS: number(1) } },
+    ], "esp32-s3");
+
+    expect(code).toContain("import tm1637");
+    expect(code).toContain("_tm1637 = tm1637.Tm1637(machine.Pin(4, machine.Pin.OUT, value=1), machine.Pin(5, machine.Pin.OUT, value=1), brightness=3)");
+    expect(code).toContain("_tm1637.show_number(12.5, decimals=int(1), colon=True)");
+  });
+
+  it("drives a four-phase stepper motor and releases the coils", () => {
+    const code = generate([
+      {
+        type: "hardware_stepper_move",
+        fields: { IN1: "4", IN2: "5", IN3: "6", IN4: "7" },
+        inputs: { STEPS: number(-200), INTERVAL: number(5) },
+      },
+    ], "esp32-s3");
+
+    expect(code).toContain("def hardware_stepper_move(in1, in2, in3, in4, steps, interval_ms):");
+    expect(code).toContain("sequence = ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))");
+    expect(code).toContain("hardware_stepper_move(4, 5, 6, 7, int(-200), int(5))");
+    expect(code).toContain("pin.value(0)");
+    expect(code.match(/time\.sleep_ms\(interval_ms\)/g)).toHaveLength(1);
+  });
+
+  it("draws OLED lines and rectangles through the framebuffer", () => {
+    const code = generate([
+      { type: "hardware_oled_line", fields: { STATE: "on" }, inputs: { X1: number(0), Y1: number(0), X2: number(64), Y2: number(32) } },
+      { type: "hardware_oled_rect", fields: { FILL: "fill" }, inputs: { X: number(4), Y: number(8), WIDTH: number(32), HEIGHT: number(16) } },
+      { type: "hardware_oled_rect", fields: { FILL: "outline" }, inputs: { X: number(0), Y: number(0), WIDTH: number(16), HEIGHT: number(8) } },
+    ], "esp32-s3");
+
+    expect(code).toContain("_oled.line(int(0), int(0), int(64), int(32), 1)");
+    expect(code).toContain("_oled.fill_rect(int(4), int(8), int(32), int(16), 1)");
+    expect(code).toContain("_oled.rect(int(0), int(0), int(16), int(8), 1)");
+  });
+
+  it("keeps the H5 blocks off WROOM and ESP8266", () => {
+    const types = ["hardware_ds18b20_temperature", "hardware_bmp280_read", "hardware_sht30_read", "hardware_mpu6050_read", "hardware_tm1637_init", "hardware_tm1637_number", "hardware_stepper_move", "hardware_oled_line", "hardware_oled_rect"];
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
+      const entries = hardwareToolboxContents(boardId).map((item) => (item as { type?: string }).type);
+      for (const type of types) expect(entries, `${boardId} 不应出现 ${type}`).not.toContain(type);
+    }
+    const s3 = hardwareToolboxContents("esp32-s3").map((item) => (item as { type?: string }).type);
+    for (const type of types) expect(s3, `ESP32-S3 缺少 ${type}`).toContain(type);
+  });
+
+  it("offers S3 defaults for the H5 blocks", () => {
+    const contents = hardwareToolboxContents("esp32-s3");
+    const block = (type: string) => contents.find((item) => (item as { type?: string }).type === type) as {
+      fields?: Record<string, string>;
+      inputs?: Record<string, { shadow?: { fields?: Record<string, unknown> } }>;
+    } | undefined;
+
+    expect(block("hardware_ds18b20_temperature")?.fields?.PIN).toBe("1");
+    expect(block("hardware_ds18b20_temperature")?.inputs?.INDEX?.shadow?.fields?.NUM).toBe(1);
+    expect(block("hardware_bmp280_read")?.fields).toMatchObject({ FIELD: "temperature", ADDRESS: "0x76" });
+    expect(block("hardware_sht30_read")?.fields).toMatchObject({ FIELD: "temperature", ADDRESS: "0x44" });
+    expect(block("hardware_mpu6050_read")?.fields).toMatchObject({ READING: "accel_x", ADDRESS: "0x68" });
+    expect(block("hardware_tm1637_init")?.fields).toMatchObject({ CLK: "1", DIO: "2", BRIGHTNESS: "7" });
+    expect(block("hardware_tm1637_number")?.fields?.COLON).toBe("off");
+    expect(block("hardware_tm1637_number")?.inputs?.DECIMALS?.shadow?.fields?.NUM).toBe(0);
+    expect(block("hardware_stepper_move")?.fields).toMatchObject({ IN1: "1", IN2: "2", IN3: "4", IN4: "5" });
+    expect(block("hardware_stepper_move")?.inputs?.STEPS?.shadow?.fields?.NUM).toBe(200);
+    expect(block("hardware_stepper_move")?.inputs?.INTERVAL?.shadow?.fields?.NUM).toBe(5);
+    expect(block("hardware_oled_line")?.fields?.STATE).toBe("on");
+    expect(block("hardware_oled_rect")?.fields?.FILL).toBe("outline");
+  });
+
+  it("reports H5 blocks on WROOM through the P1 gate", () => {
+    const workspace = loadWorkspace([
+      { type: "hardware_ds18b20_temperature", fields: { PIN: "4" }, inputs: { INDEX: number(1) } },
+      { type: "hardware_bmp280_read", fields: { FIELD: "temperature", ADDRESS: "0x76" } },
+      { type: "hardware_stepper_move", fields: { IN1: "4", IN2: "5", IN3: "6", IN4: "7" }, inputs: { STEPS: number(200), INTERVAL: number(5) } },
+      { type: "hardware_oled_rect", fields: { FILL: "outline" }, inputs: { X: number(0), Y: number(0), WIDTH: number(16), HEIGHT: number(8) } },
+    ], "esp32-wroom");
+
     expect(collectHardwareBlockIssues(workspace, "esp32-wroom").map((issue) => issue.message)).toEqual([
-      "「初始化 LCD1602」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
-      "「LCD1602 显示文字」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
-      "「清空 LCD1602」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
-      "「BH1750 光照」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
+      "「DS18B20 温度」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
+      "「读取 BMP280」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
+      "「步进电机转动」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
+      "「OLED 画矩形」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
     ]);
     workspace.dispose();
+  });
+
+  it("validates H5 sensor indexes, TM1637 settings and stepper ranges", () => {
+    const sensor = loadWorkspace([
+      { type: "hardware_ds18b20_temperature", fields: { PIN: "4" }, inputs: { INDEX: number(0) } },
+    ], "esp32-s3");
+    expect(collectHardwareBlockIssues(sensor, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「DS18B20 温度」积木：传感器序号必须是 1–8 之间的整数",
+    ]);
+    sensor.dispose();
+
+    const tm = loadWorkspace([
+      { type: "hardware_tm1637_init", fields: { CLK: "4", DIO: "4", BRIGHTNESS: "7" } },
+      { type: "hardware_tm1637_number", fields: { COLON: "off" }, inputs: { VALUE: number(1), DECIMALS: number(4) } },
+    ], "esp32-s3");
+    expect(collectHardwareBlockIssues(tm, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「初始化 TM1637」积木：CLK 和 DIO 必须使用不同引脚",
+      "「TM1637 显示数字」积木：小数位必须是 0–3 之间的整数",
+    ]);
+    tm.dispose();
+
+    const stepper = loadWorkspace([
+      {
+        type: "hardware_stepper_move",
+        fields: { IN1: "4", IN2: "4", IN3: "6", IN4: "7" },
+        inputs: { STEPS: number(200000), INTERVAL: number(0) },
+      },
+    ], "esp32-s3");
+    expect(collectHardwareBlockIssues(stepper, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「步进电机转动」积木：IN1–IN4 必须使用 4 个不同引脚",
+      "「步进电机转动」积木：步数必须是 -100000 到 100000 之间的整数",
+      "「步进电机转动」积木：间隔必须是 1–1000 之间的整数毫秒",
+    ]);
+    stepper.dispose();
+  });
+
+  it("does not generate invalid TM1637 or stepper code", () => {
+    const tm = generate([
+      { type: "hardware_tm1637_init", fields: { CLK: "4", DIO: "4", BRIGHTNESS: "7" } },
+      { type: "hardware_tm1637_number", fields: { COLON: "off" }, inputs: { VALUE: number(1), DECIMALS: number(4) } },
+    ], "esp32-s3");
+    expect(tm).toContain("# 硬件积木未生成代码：TM1637 的 CLK 和 DIO 必须使用不同引脚");
+    expect(tm).toContain("# 硬件积木未生成代码：TM1637 小数位必须是 0–3 之间的整数");
+    expect(tm).not.toContain("_tm1637.show_number(");
+
+    const stepper = generate([{
+      type: "hardware_stepper_move",
+      fields: { IN1: "4", IN2: "5", IN3: "6", IN4: "6" },
+      inputs: { STEPS: number(200), INTERVAL: number(5) },
+    }], "esp32-s3");
+    expect(stepper).toContain("# 硬件积木未生成代码：步进电机的 IN1–IN4 必须使用 4 个不同引脚");
+    expect(stepper).not.toContain("machine.Pin(in1, machine.Pin.OUT)");
+  });
+});
+
+describe("P2 clock, time-of-flight, progress and download blocks", () => {
+  const text = (value: string) => ({ block: { type: "text", fields: { TEXT: value } } });
+
+  it("reads and writes the DS3231 through one cached helper", () => {
+    const code = generate([
+      { type: "hardware_ds3231_read", fields: { COMPONENT: "0" } },
+      {
+        type: "hardware_ds3231_set",
+        inputs: { YEAR: number(2026), MONTH: number(1), DAY: number(2), HOUR: number(3), MINUTE: number(4), SECOND: number(5) },
+      },
+    ], "esp32-s3");
+
+    expect(code).toContain("import ds3231");
+    expect(code).toContain("def hardware_ds3231_read(component):");
+    expect(code).toContain('sensor = globals().get("_ds3231")');
+    expect(code).toContain("values = sensor.read_datetime()");
+    expect(code).toContain("return values[component]");
+    expect(code).toContain("def hardware_ds3231_write(year, month, day, hour, minute, second):");
+    expect(code).toContain("sensor.set_datetime(year, month, day, hour, minute, second)");
+    expect(code).toContain("hardware_ds3231_read(0)");
+    expect(code).toContain("hardware_ds3231_write(2026, 1, 2, 3, 4, 5)");
+    expect(code.match(/def hardware_i2c_bus\(/g)).toHaveLength(1);
+    expect(code.match(/machine\.I2C\(/g)).toHaveLength(1);
+  });
+
+  it("reads VL53L0X distance through one cached sensor", () => {
+    const code = generate([{ type: "hardware_vl53l0x_distance" }], "esp32-s3");
+
+    expect(code).toContain("import vl53l0x");
+    expect(code).toContain("_vl53l0x = None");
+    expect(code).toContain("def hardware_vl53l0x_read():");
+    expect(code).toContain("_vl53l0x = vl53l0x.VL53L0X(hardware_i2c_bus())");
+    expect(code).toContain("return _vl53l0x.read_mm()");
+    expect(code).toContain("return -1");
+    expect(code).toContain("hardware_vl53l0x_read()");
+  });
+
+  it("draws an OLED progress bar with a clamped percentage", () => {
+    const code = generate([{
+      type: "hardware_oled_progress",
+      inputs: { X: number(0), Y: number(48), WIDTH: number(128), HEIGHT: number(10), PERCENT: number(50) },
+    }], "esp32-s3");
+
+    expect(code).toContain("def hardware_oled_progress(x, y, width, height, percent):");
+    expect(code).toContain("_oled.rect(x, y, width, height, 1)");
+    expect(code).toContain("_oled.fill_rect(x, y, int(width * percent / 100), height, 1)");
+    expect(code).toContain("hardware_oled_progress(int(0), int(48), int(128), int(10), 50)");
+  });
+
+  it("downloads a URL into a device file with explicit error codes", () => {
+    const code = generate([{
+      type: "hardware_http_download",
+      inputs: { URL: text("http://example.com/a.bin"), PATH: text("/a.bin") },
+    }], "esp32-s3");
+
+    expect(code).toContain("import requests");
+    expect(code).toContain("def hardware_http_download(url, path):");
+    expect(code).toContain('with open(str(path), "wb") as file:');
+    expect(code).toContain("return -1");
+    expect(code).toContain("return -2");
+    expect(code).toContain("return len(data)");
+    expect(code).toContain("hardware_http_download('http://example.com/a.bin', '/a.bin')");
+  });
+
+  it("keeps the P2 blocks off WROOM and ESP8266", () => {
+    const types = [
+      "hardware_ds3231_read",
+      "hardware_ds3231_set",
+      "hardware_vl53l0x_distance",
+      "hardware_oled_progress",
+      "hardware_http_download",
+      "hardware_http_status",
+      "hardware_mqtt_connected",
+      "hardware_ir_receive",
+      "hardware_file_size",
+      "hardware_rc522_uid",
+      "hardware_sd_card",
+      "hardware_webserver_serve",
+      "hardware_timer_every",
+      "hardware_ble_gatt_start",
+      "hardware_ble_gatt_notify",
+    ];
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
+      const entries = hardwareToolboxContents(boardId).map((item) => (item as { type?: string }).type);
+      for (const type of types) expect(entries, `${boardId} 不应出现 ${type}`).not.toContain(type);
+    }
+    const s3 = hardwareToolboxContents("esp32-s3").map((item) => (item as { type?: string }).type);
+    for (const type of types) expect(s3, `ESP32-S3 缺少 ${type}`).toContain(type);
+  });
+
+  it("offers S3 defaults for the P2 blocks", () => {
+    const contents = hardwareToolboxContents("esp32-s3");
+    const block = (type: string) => contents.find((item) => (item as { type?: string }).type === type) as {
+      fields?: Record<string, string>;
+      inputs?: Record<string, { shadow?: { fields?: Record<string, unknown> } }>;
+    } | undefined;
+
+    expect(block("hardware_ds3231_read")?.fields?.COMPONENT).toBe("0");
+    expect(block("hardware_ds3231_set")?.inputs?.YEAR?.shadow?.fields?.NUM).toBe(2026);
+    expect(block("hardware_ds3231_set")?.inputs?.MONTH?.shadow?.fields?.NUM).toBe(1);
+    expect(block("hardware_oled_progress")?.inputs?.PERCENT?.shadow?.fields?.NUM).toBe(50);
+    expect(block("hardware_oled_progress")?.inputs?.WIDTH?.shadow?.fields?.NUM).toBe(128);
+    expect(block("hardware_http_download")?.inputs?.URL?.shadow?.fields?.TEXT).toBe("http://example.com/data.txt");
+    expect(block("hardware_http_download")?.inputs?.PATH?.shadow?.fields?.TEXT).toBe("/data.txt");
+    expect(block("hardware_http_status")).toBeTruthy();
+    expect(block("hardware_mqtt_connected")).toBeTruthy();
+    expect(block("hardware_ir_receive")?.inputs?.TIMEOUT?.shadow?.fields?.NUM).toBe(5000);
+    expect(block("hardware_file_size")?.inputs?.PATH?.shadow?.fields?.TEXT).toBe("/data.txt");
+  });
+
+  it("reports P2 blocks on WROOM through the P2 gate", () => {
+    const workspace = loadWorkspace([
+      { type: "hardware_ds3231_read", fields: { COMPONENT: "0" } },
+      { type: "hardware_vl53l0x_distance" },
+      { type: "hardware_oled_progress", inputs: { X: number(0), Y: number(0), WIDTH: number(64), HEIGHT: number(8), PERCENT: number(50) } },
+      { type: "hardware_http_download", inputs: { URL: text("http://example.com/a.bin"), PATH: text("/a.bin") } },
+    ], "esp32-wroom");
+
+    expect(collectHardwareBlockIssues(workspace, "esp32-wroom").map((issue) => issue.message)).toEqual([
+      "「读取 DS3231」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
+      "「VL53L0X 测距」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
+      "「OLED 进度条」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
+      "「HTTP 下载文件」积木：ESP32 WROOM 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）",
+    ]);
+    workspace.dispose();
+  });
+
+  it("validates DS3231 fields, progress percentage and download paths", () => {
+    const clock = loadWorkspace([{
+      type: "hardware_ds3231_set",
+      inputs: { YEAR: number(1999), MONTH: number(13), DAY: number(1), HOUR: number(0), MINUTE: number(0), SECOND: number(0) },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(clock, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「设置 DS3231 时间」积木：年份必须是 2000–2099 之间的整数",
+      "「设置 DS3231 时间」积木：月份必须是 1–12 之间的整数",
+    ]);
+    clock.dispose();
+
+    const progress = loadWorkspace([{
+      type: "hardware_oled_progress",
+      inputs: { X: number(0), Y: number(0), WIDTH: number(64), HEIGHT: number(8), PERCENT: number(101) },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(progress, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「OLED 进度条」积木：百分比必须是 0–100 之间的数",
+    ]);
+    progress.dispose();
+
+    const download = loadWorkspace([{
+      type: "hardware_http_download",
+      inputs: { URL: text("ftp://example.com/a.bin"), PATH: text("/main.py") },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(download, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「HTTP 下载文件」积木：网址必须以 http:// 或 https:// 开头",
+      "「HTTP 下载文件」积木：不要覆盖 /main.py，它会替换正在运行的程序",
+    ]);
+    download.dispose();
+  });
+
+  it("tracks the last HTTP status and MQTT connection state", () => {
+    const code = generate([
+      { type: "hardware_http_get", inputs: { URL: text("http://example.com") } },
+      { type: "hardware_http_status" },
+      {
+        type: "hardware_mqtt_connect",
+        inputs: { SERVER: text("192.168.1.10"), PORT: number(1883), CLIENT_ID: text("vp"), USER: text(""), PASSWORD: text("") },
+      },
+      { type: "hardware_mqtt_connected" },
+    ], "esp32-s3");
+
+    expect(code).toContain('globals()["_http_status"] = response.status_code');
+    expect(code).toContain('globals()["_http_status"] = 0');
+    expect(code).toContain('globals().get("_http_status", 0)');
+    expect(code).toContain("def hardware_mqtt_connected():");
+    expect(code).toContain("return _mqtt.sock is not None");
+    expect(code).toContain("hardware_mqtt_connected()");
+  });
+
+  it("decodes NEC infrared frames with inverse-byte validation", () => {
+    const code = generate([
+      { type: "hardware_ir_receive", fields: { PIN: "4" }, inputs: { TIMEOUT: number(5000) } },
+    ], "esp32-s3");
+
+    expect(code).toContain("import machine");
+    expect(code).toContain("def hardware_ir_read(pin, timeout_ms):");
+    expect(code).toContain("receiver = machine.Pin(pin, machine.Pin.IN)");
+    expect(code).toContain("machine.time_pulse_us(receiver, 0, 20000)");
+    expect(code).toContain("machine.time_pulse_us(receiver, 1, 2000)");
+    expect(code).toContain("value |= 1 << index");
+    expect(code).toContain("if address ^ ((value >> 8) & 0xFF) != 0xFF:");
+    expect(code).toContain("return command");
+    expect(code).toContain("hardware_ir_read(4, int(5000))");
+  });
+
+  it("reads a device file size and returns -1 when missing", () => {
+    const code = generate([
+      { type: "hardware_file_size", inputs: { PATH: text("/data.txt") } },
+    ], "esp32-s3");
+
+    expect(code).toContain("def hardware_file_size(path):");
+    expect(code).toContain("return os.stat(str(path))[6]");
+    expect(code).toContain("return -1");
+    expect(code).toContain("hardware_file_size('/data.txt')");
+  });
+
+  it("validates the infrared timeout and file-size paths", () => {
+    const ir = loadWorkspace([{
+      type: "hardware_ir_receive",
+      fields: { PIN: "4" },
+      inputs: { TIMEOUT: number(60001) },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(ir, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「红外接收」积木：超时必须是 0–60000 之间的整数毫秒",
+    ]);
+    ir.dispose();
+
+    const size = loadWorkspace([{
+      type: "hardware_file_size",
+      inputs: { PATH: text("") },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(size, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「设备文件大小」积木：文件路径不能为空",
+    ]);
+    size.dispose();
+  });
+
+  it("reads a 4-byte UID from the RC522 over SPI", () => {
+    const code = generate([{
+      type: "hardware_rc522_uid",
+      fields: { SPI: "2", SCK: "12", MOSI: "11", MISO: "13", CS: "10", RST: "7" },
+    }], "esp32-s3");
+
+    expect(code).toContain("import rc522");
+    expect(code).toContain("def hardware_rc522_read(spi_id, sck, mosi, miso, cs, rst):");
+    expect(code).toContain("spi = machine.SPI(spi_id, baudrate=1000000, polarity=0, phase=0, sck=machine.Pin(sck), mosi=machine.Pin(mosi), miso=machine.Pin(miso))");
+    expect(code).toContain("sensor = rc522.RC522(spi, machine.Pin(cs, machine.Pin.OUT, value=1), machine.Pin(rst, machine.Pin.OUT, value=1))");
+    expect(code).toContain("return sensor.read_uid()");
+    expect(code).toContain('return ""');
+    expect(code).toContain("hardware_rc522_read(2, 12, 11, 13, 10, 7)");
+  });
+
+  it("mounts and unmounts an SD card through slot 2", () => {
+    const code = generate([
+      { type: "hardware_sd_card", fields: { ACTION: "mount", SCK: "12", MOSI: "11", MISO: "13", CS: "10" } },
+      { type: "hardware_sd_card", fields: { ACTION: "unmount" } },
+    ], "esp32-s3");
+
+    expect(code).toContain("import machine");
+    expect(code).toContain("def hardware_sd_card(action, sck, mosi, miso, cs):");
+    expect(code).toContain('sd = machine.SDCard(slot=2, sck=machine.Pin(sck), mosi=machine.Pin(mosi), miso=machine.Pin(miso), cs=machine.Pin(cs), freq=20000000)');
+    expect(code).toContain('os.mount(sd, "/sd")');
+    expect(code).toContain('os.umount("/sd")');
+    expect(code).toContain('hardware_sd_card("mount", 12, 11, 13, 10)');
+    expect(code).toContain('hardware_sd_card("unmount", 0, 0, 0, 0)');
+  });
+
+  it("offers distinct S3 defaults for RFID and SD card", () => {
+    const contents = hardwareToolboxContents("esp32-s3");
+    const block = (type: string) => contents.find((item) => (item as { type?: string }).type === type) as {
+      fields?: Record<string, string>;
+      inputs?: Record<string, { shadow?: { fields?: Record<string, unknown> } }>;
+    } | undefined;
+
+    expect(block("hardware_rc522_uid")?.fields).toMatchObject({ SPI: "1", SCK: "1", MOSI: "2", MISO: "6", CS: "4", RST: "5" });
+    expect(block("hardware_sd_card")?.fields).toMatchObject({ ACTION: "mount", SCK: "1", MOSI: "2", MISO: "5", CS: "4" });
+    expect(block("hardware_webserver_serve")?.inputs?.PORT?.shadow?.fields?.NUM).toBe(80);
+    expect(block("hardware_webserver_serve")?.inputs?.BODY?.shadow?.fields?.TEXT).toBe("<h1>Visual Python</h1>");
+  });
+
+  it("reports duplicate RFID and SD card pins", () => {
+    const rfid = loadWorkspace([{
+      type: "hardware_rc522_uid",
+      fields: { SPI: "2", SCK: "12", MOSI: "12", MISO: "13", CS: "10", RST: "7" },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(rfid, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「RFID 读卡」积木：SCK、MOSI、MISO、CS、RST 必须使用不同引脚",
+    ]);
+    rfid.dispose();
+
+    const sd = loadWorkspace([{
+      type: "hardware_sd_card",
+      fields: { ACTION: "mount", SCK: "12", MOSI: "11", MISO: "11", CS: "10" },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(sd, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「SD 卡挂载/卸载」积木：SCK、MOSI、MISO、CS 必须使用不同引脚",
+    ]);
+    sd.dispose();
+  });
+
+  it("serves one HTTP request per call and returns its path", () => {
+    const code = generate([{
+      type: "hardware_webserver_serve",
+      inputs: { PORT: number(80), BODY: text("<h1>Hi</h1>") },
+    }], "esp32-s3");
+
+    expect(code).toContain("import socket");
+    expect(code).toContain("def hardware_webserver_serve(port, body):");
+    expect(code).toContain("server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)");
+    expect(code).toContain('server.bind(("", int(port)))');
+    expect(code).toContain("client, address = server.accept()");
+    expect(code).toContain('request.decode().split(" ")[1]');
+    expect(code).toContain("client.send(response.encode())");
+    expect(code).toContain("client.close()");
+    expect(code).toContain("hardware_webserver_serve(80, '<h1>Hi</h1>')");
+  });
+
+  it("validates the web server port", () => {
+    const workspace = loadWorkspace([{
+      type: "hardware_webserver_serve",
+      inputs: { PORT: number(70000), BODY: text("<h1>Hi</h1>") },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(workspace, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「处理一次网页请求」积木：端口必须是 1–65535 之间的整数",
+    ]);
+    workspace.dispose();
+  });
+
+  it("creates a periodic hardware timer around a statement body", () => {
+    const code = generate([{
+      type: "hardware_timer_every",
+      inputs: {
+        PERIOD: number(1000),
+        BODY: { block: { type: "hardware_pin_write", fields: { PIN: "4", LEVEL: "1" } } },
+      },
+    }], "esp32-s3");
+
+    expect(code).toContain("import machine");
+    expect(code).toMatch(/def hardware_timer_cb_0_[A-Za-z0-9_]+\(_timer\):/);
+    expect(code).toContain("machine.Pin(4, machine.Pin.OUT).value(1)");
+    expect(code).toContain("machine.Timer(0)");
+    expect(code).toContain("mode=machine.Timer.PERIODIC");
+    expect(code).toMatch(/hardware_timer_0_[A-Za-z0-9_]+\.init\(period=int\(1000\)/);
+  });
+
+  it("registers a BLE GATT service and sends notifications", () => {
+    const service = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
+    const characteristic = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
+    const code = generate([
+      {
+        type: "hardware_ble_gatt_start",
+        inputs: { NAME: text("VP"), SERVICE: text(service), CHARACTERISTIC: text(characteristic) },
+      },
+      { type: "hardware_ble_gatt_notify", inputs: { MESSAGE: text("hello") } },
+    ], "esp32-s3");
+
+    expect(code).toContain("import bluetooth");
+    expect(code).toContain("_ble_conn = None");
+    expect(code).toContain("def hardware_ble_gatt_start(name, service_uuid, characteristic_uuid):");
+    expect(code).toContain("((_ble_handle,),) = _ble.gatts_register_services((service,))");
+    expect(code).toContain("_ble.gap_advertise(200000, adv_data=");
+    expect(code).toContain("connectable=True");
+    expect(code).toContain("def hardware_ble_gatt_notify(message):");
+    expect(code).toContain("_ble.gatts_notify(_ble_conn, _ble_handle, str(message).encode())");
+    expect(code).toContain(`hardware_ble_gatt_start('VP', '${service}', '${characteristic}')`);
+    expect(code).toContain("hardware_ble_gatt_notify('hello')");
+  });
+
+  it("validates timer periods, timer count and GATT UUIDs", () => {
+    const timer = loadWorkspace([{
+      type: "hardware_timer_every",
+      inputs: { PERIOD: number(0) },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(timer, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「定时器」积木：周期必须是 1–3600000 之间的整数毫秒",
+    ]);
+    timer.dispose();
+
+    const many = loadWorkspace(Array.from({ length: 5 }, () => ({
+      type: "hardware_timer_every",
+      inputs: { PERIOD: number(500) },
+    })), "esp32-s3");
+    const countIssues = collectHardwareBlockIssues(many, "esp32-s3");
+    expect(countIssues).toHaveLength(5);
+    expect(countIssues[0].message).toBe("「定时器」积木：最多同时使用 4 个定时器（当前 5 个）");
+    many.dispose();
+
+    const gatt = loadWorkspace([{
+      type: "hardware_ble_gatt_start",
+      inputs: { NAME: text("这个设备名字远远超过二十个字节"), SERVICE: text("not-a-uuid"), CHARACTERISTIC: text("6E400003-B5A3-F393-E0A9-E50E24DCCA9E") },
+    }], "esp32-s3");
+    expect(collectHardwareBlockIssues(gatt, "esp32-s3").map((issue) => issue.message)).toEqual([
+      "「开启 BLE GATT 服务」积木：设备名不能超过 20 字节",
+      "「开启 BLE GATT 服务」积木：服务 UUID 格式无效",
+    ]);
+    gatt.dispose();
+  });
+
+  it("offers S3 defaults for the timer and GATT blocks", () => {
+    const contents = hardwareToolboxContents("esp32-s3");
+    const block = (type: string) => contents.find((item) => (item as { type?: string }).type === type) as {
+      inputs?: Record<string, { shadow?: { fields?: Record<string, unknown> } }>;
+    } | undefined;
+
+    expect(block("hardware_timer_every")?.inputs?.PERIOD?.shadow?.fields?.NUM).toBe(500);
+    expect(block("hardware_ble_gatt_start")?.inputs?.SERVICE?.shadow?.fields?.TEXT).toBe("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+    expect(block("hardware_ble_gatt_notify")?.inputs?.MESSAGE?.shadow?.fields?.TEXT).toBe("hello");
   });
 });

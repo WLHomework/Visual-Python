@@ -33,6 +33,32 @@ describe("hardware device libraries", () => {
     expect(deviceLibraryBytes(library!).byteLength).toBeGreaterThan(1500);
   });
 
+  it("describes the bundled BMP280, SHT30, MPU6050 and TM1637 libraries", () => {
+    for (const [id, bytes] of [["bmp280", 2000], ["sht30", 800], ["mpu6050", 1200], ["tm1637", 1500]] as const) {
+      const library = hardwareDeviceLibraries.find((item) => item.id === id);
+      expect(library).toMatchObject({
+        deviceFileName: `${id}.py`,
+        sourcePath: `src/hardware/device-libraries/${id}.py`,
+      });
+      expect(library?.source.split("\n")[0]).toContain("Source:");
+      expect(deviceLibraryPath(library!)).toBe(`/lib/${id}.py`);
+      expect(deviceLibraryBytes(library!).byteLength).toBeGreaterThan(bytes);
+    }
+  });
+
+  it("describes the bundled DS3231, VL53L0X and RC522 libraries", () => {
+    for (const [id, bytes] of [["ds3231", 2000], ["vl53l0x", 5000], ["rc522", 2000]] as const) {
+      const library = hardwareDeviceLibraries.find((item) => item.id === id);
+      expect(library).toMatchObject({
+        deviceFileName: `${id}.py`,
+        sourcePath: `src/hardware/device-libraries/${id}.py`,
+      });
+      expect(library?.source.split("\n")[0]).toContain("Source:");
+      expect(deviceLibraryPath(library!)).toBe(`/lib/${id}.py`);
+      expect(deviceLibraryBytes(library!).byteLength).toBeGreaterThan(bytes);
+    }
+  });
+
   it("normalizes source line endings so the upload hash is platform-independent", () => {
     for (const library of hardwareDeviceLibraries) {
       expect(library.source, `${library.id} 含 CRLF，上传前未统一为 LF`).not.toContain("\r");
@@ -53,6 +79,14 @@ describe("hardware device libraries", () => {
     expect(deviceLibrariesForCode("import bh1750 as light\n").map((item) => item.id)).toEqual(["bh1750"]);
     expect(deviceLibrariesForCode("from lcd1602 import Lcd1602\n").map((item) => item.id)).toEqual(["lcd1602"]);
     expect(deviceLibrariesForCode("import lcd1602 as lcd\n").map((item) => item.id)).toEqual(["lcd1602"]);
+    expect(deviceLibrariesForCode("import bmp280\nbmp280.BMP280(bus)\n").map((item) => item.id)).toEqual(["bmp280"]);
+    expect(deviceLibrariesForCode("from sht30 import SHT30\n").map((item) => item.id)).toEqual(["sht30"]);
+    expect(deviceLibrariesForCode("import mpu6050 as imu\n").map((item) => item.id)).toEqual(["mpu6050"]);
+    expect(deviceLibrariesForCode("from tm1637 import Tm1637\n").map((item) => item.id)).toEqual(["tm1637"]);
+    expect(deviceLibrariesForCode("import ds3231\n").map((item) => item.id)).toEqual(["ds3231"]);
+    expect(deviceLibrariesForCode("from vl53l0x import VL53L0X\n").map((item) => item.id)).toEqual(["vl53l0x"]);
+    expect(deviceLibrariesForCode("import rc522\n").map((item) => item.id)).toEqual(["rc522"]);
+    expect(deviceLibrariesForCode("import machine\nprint('bmp280')\nprint('sht30')\nprint('mpu6050')\nprint('tm1637')\nprint('ds3231')\nprint('vl53l0x')\n")).toEqual([]);
     expect(deviceLibrariesForCode("import machine\nprint('ssd1306')\nprint('bh1750')\nprint('lcd1602')\n")).toEqual([]);
   });
 });

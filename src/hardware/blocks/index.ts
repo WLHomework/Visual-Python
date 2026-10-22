@@ -10,6 +10,7 @@ import * as flow from "./flow";
 import * as gpio from "./gpio";
 import * as http from "./http";
 import * as i2c from "./i2c";
+import * as infrared from "./infrared";
 import * as lcd1602 from "./lcd1602";
 import * as math from "./math";
 import * as mqtt from "./mqtt";
@@ -18,14 +19,21 @@ import * as oled from "./oled";
 import { hardwarePackToolboxContents, registerHardwarePacks, type HardwareBlockPack } from "./pack";
 import * as pwm from "./pwm";
 import { esp8266RandomBlockIssue, installEsp8266RandomGuards } from "./randomCompat";
+import * as rfid from "./rfid";
+import * as rtc from "./rtc";
 import * as sensorsAnalog from "./sensorsAnalog";
 import * as sensorsDigital from "./sensorsDigital";
 import * as sensorsI2c from "./sensorsI2c";
+import * as sensorsOneWire from "./sensorsOneWire";
 import * as spi from "./spi";
+import * as stepper from "./stepper";
 import * as storage from "./storage";
 import * as temperature from "./temperature";
+import * as timer from "./timer";
+import * as tm1637 from "./tm1637";
 import * as uart from "./uart";
 import * as ultrasonic from "./ultrasonic";
+import * as webserver from "./webserver";
 import * as wifi from "./wifi";
 import {
   advancedWirelessBlockTypes,
@@ -33,6 +41,8 @@ import {
   hardwareBlockLabels,
   hardwareSectionLabel,
   p0ModuleBlockTypes,
+  p1ModuleBlockTypes,
+  p2ModuleBlockTypes,
   pinUseByBlockType,
   pinUsesForBlock,
   registerHardwareBoardPinExtension,
@@ -67,11 +77,17 @@ export const hardwareBlockPacks: readonly HardwareBlockPack[] = [
   sensorsAnalog,
   sensorsDigital,
   sensorsI2c,
+  sensorsOneWire,
+  rtc,
+  infrared,
+  rfid,
   actuators,
+  stepper,
   neopixel,
   dht,
   ultrasonic,
   oled,
+  tm1637,
   lcd1602,
   uart,
   i2c,
@@ -81,8 +97,10 @@ export const hardwareBlockPacks: readonly HardwareBlockPack[] = [
   ble,
   espnow,
   mqtt,
+  webserver,
   storage,
   temperature,
+  timer,
   flow,
   math,
 ];
@@ -110,6 +128,7 @@ export function hardwareToolboxContents(boardId?: HardwareBoardId): Blockly.util
 export function collectHardwareBlockIssues(workspace: Blockly.Workspace, boardId?: HardwareBoardId): HardwareBlockIssue[] {
   const profile = getBoardProfile(boardId);
   const issues = new Map<string, HardwareBlockIssue>();
+  const timerBlocks = workspace.getAllBlocks(false).filter((block) => block.type === "hardware_timer_every");
   const record = (key: string, issue: HardwareBlockIssue) => {
     if (!issues.has(key)) issues.set(key, issue);
   };
@@ -147,6 +166,20 @@ export function collectHardwareBlockIssues(workspace: Blockly.Workspace, boardId
     }
     if (p0ModuleBlockTypes.includes(block.type) && !profile.p0Modules) {
       record(`p0-${block.id}`, {
+        blockId: block.id,
+        message: `「${label}」积木：${profile.displayName} 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）`,
+      });
+      continue;
+    }
+    if (p1ModuleBlockTypes.includes(block.type) && !profile.p1Modules) {
+      record(`p1-${block.id}`, {
+        blockId: block.id,
+        message: `「${label}」积木：${profile.displayName} 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）`,
+      });
+      continue;
+    }
+    if (p2ModuleBlockTypes.includes(block.type) && !profile.p2Modules) {
+      record(`p2-${block.id}`, {
         blockId: block.id,
         message: `「${label}」积木：${profile.displayName} 暂未开放该模块积木（仅 ESP32-S3，待 S3 真机验证后评估下放）`,
       });
@@ -254,6 +287,110 @@ export function collectHardwareBlockIssues(workspace: Blockly.Workspace, boardId
         });
       }
     }
+    if (block.type === "hardware_ds18b20_temperature") {
+      const index = numericInputValue(block, "INDEX");
+      if (index !== undefined && (!Number.isInteger(index) || index < 1 || index > 8)) {
+        record(`ds18b20-index-${block.id}`, { blockId: block.id, message: `「${label}」积木：传感器序号必须是 1–8 之间的整数` });
+      }
+    }
+    if (block.type === "hardware_tm1637_init") {
+      const clk = String(block.getFieldValue("CLK") ?? "");
+      const dio = String(block.getFieldValue("DIO") ?? "");
+      if (clk && dio && clk === dio) {
+        record(`tm1637-pins-${block.id}`, { blockId: block.id, message: `「${label}」积木：CLK 和 DIO 必须使用不同引脚` });
+      }
+    }
+    if (block.type === "hardware_tm1637_number") {
+      const decimals = numericInputValue(block, "DECIMALS");
+      if (decimals !== undefined && (!Number.isInteger(decimals) || decimals < 0 || decimals > 3)) {
+        record(`tm1637-decimals-${block.id}`, { blockId: block.id, message: `「${label}」积木：小数位必须是 0–3 之间的整数` });
+      }
+    }
+    if (block.type === "hardware_stepper_move") {
+      const pins = ["IN1", "IN2", "IN3", "IN4"].map((field) => String(block.getFieldValue(field) ?? ""));
+      if (pins.every(Boolean) && new Set(pins).size < 4) {
+        record(`stepper-pins-${block.id}`, { blockId: block.id, message: `「${label}」积木：IN1–IN4 必须使用 4 个不同引脚` });
+      }
+      const steps = numericInputValue(block, "STEPS");
+      if (steps !== undefined && (!Number.isInteger(steps) || steps < -100000 || steps > 100000)) {
+        record(`stepper-steps-${block.id}`, { blockId: block.id, message: `「${label}」积木：步数必须是 -100000 到 100000 之间的整数` });
+      }
+      const interval = numericInputValue(block, "INTERVAL");
+      if (interval !== undefined && (!Number.isInteger(interval) || interval < 1 || interval > 1000)) {
+        record(`stepper-interval-${block.id}`, { blockId: block.id, message: `「${label}」积木：间隔必须是 1–1000 之间的整数毫秒` });
+      }
+    }
+    if (block.type === "hardware_ds3231_set") {
+      const ranges: Array<[string, number, number, string]> = [
+        ["YEAR", 2000, 2099, "年份必须是 2000–2099 之间的整数"],
+        ["MONTH", 1, 12, "月份必须是 1–12 之间的整数"],
+        ["DAY", 1, 31, "日期必须是 1–31 之间的整数"],
+        ["HOUR", 0, 23, "小时必须是 0–23 之间的整数"],
+        ["MINUTE", 0, 59, "分钟必须是 0–59 之间的整数"],
+        ["SECOND", 0, 59, "秒必须是 0–59 之间的整数"],
+      ];
+      for (const [field, min, max, message] of ranges) {
+        const value = numericInputValue(block, field);
+        if (value !== undefined && (!Number.isInteger(value) || value < min || value > max)) {
+          record(`ds3231-${field}-${block.id}`, { blockId: block.id, message: `「${label}」积木：${message}` });
+        }
+      }
+    }
+    if (block.type === "hardware_oled_progress") {
+      const percent = numericInputValue(block, "PERCENT");
+      if (percent !== undefined && (!Number.isFinite(percent) || percent < 0 || percent > 100)) {
+        record(`oled-progress-${block.id}`, { blockId: block.id, message: `「${label}」积木：百分比必须是 0–100 之间的数` });
+      }
+    }
+    if (block.type === "hardware_ir_receive") {
+      const timeout = numericInputValue(block, "TIMEOUT");
+      if (timeout !== undefined && (!Number.isInteger(timeout) || timeout < 0 || timeout > 60000)) {
+        record(`ir-timeout-${block.id}`, { blockId: block.id, message: `「${label}」积木：超时必须是 0–60000 之间的整数毫秒` });
+      }
+    }
+    if (block.type === "hardware_rc522_uid") {
+      const spiId = Number(block.getFieldValue("SPI"));
+      if (profile.spiIds?.length && !profile.spiIds.includes(spiId)) {
+        record(`rc522-spi-${block.id}`, { blockId: block.id, message: `「${label}」积木：${profile.displayName} 上没有 SPI ${spiId}` });
+      }
+      const pins = ["SCK", "MOSI", "MISO", "CS", "RST"].map((field) => String(block.getFieldValue(field) ?? ""));
+      if (pins.every(Boolean) && new Set(pins).size < 5) {
+        record(`rc522-pins-${block.id}`, { blockId: block.id, message: `「${label}」积木：SCK、MOSI、MISO、CS、RST 必须使用不同引脚` });
+      }
+    }
+    if (block.type === "hardware_sd_card" && block.getFieldValue("ACTION") !== "unmount") {
+      const pins = ["SCK", "MOSI", "MISO", "CS"].map((field) => String(block.getFieldValue(field) ?? ""));
+      if (pins.every(Boolean) && new Set(pins).size < 4) {
+        record(`sd-pins-${block.id}`, { blockId: block.id, message: `「${label}」积木：SCK、MOSI、MISO、CS 必须使用不同引脚` });
+      }
+    }
+    if (block.type === "hardware_webserver_serve") {
+      const port = numericInputValue(block, "PORT");
+      if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+        record(`webserver-port-${block.id}`, { blockId: block.id, message: `「${label}」积木：端口必须是 1–65535 之间的整数` });
+      }
+    }
+    if (block.type === "hardware_timer_every") {
+      const period = numericInputValue(block, "PERIOD");
+      if (period !== undefined && (!Number.isInteger(period) || period < 1 || period > 3600000)) {
+        record(`timer-period-${block.id}`, { blockId: block.id, message: `「${label}」积木：周期必须是 1–3600000 之间的整数毫秒` });
+      }
+      if (timerBlocks.length > 4) {
+        record(`timer-count-${block.id}`, { blockId: block.id, message: `「${label}」积木：最多同时使用 4 个定时器（当前 ${timerBlocks.length} 个）` });
+      }
+    }
+    if (block.type === "hardware_ble_gatt_start") {
+      const name = textInputValue(block, "NAME");
+      if (name !== undefined && new TextEncoder().encode(name).length > 20) {
+        record(`gatt-name-${block.id}`, { blockId: block.id, message: `「${label}」积木：设备名不能超过 20 字节` });
+      }
+      for (const field of ["SERVICE", "CHARACTERISTIC"]) {
+        const uuid = textInputValue(block, field);
+        if (uuid !== undefined && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(uuid.trim())) {
+          record(`gatt-uuid-${field}-${block.id}`, { blockId: block.id, message: `「${label}」积木：${field === "SERVICE" ? "服务" : "特征"} UUID 格式无效` });
+        }
+      }
+    }
     if (block.type === "hardware_builtin_led" && !builtinLedPin(profile)) {
       record(`led-${block.id}`, { blockId: block.id, message: `「${label}」积木：${profile.displayName} 没有板载 LED` });
     }
@@ -328,12 +465,21 @@ export function collectHardwareBlockIssues(workspace: Blockly.Workspace, boardId
         record(`wifi-ap-channel-${block.id}`, { blockId: block.id, message: `「${label}」积木：信道必须是 1–13 之间的整数` });
       }
     }
-    if (block.type === "hardware_http_get" || block.type === "hardware_http_post") {
+    if (block.type === "hardware_http_get" || block.type === "hardware_http_post" || block.type === "hardware_http_download") {
       const url = textInputValue(block, "URL");
       if (url !== undefined && !url.trim()) {
         record(`http-url-${block.id}`, { blockId: block.id, message: `「${label}」积木：网址不能为空` });
       } else if (url !== undefined && !/^https?:\/\//i.test(url.trim())) {
         record(`http-url-scheme-${block.id}`, { blockId: block.id, message: `「${label}」积木：网址必须以 http:// 或 https:// 开头` });
+      }
+    }
+    if (block.type === "hardware_http_download") {
+      const path = textInputValue(block, "PATH");
+      const normalized = path?.replace(/\\/g, "/");
+      if (path !== undefined && !path.trim()) {
+        record(`http-path-${block.id}`, { blockId: block.id, message: `「${label}」积木：保存路径不能为空` });
+      } else if (normalized !== undefined && /(^|\/)main\.py$/i.test(normalized)) {
+        record(`http-path-main-${block.id}`, { blockId: block.id, message: `「${label}」积木：不要覆盖 /main.py，它会替换正在运行的程序` });
       }
     }
     if (block.type === "hardware_ntp_local") {
@@ -394,6 +540,7 @@ export function collectHardwareBlockIssues(workspace: Blockly.Workspace, boardId
       block.type === "hardware_file_append" ||
       block.type === "hardware_file_read" ||
       block.type === "hardware_file_exists" ||
+      block.type === "hardware_file_size" ||
       block.type === "hardware_file_delete" ||
       block.type === "hardware_file_list"
     ) {
@@ -404,7 +551,7 @@ export function collectHardwareBlockIssues(workspace: Blockly.Workspace, boardId
       } else if (normalized !== undefined && /(^|\/)main\.py$/i.test(normalized)) {
         if (block.type === "hardware_file_delete") {
           record(`file-main-${block.id}`, { blockId: block.id, message: `「${label}」积木：不要删除 /main.py，它可能正在运行` });
-        } else if (block.type !== "hardware_file_read" && block.type !== "hardware_file_exists" && block.type !== "hardware_file_list") {
+        } else if (block.type !== "hardware_file_read" && block.type !== "hardware_file_exists" && block.type !== "hardware_file_size" && block.type !== "hardware_file_list") {
           record(`file-main-${block.id}`, { blockId: block.id, message: `「${label}」积木：不要写入 /main.py，它会覆盖正在运行的程序` });
         }
       }

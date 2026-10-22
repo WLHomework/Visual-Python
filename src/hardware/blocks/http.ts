@@ -38,6 +38,25 @@ const definitions = [
       "向网址发送文本内容并返回响应正文。需要先连接 Wi-Fi。支持 http 和 https；HTTPS 不校验证书。超时或网络错误返回空字符串。",
   },
   {
+    type: "hardware_http_download",
+    message0: "HTTP 下载 %1 保存到 %2",
+    args0: [
+      { type: "input_value", name: "URL", check: "String" },
+      { type: "input_value", name: "PATH", check: "String" },
+    ],
+    inputsInline: true,
+    output: "Number",
+    colour: hardwareColours.network,
+    tooltip: "把网址内容保存为开发板文件，返回写入的字节数。网络失败返回 -1，文件写入失败返回 -2。需要先连接 Wi-Fi；大文件会占用设备内存，请确认剩余空间。不要在运行中覆盖 /main.py。",
+  },
+  {
+    type: "hardware_http_status",
+    message0: "最近 HTTP 状态码",
+    output: "Number",
+    colour: hardwareColours.network,
+    tooltip: "返回最近一次 HTTP GET、POST 或下载的状态码；还没有发过请求或请求失败时返回 0。",
+  },
+  {
     type: "hardware_ntp_sync",
     message0: "NTP 校时",
     previousStatement: null,
@@ -76,10 +95,12 @@ const ensureHttpGetHelper = (): string =>
     `def ${hardwareInternals().FUNCTION_NAME_PLACEHOLDER_}(url):`,
     "  try:",
     "    response = requests.get(str(url), timeout=5)",
+    '    globals()["_http_status"] = response.status_code',
     "    data = response.text",
     "    response.close()",
     "    return data",
     "  except (OSError, ValueError, UnicodeError):",
+    '    globals()["_http_status"] = 0',
     '    return ""',
   ]);
 
@@ -88,10 +109,12 @@ const ensureHttpPostHelper = (): string =>
     `def ${hardwareInternals().FUNCTION_NAME_PLACEHOLDER_}(url, body):`,
     "  try:",
     "    response = requests.post(str(url), data=str(body), timeout=5)",
+    '    globals()["_http_status"] = response.status_code',
     "    data = response.text",
     "    response.close()",
     "    return data",
     "  except (OSError, ValueError, UnicodeError):",
+    '    globals()["_http_status"] = 0',
     '    return ""',
   ]);
 
@@ -103,6 +126,25 @@ const ensureNtpSyncHelper = (): string =>
     "    ntptime.settime()",
     "  except OSError:",
     "    pass",
+  ]);
+
+const ensureHttpDownloadHelper = (): string =>
+  hardwareInternals().provideFunction_("hardware_http_download", [
+    `def ${hardwareInternals().FUNCTION_NAME_PLACEHOLDER_}(url, path):`,
+    "  try:",
+    "    response = requests.get(str(url), timeout=10)",
+    '    globals()["_http_status"] = response.status_code',
+    "    data = response.content",
+    "    response.close()",
+    "  except (OSError, ValueError, UnicodeError):",
+    '    globals()["_http_status"] = 0',
+    "    return -1",
+    "  try:",
+    '    with open(str(path), "wb") as file:',
+    "      file.write(data)",
+    "  except OSError:",
+    "    return -2",
+    "  return len(data)",
   ]);
 
 export function register(): void {
@@ -132,6 +174,20 @@ export function register(): void {
     return `${ensureNtpSyncHelper()}()\n`;
   };
 
+  hardwareGenerator.forBlock.hardware_http_download = (block, generator) => {
+    if (advancedGuard()) return ["-1", pythonOrder.ATOMIC];
+    ensureImport("requests");
+    const helper = ensureHttpDownloadHelper();
+    const url = generator.valueToCode(block, "URL", pythonOrder.NONE) || '""';
+    const path = generator.valueToCode(block, "PATH", pythonOrder.NONE) || '"/download.bin"';
+    return [`${helper}(${url}, ${path})`, pythonOrder.FUNCTION_CALL];
+  };
+
+  hardwareGenerator.forBlock.hardware_http_status = () => {
+    if (advancedGuard()) return ["0", pythonOrder.ATOMIC];
+    return ['globals().get("_http_status", 0)', pythonOrder.FUNCTION_CALL];
+  };
+
   hardwareGenerator.forBlock.hardware_ntp_now = () => {
     if (advancedGuard()) return ['""', pythonOrder.ATOMIC];
     ensureImport("time");
@@ -152,7 +208,7 @@ export function register(): void {
 export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbox.FlyoutItemInfo[] {
   const profile = getBoardProfile(boardId);
   if (!profile?.advancedWireless) return [];
-  return [
+  const contents: unknown[] = [
     { kind: "sep", gap: 20 },
     hardwareSectionLabel("HTTP 与校时"),
     {
@@ -168,10 +224,24 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
         BODY: { shadow: { type: "text", fields: { TEXT: "hello" } } },
       },
     },
+  ];
+  if (profile.p2Modules) {
+    contents.push({
+      kind: "block",
+      type: "hardware_http_download",
+      inputs: {
+        URL: { shadow: { type: "text", fields: { TEXT: "http://example.com/data.txt" } } },
+        PATH: { shadow: { type: "text", fields: { TEXT: "/data.txt" } } },
+      },
+    });
+    contents.push({ kind: "block", type: "hardware_http_status" });
+  }
+  contents.push(
     { kind: "block", type: "hardware_ntp_sync" },
     { kind: "block", type: "hardware_ntp_now" },
     { kind: "block", type: "hardware_ntp_local", inputs: { OFFSET: numberShadow(8) } },
-  ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
+  );
+  return contents as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
 }
 
 // provideFunction_ 需要生成器的内部接口；集中在 shared.ts 里没有导出，这里复用同一组字段。

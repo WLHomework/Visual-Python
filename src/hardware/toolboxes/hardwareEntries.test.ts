@@ -5,6 +5,8 @@ import {
   getActiveHardwareBoard,
   hardwareBlockTypes,
   p0ModuleBlockTypes,
+  p1ModuleBlockTypes,
+  p2ModuleBlockTypes,
   setActiveHardwareBoard,
   spiBlockTypes,
 } from "../blocks/shared";
@@ -19,7 +21,8 @@ const missingByBoard: Record<string, readonly string[]> = {
     "hardware_mcu_temperature",
     ...advancedWirelessBlockTypes,
     ...deviceStorageBlockTypes,
-    ...p0ModuleBlockTypes,
+    ...p1ModuleBlockTypes,
+    ...p2ModuleBlockTypes,
     ...spiBlockTypes,
   ],
   "esp8266-esp12e": [
@@ -33,7 +36,8 @@ const missingByBoard: Record<string, readonly string[]> = {
     "hardware_uart_deinit",
     ...advancedWirelessBlockTypes,
     ...deviceStorageBlockTypes,
-    ...p0ModuleBlockTypes,
+    ...p1ModuleBlockTypes,
+    ...p2ModuleBlockTypes,
     ...spiBlockTypes,
   ],
 };
@@ -117,13 +121,30 @@ describe("hardwareBlockEntries", () => {
     }
   });
 
-  it("keeps the H1 module blocks only on ESP32-S3 for now", () => {
+  it("offers the P0 module blocks on every board after H6 down-channeling", () => {
+    for (const boardId of ["esp32-s3", "esp32-wroom", "esp8266-esp12e"] as const) {
+      const entries = hardwareBlockEntries(boardId);
+      for (const type of p0ModuleBlockTypes) expect(entries.has(type), `${boardId} 缺少 ${type}`).toBe(true);
+    }
+  });
+
+  it("keeps the H5 driver module blocks only on ESP32-S3 for now", () => {
     const s3 = hardwareBlockEntries("esp32-s3");
-    for (const type of p0ModuleBlockTypes) expect(s3.has(type)).toBe(true);
+    for (const type of p1ModuleBlockTypes) expect(s3.has(type)).toBe(true);
 
     for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
       const entries = hardwareBlockEntries(boardId);
-      for (const type of p0ModuleBlockTypes) expect(entries.has(type), `${boardId} 不应该有 ${type}`).toBe(false);
+      for (const type of p1ModuleBlockTypes) expect(entries.has(type), `${boardId} 不应该有 ${type}`).toBe(false);
+    }
+  });
+
+  it("keeps the P2 clock, time-of-flight, progress and download blocks only on ESP32-S3", () => {
+    const s3 = hardwareBlockEntries("esp32-s3");
+    for (const type of p2ModuleBlockTypes) expect(s3.has(type)).toBe(true);
+
+    for (const boardId of ["esp32-wroom", "esp8266-esp12e"] as const) {
+      const entries = hardwareBlockEntries(boardId);
+      for (const type of p2ModuleBlockTypes) expect(entries.has(type), `${boardId} 不应该有 ${type}`).toBe(false);
     }
   });
 

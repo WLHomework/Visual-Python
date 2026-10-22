@@ -87,6 +87,32 @@ describe("ESP32-S3 工具箱的积木搜索", () => {
     );
     expect(searchBlockIndex(index, "POST").map((entry) => entry.type)).toContain("hardware_http_post");
     expect(searchBlockIndex(index, "断开").map((entry) => entry.type)).toContain("hardware_mqtt_disconnect");
+    expect(searchBlockIndex(index, "DS18B20").map((entry) => entry.type)).toContain("hardware_ds18b20_temperature");
+    expect(searchBlockIndex(index, "BMP280").map((entry) => entry.type)).toContain("hardware_bmp280_read");
+    expect(searchBlockIndex(index, "SHT30").map((entry) => entry.type)).toContain("hardware_sht30_read");
+    expect(searchBlockIndex(index, "MPU6050").map((entry) => entry.type)).toContain("hardware_mpu6050_read");
+    expect(searchBlockIndex(index, "TM1637").map((entry) => entry.type)).toEqual(
+      expect.arrayContaining(["hardware_tm1637_init", "hardware_tm1637_number"]),
+    );
+    expect(searchBlockIndex(index, "步进").map((entry) => entry.type)).toContain("hardware_stepper_move");
+    expect(searchBlockIndex(index, "矩形").map((entry) => entry.type)).toContain("hardware_oled_rect");
+    expect(searchBlockIndex(index, "画线").map((entry) => entry.type)).toContain("hardware_oled_line");
+    expect(searchBlockIndex(index, "DS3231").map((entry) => entry.type)).toEqual(
+      expect.arrayContaining(["hardware_ds3231_read", "hardware_ds3231_set"]),
+    );
+    expect(searchBlockIndex(index, "VL53L0X").map((entry) => entry.type)).toContain("hardware_vl53l0x_distance");
+    expect(searchBlockIndex(index, "进度条").map((entry) => entry.type)).toContain("hardware_oled_progress");
+    expect(searchBlockIndex(index, "下载").map((entry) => entry.type)).toContain("hardware_http_download");
+    expect(searchBlockIndex(index, "状态码").map((entry) => entry.type)).toContain("hardware_http_status");
+    expect(searchBlockIndex(index, "红外").map((entry) => entry.type)).toContain("hardware_ir_receive");
+    expect(searchBlockIndex(index, "大小").map((entry) => entry.type)).toContain("hardware_file_size");
+    expect(searchBlockIndex(index, "RFID").map((entry) => entry.type)).toContain("hardware_rc522_uid");
+    expect(searchBlockIndex(index, "SD 卡").map((entry) => entry.type)).toContain("hardware_sd_card");
+    expect(searchBlockIndex(index, "网页").map((entry) => entry.type)).toContain("hardware_webserver_serve");
+    expect(searchBlockIndex(index, "定时器").map((entry) => entry.type)).toContain("hardware_timer_every");
+    expect(searchBlockIndex(index, "GATT").map((entry) => entry.type)).toEqual(
+      expect.arrayContaining(["hardware_ble_gatt_start", "hardware_ble_gatt_notify"]),
+    );
   });
 
   it("搜不到工具箱外的 Python 积木", () => {

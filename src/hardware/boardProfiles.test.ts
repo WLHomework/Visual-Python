@@ -151,8 +151,14 @@ describe("board pin choices", () => {
     expect(analogReadMax(esp32)).toBe(4095);
     expect(analogReadMax(esp8266)).toBe(1023);
     expect(esp32s3.p0Modules).toBe(true);
-    expect(esp32.p0Modules).toBeUndefined();
-    expect(esp8266.p0Modules).toBeUndefined();
+    expect(esp32.p0Modules).toBe(true);
+    expect(esp8266.p0Modules).toBe(true);
+    expect(esp32s3.p1Modules).toBe(true);
+    expect(esp32.p1Modules).toBeUndefined();
+    expect(esp8266.p1Modules).toBeUndefined();
+    expect(esp32s3.p2Modules).toBe(true);
+    expect(esp32.p2Modules).toBeUndefined();
+    expect(esp8266.p2Modules).toBeUndefined();
   });
 
   it("marks the official capacitive touch pins on ESP32 boards only", () => {

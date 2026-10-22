@@ -30,7 +30,7 @@ import type { BoardToolboxSpec } from "./types";
 export const esp32WroomToolbox: BoardToolboxSpec = {
   boardId: "esp32-wroom",
   categories: [
-    inputOutputCategory(["hardware_touch_read"]),
+    inputOutputCategory(["hardware_touch_read", "hardware_button_read"]),
     boardControlCategory(),
     logicCategory(),
     boardMathCategory(),
@@ -43,9 +43,9 @@ export const esp32WroomToolbox: BoardToolboxSpec = {
     serialCategory(["hardware_uart_init", "hardware_uart_write", "hardware_uart_read", "hardware_uart_available", "hardware_uart_deinit"]),
     communicationCategory(),
     networkCategory(),
-    sensorCategory(),
-    actuatorCategory(),
-    lightCategory({ before: ["hardware_builtin_led"] }),
-    displayCategory(),
+    sensorCategory(["hardware_pir_motion", "hardware_light_percent", "hardware_soil_percent", "hardware_bh1750_lux"]),
+    actuatorCategory(["hardware_relay_set", "hardware_dc_motor"]),
+    lightCategory({ before: ["hardware_builtin_led"], after: ["hardware_neopixel_fill"] }),
+    displayCategory({ after: ["hardware_lcd1602_init", "hardware_lcd1602_text", "hardware_lcd1602_clear"] }),
   ],
 };

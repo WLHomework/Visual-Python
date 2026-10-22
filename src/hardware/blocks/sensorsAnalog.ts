@@ -84,7 +84,9 @@ export function register(): void {
     const helper = ensureAdcPercentHelper(target.profile);
     const low = generator.valueToCode(block, lowInput, pythonOrder.NONE) || String(lowDefault(max));
     const high = generator.valueToCode(block, highInput, pythonOrder.NONE) || String(highDefault(max));
-    return [`${helper}(${target.pinId}, ${low}, ${high})`, pythonOrder.FUNCTION_CALL];
+    // ESP8266 只有 ADC(0)，引脚参数不使用；传 0 避免把 "A0" 当成 Python 标识符。
+    const pinArgument = target.profile.analogRead === "adc0" ? "0" : target.pinId;
+    return [`${helper}(${pinArgument}, ${low}, ${high})`, pythonOrder.FUNCTION_CALL];
   };
 
   hardwareGenerator.forBlock.hardware_light_percent = (block, generator) =>

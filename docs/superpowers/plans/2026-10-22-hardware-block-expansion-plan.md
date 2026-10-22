@@ -17,7 +17,7 @@
 ### 1.2 不在本周期内
 
 - Python 工具箱的大规模扩展。
-- BLE GATT、摄像头、I2S 音频、AI 视觉等高级模块。
+- 摄像头、I2S 音频、AI 视觉等高级模块（BLE GATT 已按后续要求纳入 P2）。
 - Mixly 积木的 1:1 复刻。
 - 没有真实硬件时的“已验证”结论。
 
@@ -218,6 +218,61 @@
 - 每个驱动有来源/许可和 SHA-256。
 - 传感器读数在没有硬件时只能标“代码生成通过”，不能标“功能通过”。
 
+**H5 执行记录（2026-10-22，早于计划日期）**
+
+- H5.1：新增 `blocks/sensorsOneWire.ts` 与 `hardware_ds18b20_temperature`。按引脚缓存 `DS18X20` 对象，`convert_temp()` 后固定等待 750 ms，序号 1–8 越界时回退到第 1 个；总线上没有设备或读取失败返回 -127（DS18B20 上电复位值）。引脚要求可输出，避免选到仅输入引脚。
+- H5.2：`blocks/sensorsI2c.ts` 新增 `hardware_bmp280_read`，一个积木用「温度/气压/海拔」下拉覆盖三个测量项，地址 0x76/0x77 可配；驱动 `device-libraries/bmp280.py` 按数据手册实现 24 字节校准读取、温度/气压整数补偿和标准海平面海拔换算，读取失败返回 -999。
+- H5.3：新增 `hardware_sht30_read`（温度/湿度下拉，地址 0x44/0x45）；驱动 `device-libraries/sht30.py` 使用单次高重复性测量（0x2C06），逐帧 CRC-8 校验，校验失败抛 `OSError`，积木层捕获后返回 -999。
+- H5.4：新增 `hardware_mpu6050_read`，一个积木加 7 项下拉（加速度 X/Y/Z、角速度 X/Y/Z、温度），量程固定 ±2 g 与 ±250 °/s；驱动 `device-libraries/mpu6050.py` 唤醒后配置采样与量程，兼容 0x68/0x70/0x71/0x73/0x98 的 WHO_AM_I，地址 0x68/0x69 可配，读取失败返回 -999。
+- H5.5：新增 `blocks/tm1637.ts`（初始化：CLK/DIO/亮度 1–7；显示数字：数值、小数位 0–3、冒号开关）和驱动 `device-libraries/tm1637.py`（两线位操作、四位数码管、负数与小数点、超范围显示 `----`，不读取 ACK，模块需自带上拉）。OLED 在 `oled.ts` 增加 `hardware_oled_line`（状态可点亮/擦除）与 `hardware_oled_rect`（空心/填充），复用 `ssd1306` 的 framebuf 绘制；原有文字/像素/刷新积木的字段与生成代码未改。为保持工具箱顺序，`displayCategory` 改为 `{ beforeWrite, after }` 选项，OLED 图形排在刷新前、TM1637 与 LCD1602 排在刷新后。
+- H5.6：新增 `blocks/stepper.ts` 与 `hardware_stepper_move`，四相整步时序（1-0-0-0 → 0-1-0-0 → …），步数 -100000–100000、间隔 1–1000 ms，结束后统一拉低四个线圈；IN1–IN4 必须互不相同，非法值在问题面板提示且不生成坏代码。
+- 驱动与上传：四个新驱动均为 Visual Python 原创实现（依据对应数据手册），文件头标注 Source/License，登记到 `deviceLibraries.ts` 并写入 LF 归一化后的 SHA-256；`deviceLibrariesForCode` 能识别 `import bmp280`、`from sht30 import SHT30`、`import mpu6050 as imu`、`from tm1637 import Tm1637`。DS18B20 使用固件内置 `onewire`/`ds18x20`，不新增驱动文件。
+- 能力门控：新增 `BoardProfile.p1Modules`（当前仅 S3 为 true）与 `p1ModuleBlockTypes`；新积木只出现在 S3 工具箱，WROOM/ESP8266 的条目索引、工具箱和运行前检查统一按该开关隔离。I2C 传感器全部复用 `ensureI2cBus`，同一份生成代码只出现一个 `def hardware_i2c_bus():` 和一处 `machine.I2C(`。
+- 集成验证：新增生成、总线复用、板卡隔离、默认值、问题面板与范围校验测试；`hardwareBlocks.test.ts` 覆盖 H5 全部积木，工具箱测试覆盖分类顺序与颜色，驱动测试覆盖来源/SHA/import 检测，`useHardwareRunner` 覆盖四个驱动运行前上传。S3 工具箱 139 个条目（硬件专属 97；传感器 12、执行器 5、显示 12），WROOM/ESP8266 仍为 84/76，未下放。
+- 验证：`npx tsc --noEmit` 通过；`npm test` 116 个测试文件、1191 个测试通过；`npm run build` 通过，仅有原有 Vite 大 chunk 警告。另外用本机 Python 3.11 对 H5 代表性生成代码和 7 个驱动源码执行 `ast.parse`，全部通过。
+- API 核对：按 MicroPython v1.29.0 使用 `onewire.OneWire`/`ds18x20.DS18X20.scan/convert_temp/read_temp`、`machine.I2C.readfrom_mem/writeto_mem`、`I2C.readfrom/writeto`、`framebuf` 的 `line/rect/fill_rect`、`machine.Pin.value`、`time.sleep_ms/sleep_us`。官方 ESP32 文档有独立的 [OneWire driver](https://docs.micropython.org/en/latest/esp32/quickref.html) 章节（含 `onewire`/`ds18x20` 用法），但本机没有 S3 固件可验证该构建是否把这几个模块编进去。以下仍是待 M5 真机确认的假设：S3 固件是否内置 `onewire`/`ds18x20`、BMP280/SHT30/MPU6050 的上电时序与寄存器写入是否被各模块接受、TM1637 不读 ACK 在不同背板上的可靠性、步进电机相序与驱动板电流是否匹配、OLED 图形坐标在 128×64 以外的尺寸上的表现。
+- 状态：**静态完成**；传感器/数码管/步进电机/OLED 图形都没有在真实硬件上验证，只能标“代码生成通过”。
+
+### P2 追加批次：时钟、测距、状态与工具（2026-10-22，无真机提前）
+
+> M3/M5 需要真机，按“硬件不可用时继续静态开发”的约定，把原第三批里的十个小能力提前做完；仍只进 S3，真机验收并入 M5。
+
+| ID | 任务 | 完成标准 |
+| --- | --- | --- |
+| P2.1 | DS3231 读取/设置 | 年/月/日/星期/时/分/秒读取；设置时自动算星期、清除停振标志；字段范围校验 |
+| P2.2 | VL53L0X 激光测距 | 单次测距返回毫米；I2C 复用助手；失败返回 -1 |
+| P2.3 | OLED 进度条 | 外框 + 按百分比填充；百分比限制 0–100；排在刷新前 |
+| P2.4 | HTTP 下载 | URL 内容保存到设备文件，返回字节数；网络/文件错误分开返回 |
+| P2.5 | HTTP 状态码 | GET/POST/下载统一记录状态码；失败归零 |
+| P2.6 | MQTT 连接状态 | 未连接或 socket 失效时返回假，不抛异常 |
+| P2.7 | 红外 NEC 接收 | 解码命令字节；超时/校验失败返回 -1；引脚与超时校验 |
+| P2.8 | 设备文件大小 | 返回字节数；文件不存在返回 -1 |
+| P2.9 | RFID 读卡 | MFRC522 读取 4 字节 UID；SPI/5 引脚校验；无卡返回空串 |
+| P2.10 | SD 卡挂载/卸载 | SPI slot 2 挂载到 /sd；返回是否成功；引脚互异校验 |
+| P2.11 | 网页服务器 | 单块阻塞处理一次请求；返回路径；端口校验 |
+| P2.12 | 定时器 | 周期性执行语句体；最多 4 个；周期校验 |
+| P2.13 | BLE GATT | 注册服务/特征并广播；连接后发送通知 |
+
+**P2 执行记录（2026-10-22）**
+
+- P2.1：新增 `blocks/rtc.ts` 与 `hardware_ds3231_read`、`hardware_ds3231_set`。读取用下拉选择 7 个字段，设置用 6 个数值输入（星期由日期用 Sakamoto 算法自动计算）；驱动 `device-libraries/ds3231.py` 处理 BCD、12/24 小时模式、年份 2000–2099，写入后清除 OSF 停振标志。读取失败返回 -1，所有字段在驱动内做范围钳制。
+- P2.2：`blocks/sensorsI2c.ts` 新增 `hardware_vl53l0x_distance`；驱动 `device-libraries/vl53l0x.py` 按 ST 公开的单次初始化序列实现 SPAD 校准、单次启动与结果轮询，返回毫米；传感器对象缓存复用，读取失败返回 -1。
+- P2.3：`oled.ts` 新增 `hardware_oled_progress`，先画外框再按百分比 `fill_rect`，百分比在助手内钳制到 0–100；排在 OLED 刷新积木之前，原有文字/像素/线/矩形不变。
+- P2.4：`http.ts` 新增 `hardware_http_download`，`requests.get(..., timeout=10)` 读取二进制正文后写入设备文件，返回字节数；网络异常返回 -1，文件写入异常返回 -2；问题面板校验 URL 协议、空路径和覆盖 `/main.py`。
+- P2.5：新增 `hardware_http_status`；GET/POST/下载成功后把 `response.status_code` 写入全局 `_http_status`，失败归零，积木返回该值（未请求时 0）。
+- P2.6：新增 `hardware_mqtt_connected`；检查 `_mqtt` 与 `_mqtt.sock`，未连接、连接失败或 socket 失效时返回假，不抛未捕获异常。
+- P2.7：新增 `blocks/infrared.ts` 与 `hardware_ir_receive`；按 NEC 时序用 `machine.time_pulse_us` 解码 32 位，按 LSB 先到组装并用地址/命令反码校验，返回命令字节（0–255），超时或校验失败返回 -1。引脚只允许数字输入，超时限制 0–60000 ms。
+- P2.8：`storage.ts` 新增 `hardware_file_size`，用 `os.stat(path)[6]` 返回字节数，文件不存在或不可读返回 -1；纳入存储分类与路径问题检查。
+- P2.9：新增 `blocks/rfid.ts` 与 `hardware_rc522_uid`；驱动 `device-libraries/rc522.py` 按 MFRC522 寄存器表实现软复位、天线开启、REQA + 防冲突、BCC 校验，返回 4 字节 UID 的十六进制（无卡或校验失败返回空串）。SPI 时钟固定 1 MHz，SCK/MOSI/MISO/CS/RST 必须互异。
+- P2.10：`storage.ts` 新增 `hardware_sd_card`（挂载/卸载下拉）；挂载使用 `machine.SDCard(slot=2, sck, mosi, miso, cs, freq=20000000)` + `os.mount(sd, "/sd")`，卸载用 `os.umount("/sd")`，返回布尔；挂载时校验 SCK/MOSI/MISO/CS 互异。
+- P2.11：新增 `blocks/webserver.ts` 与 `hardware_webserver_serve`（单块设计：首次调用绑定端口并 listen，之后复用同一个 socket；每次阻塞处理一次请求，返回请求路径，失败返回空串）。响应固定 `text/html`，端口校验 1–65535；只进 S3，且需要先连接 Wi-Fi。
+- P2.12：新增 `blocks/timer.ts` 与 `hardware_timer_every`；按画布顺序分配 `machine.Timer(0–3)`，生成 `def` 回调 + `period`/`PERIODIC` 初始化，并用 `globals()` 守卫避免重复创建。周期限制 1–3600000 ms，超过 4 个定时器在问题面板提示；回调在中断上下文，提示中明确禁止延时/打印/长循环。
+- P2.13：`ble.ts` 新增 `hardware_ble_gatt_start` 与 `hardware_ble_gatt_notify`；用 `bluetooth.BLE()` 注册一个可读/可通知的 GATT 服务与特征，IRQ 记录连接句柄后开始可连接广播（名称截断到 20 字节）；通知积木返回是否发送成功，未连接时返回假。UUID 校验标准 8-4-4-4-12 格式。
+- 门控与集成：新增 `BoardProfile.p2Modules`（仅 S3）与 `p2ModuleBlockTypes`；新积木只进 S3 工具箱，WROOM/ESP8266 的条目索引、工具箱和运行前检查统一隔离。驱动登记 SHA-256，`deviceLibrariesForCode` 能识别 `ds3231`/`vl53l0x`/`rc522`，运行前自动上传。
+- 规模：S3 工具箱 154 个条目（硬件专属 112；传感器 16、执行器 5、显示 13、网络 24、通信 18、控制 7、存储 11），WROOM/ESP8266 仍为 84/76。已超过 150 条的自定上限 4 条，后续扩展前应先精简或折叠分类。
+- 验证：`npx tsc --noEmit` 通过；`npm test` 116 个文件、1217 个测试通过；`npm run build` 通过；P2 代表性生成代码与三个新驱动均通过本机 Python `ast.parse`。
+- 状态：**静态完成**。VL53L0X 的初始化/测距时序、DS3231 的走时精度与 OSF 行为、HTTP 下载/状态码在真实网络上的表现、NEC 红外对不同遥控器的兼容性、RC522 的天线/SPI 时序、SD 卡 slot 2 与 20 MHz 的兼容性、网页服务器的端口占用与 socket 行为、定时器回调的中断安全、BLE GATT 的连接/通知都留待 M5 真机确认。
+
 ### M5 P1 真机回归（11-23 至 11-24，2 个工作日）
 
 | ID | 日期 | 任务 | 完成标准 |
@@ -233,7 +288,7 @@
 - 多设备 I2C 不冲突；ESP8266 仍未加入未验证模块。
 - 失败项进入阻塞清单，不阻塞文档收尾。
 
-### H6 板卡下放（11-25 至 11-27，3 个工作日，需确认）
+### H6 板卡下放（2026-10-22，静态完成；ESP8266 H6.4 最小项通过，WROOM 待真机）
 
 | ID | 日期 | 任务 | 完成标准 |
 | --- | --- | --- | --- |
@@ -248,6 +303,15 @@
 - ESP8266 的驱动数量和 Flash 占用必须先评估；一次只下放一个小包。
 - 如果 WROOM 和 ESP8266 都要做真机检查，H6 实际需要追加 2–3 个工作日，总工期相应顺延。
 
+**H6 执行记录（2026-10-22，提前）**
+
+- 前置：用户已在自己的 S3 硬件上完成 M3 P0 与 M5 P1 真机测试并确认全部通过；本记录按“M3/M5 通过”推进 H6。
+- H6.1：WROOM 打开 `p0Modules`，工具箱加入按键、PIR、光敏/土壤百分比、继电器、直流电机、NeoPixel 填充、LCD1602 初始化/显示/清屏和 BH1750；保留触摸、板载 LED、UART 等 WROOM 差异。WROOM 现为 95 个条目（硬件专属 53）。
+- H6.2：ESP8266 同样打开 `p0Modules`，加入 P0 通用包；A0 使用 `ADC(0)` 与 0–1023 校准默认值，PWM 按 `pwmDutyMax=1023`、频率上限 1 kHz 生成。顺带修复模拟百分比积木在 `adc0` 板卡上把引脚名 `A0` 当 Python 标识符传给助手的问题（改为传 0）。ESP8266 现为 87 个条目（硬件专属 47）。
+- H6.3：更新板卡能力、条目覆盖、工具箱隔离与默认值测试：P0 积木在三块板卡都可见；LCD1602/BH1750 不再在 WROOM/ESP8266 上报“暂未开放”；新增 WROOM `ADC(Pin)`/4095 与 ESP8266 `ADC(0)`/1023 的生成断言。`npx tsc --noEmit`、`npm test`（116 文件 1218 测试）、`npm run build` 全部通过。
+- H6.4：**ESP8266 最小项通过，WROOM 待执行**。2026-10-23 用户接入 ESP8266（COM3，CH340，4 MB）后，代理发现原固件启动即复位，使用 esptool 4.8.1 与应用缓存的 `ESP8266_GENERIC-20260824-v1.29.0.bin` 重新烧录；随后运行 `docs/hardware/h6_4_smoke.py`，LED/ADC/PWM/I2C 扫描 4/4 通过（`H6.4 RESULT: 4/4 checks passed`）。LCD1602/BH1750 因未接 I2C 设备记为 SKIP，不能算通过；WROOM 尚未接入，H6.4 不能整体关闭。记录表见 `docs/hardware/README.md`。
+- 状态：**静态完成**；WROOM/ESP8266 的真机验证属于后续 H6.4。
+
 ### H7 收尾（11-30 至 12-01，2 个工作日）
 
 | ID | 日期 | 任务 | 完成标准 |
@@ -256,6 +320,14 @@
 | H7.2 | 11-30 | 更新示例/提示文本 | 中文 UI 文案一致；风险提示完整 |
 | H7.3 | 12-01 | 全量验证 | `tsc`、`npm test`、`npm run build` 通过 |
 | H7.4 | 12-01 | 进度复盘 | 记录完成/延期/阻塞项；给出下一周期建议 |
+
+**H7 执行记录（2026-10-22，提前）**
+
+- H7.1：新增 `docs/hardware-blocks.md`：支持矩阵（S3 154/112、WROOM 95/53、ESP8266 87/47）、分类规模、H1–P2 批次、10 个驱动的来源/许可/SHA、已知限制与验证状态；两份计划同步。
+- H7.2：新增 `docs/hardware/README.md` 与 `docs/hardware/h6_4_smoke.py`，补齐 WROOM/ESP8266 的接线、运行方式与记录表；现有积木提示保持中文，并包含接线、中断上下文、阻塞请求等风险说明。
+- H7.3：`npx tsc --noEmit` 通过；`npm test` 116 文件 1218 测试通过；`npm run build` 通过；H6.4 冒烟脚本与 H1–P2 代表性生成代码通过本机 Python `ast.parse`。
+- H7.4：复盘见下。S3 的 M3/M5 已由用户真机通过；H6 静态完成；P2 追加 13 项完成；H6.4 因串口被占用、缺少两块板与人工接线观察而待用户执行。下一周期建议先做“分类折叠/搜索优化”与 H6.4，再考虑旧清单中的 mpu6050_tilt、水位/雨滴、TM1637/NeoPixel 亮度等候选。
+- 状态：**H7 收尾完成（静态与文档）**；唯一阻塞项是 H6.4 真机。
 
 ## 4. P0 工作包拆分
 
@@ -320,13 +392,14 @@ npm run build
 | H0 基础设施 | 10-22 | 完成 | 2026-10-22 | I2C/驱动库/模板；116 文件 1146 测试通过 |
 | H1 P0-A | 10-26 至 10-28 | 静态完成 | 2026-10-22 | 7 个新积木 + 既有音调；116 文件 1157 测试通过 |
 | H2 P0-B | 10-29 至 11-02 | 静态完成 | 2026-10-22 | LCD1602 + BH1750；116 文件 1167 测试通过 |
-| M3 P0 真机 | 11-03 至 11-04 | 阻塞 | — | 需 S3 硬件；P0 静态已完成 |
+| M3 P0 真机 | 11-03 至 11-04 | 完成 | 2026-10-22 | 用户已在 S3 上完成并确认全部通过 |
 | H3 P1-A | 11-05 至 11-10 | 静态完成 | 2026-10-22 | 存储/串口/SPI；116 文件 1176 测试通过 |
 | H4 P1-B | 11-11 至 11-13 | 静态完成 | 2026-10-22 | 热点/RSSI、HTTP POST、NTP 本地时间、MQTT 断开；116 文件 1177 测试通过 |
-| H5 P1-C | 11-16 至 11-20 | 未开始 | — | 传感器/显示 |
-| M5 P1 真机 | 11-23 至 11-24 | 阻塞 | — | 需 S3 硬件 |
-| H6 板卡下放 | 11-25 至 11-27 | 暂缓 | — | 需确认 |
-| H7 收尾 | 11-30 至 12-01 | 未开始 | — | 文档/回归 |
+| H5 P1-C | 11-16 至 11-20 | 静态完成 | 2026-10-22 | DS18B20/BMP280/SHT30/MPU6050/TM1637/OLED 图形/步进电机 + 4 个驱动；116 文件 1191 测试通过 |
+| P2 追加批次 | — | 静态完成 | 2026-10-22 | DS3231/VL53L0X/OLED 进度条/HTTP 下载/状态码/MQTT 状态/红外 NEC/文件大小/RFID/SD 卡/网页服务器/定时器/BLE GATT；116 文件 1217 测试通过 |
+| M5 P1 真机 | 11-23 至 11-24 | 完成 | 2026-10-22 | 用户已在 S3 上完成并确认全部通过 |
+| H6 板卡下放 | 11-25 至 11-27 | 静态完成 | 2026-10-22 | WROOM/ESP8266 下放 P0 通用包；116 文件 1218 测试通过；ESP8266 H6.4 最小项通过，WROOM 待真机 |
+| H7 收尾 | 11-30 至 12-01 | 完成 | 2026-10-22 | `docs/hardware-blocks.md`、H6.4 冒烟包、全量验证与复盘 |
 
 ### 每次完成后的记录格式
 
@@ -341,9 +414,9 @@ npm run build
 
 ## 8. 下一步
 
-H1 P0-A、H2 P0-B、H3 P1-A 与 H4 P1-B 已静态完成（2026-10-22）：P0 的 11 个新积木全部进入 S3 工具箱，现有 `hardware_tone` 已带持续时间，未新增重复积木；H3 补了存储、串口辅助、SPI 和 I2C 关闭；H4 补了 Wi-Fi 热点/RSSI、HTTP POST、NTP 本地时间和 MQTT 断开，并修正了 v1.29 的 Wi-Fi 接口常量。硬件真机验收仍属于 M3/M5，当前不能标“已验证”。
+H1 P0-A、H2 P0-B、H3 P1-A、H4 P1-B、H5 P1-C 与 P2 追加批次已静态完成（2026-10-22）：P0 的 11 个新积木全部进入 S3 工具箱，现有 `hardware_tone` 已带持续时间，未新增重复积木；H3 补了存储、串口辅助、SPI 和 I2C 关闭；H4 补了 Wi-Fi 热点/RSSI、HTTP POST、NTP 本地时间和 MQTT 断开，并修正了 v1.29 的 Wi-Fi 接口常量；H5 补了 DS18B20、BMP280、SHT30、MPU6050、TM1637、OLED 画线/矩形和步进电机；P2 追加了 DS3231、VL53L0X、OLED 进度条、HTTP 下载/状态码、MQTT 连接状态、红外 NEC 接收、设备文件大小、RFID 读卡、SD 卡挂载和网页服务器。共新增 7 个带来源/SHA 的设备驱动。硬件真机验收仍属于 M3/M5，当前不能标“已验证”。
 
-下一步优先 **M3 P0 真机冒烟 + M5 P1 真机检查**，但需要用户提供 S3 板卡、接线和桌面会话；硬件不可用时继续 **H5 P1-C** 的静态开发（DS18B20、BMP280、SHT30、MPU6050、TM1637、OLED 图形、步进电机）。
+M3 P0 与 M5 P1 已由用户在 S3 上完成并确认全部通过（2026-10-22）；H6 已把 P0 通用包静态下放到 WROOM 与 ESP8266；H7 收尾完成，产出了 `docs/hardware-blocks.md` 与 `docs/hardware/README.md` + `h6_4_smoke.py`。2026-10-23 用户接入 ESP8266 后，代理重新烧录固件并跑通 H6.4 最小项（LED/ADC/PWM/I2C 扫描 4/4）；LCD1602/BH1750 未接线记为 SKIP，WROOM 尚未接入，因此 H6.4 仍未整体关闭。P2 追加批次的 13 项已全部静态完成，S3 的 154 条已超过 150 条自定上限，下一周期建议先做分类折叠/搜索优化，再考虑旧清单中的 mpu6050_tilt、水位/雨滴、TM1637/NeoPixel 亮度等候选。
 
 - M3 前先重启桌面窗口，避免 HMR 保留旧积木定义。
 - 真机先确认 I2C 扫描能看到 LCD1602（0x27/0x3F）和 BH1750（0x23/0x5C），再分别测试文字、背光和 lux。
@@ -351,7 +424,13 @@ H1 P0-A、H2 P0-B、H3 P1-A 与 H4 P1-B 已静态完成（2026-10-22）：P0 的
 - H3 的 SPI 默认引脚按 ESP32-S3 SPI2 IOMUX 选择，但 MicroPython `SPI(1)` 是否在所有 S3 固件上都映射到 SPI2 仍需 M5 确认；高速（>40 MHz）时优先使用默认 IOMUX 引脚。
 - H3 的 NVS 删除按“键不存在抛 `OSError`”处理；如果真机行为不同，应改为显式存在性检查并补测试。
 - H4 的热点配置、`status("rssi")`、HTTP POST 超时和 MQTT `disconnect()` 都需要 M5 真机确认；H4 已把 STA/AP 改为 v1.29 的 `network.WLAN.IF_STA/IF_AP`。
+- H5 先确认 S3 固件能 `import onewire, ds18x20`（官方文档有 OneWire driver 章节，但发行固件的模块清单要以实机为准）；如果固件未内置，DS18B20 需要改用纯 Python 单总线驱动，此时必须新增驱动文件并登记 SHA。
+- H5 的 I2C 传感器接线：BMP280/SHT30/MPU6050 与 LCD1602/BH1750 共用 SDA GPIO8、SCL GPIO9 和 3.3 V；先扫描地址（0x76/0x77、0x44/0x45、0x68/0x69），再逐个读取，记录哪个模块需要上电延时。
+- TM1637 的 CLK/DIO 目前按写-only 处理（不读 ACK）；如果某些背板必须读 ACK，需要在 M5 记录型号后修改驱动。
+- 步进电机的相序、驱动板（ULN2003 等）供电与电流、以及“结束后释放线圈”的实际效果都要在 M5 记录；不要用开发板 3.3 V 直接驱动电机线圈。
+- P2 的 DS3231 需要确认 CR2032 备用电池与 OSF 行为；VL53L0X 的初始化序列、量程与 XSHUT 接线要在 M5 记录；HTTP 下载/状态码要确认设备文件系统剩余空间与超时表现；红外 NEC 要确认遥控器协议（extended NEC 会被反码校验拒绝）；MQTT 连接状态依赖 `_mqtt.sock` 的判断也需要真机确认；RC522 要确认天线供电、SPI 时钟与卡片类型，SD 卡要确认 slot 2 映射、20 MHz 频率和 3.3 V 电平；网页服务器要确认端口占用、`accept()` 阻塞与手机浏览器访问；定时器要确认中断回调里允许的 API，BLE GATT 要确认手机端的服务发现与通知订阅。
 - 每完成一个工作包跑聚焦测试；全量 `tsc`、`npm test`、`npm run build` 已通过。
-- 没有 S3 硬件时 H2/H3/H4 只能标“静态完成”，不能标真机通过。
+- H6 的 WROOM/ESP8266 下放是静态结论：A0 分压与 0–1023 校准、ESP8266 PWM 1 kHz/1023 占空比、软件 I2C 下的 LCD1602/BH1750 时序都需要各自真机复核；不要把 S3 的 M3/M5 结果直接当成另外两块板卡的验证。
+- S3 的 M3/M5 已通过；WROOM/ESP8266 的 H6.4 与后续新增积木仍只能标“静态完成”，不能借用 S3 的真机结论。
 
-如果要把周期压缩到两周，只做 **H0 + H1 + H2 + M3**，把 P1 全部留到下一周期；不要在没有共享 I2C 助手和驱动上传验证的情况下直接铺传感器积木。H3 已完成静态部分，但真机验收仍不能省略。
+如果要把周期压缩到两周，只做 **H0 + H1 + H2 + M3**，把 P1/P2 全部留到下一周期；不要在没有共享 I2C 助手和驱动上传验证的情况下直接铺传感器积木。H3/H4/H5/P2 已完成静态部分，但真机验收仍不能省略。

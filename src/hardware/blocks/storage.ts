@@ -1,5 +1,5 @@
 import * as Blockly from "blockly/core";
-import { getBoardProfile } from "../boardProfiles";
+import { boardPinChoices, getBoardProfile } from "../boardProfiles";
 import type { HardwareBoardId } from "../firmwareCatalog";
 import {
   defineHardwareBlocks,
@@ -8,6 +8,7 @@ import {
   hardwareColours,
   hardwareGenerator,
   hardwareSectionLabel,
+  pinTargetField,
   pythonOrder,
   unavailable,
 } from "./shared";
@@ -58,6 +59,32 @@ const definitions = [
     output: "Boolean",
     colour: hardwareColours.storage,
     tooltip: "检查设备上是否存在这个文件或目录；路径不存在时返回假，不会抛异常。",
+  },
+  {
+    type: "hardware_file_size",
+    message0: "设备文件 %1 大小",
+    args0: [{ type: "input_value", name: "PATH", check: "String" }],
+    inputsInline: true,
+    output: "Number",
+    colour: hardwareColours.storage,
+    tooltip: "返回文件字节数；文件不存在或无法读取时返回 -1。",
+  },
+  {
+    type: "hardware_sd_card",
+    message0: "SD 卡 %1 SCK %2 MOSI %3 MISO %4 CS %5",
+    args0: [
+      { type: "field_dropdown", name: "ACTION", options: [["挂载到 /sd", "mount"], ["卸载", "unmount"]] },
+      { type: "field_dropdown", name: "SCK", options: [["（请先选择硬件板卡）", ""]] },
+      { type: "field_dropdown", name: "MOSI", options: [["（请先选择硬件板卡）", ""]] },
+      { type: "field_dropdown", name: "MISO", options: [["（请先选择硬件板卡）", ""]] },
+      { type: "field_dropdown", name: "CS", options: [["（请先选择硬件板卡）", ""]] },
+    ],
+    inputsInline: false,
+    output: "Boolean",
+    colour: hardwareColours.storage,
+    tooltip:
+      "用 SPI 模式挂载或卸载 SD 卡，成功返回真。挂载后可用文件积木读写 /sd/ 下的文件；SPI 使用 slot 2、自定义引脚和 20 MHz。SD 卡与模块必须使用 3.3 V 电平，不要热插拔。",
+    extensions: ["hardware_board_pin"],
   },
   {
     type: "hardware_file_delete",
@@ -183,6 +210,34 @@ const ensureFileListHelper = (): string =>
     "    return []",
   ]);
 
+const ensureFileSizeHelper = (): string =>
+  internals().provideFunction_("hardware_file_size", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(path):`,
+    "  try:",
+    "    return os.stat(str(path))[6]",
+    "  except OSError:",
+    "    return -1",
+  ]);
+
+const ensureSdCardHelper = (): string =>
+  internals().provideFunction_("hardware_sd_card", [
+    `def ${internals().FUNCTION_NAME_PLACEHOLDER_}(action, sck, mosi, miso, cs):`,
+    '  if action == "unmount":',
+    "    try:",
+    '      os.umount("/sd")',
+    '      globals()["_sd"] = None',
+    "      return True",
+    "    except OSError:",
+    "      return False",
+    "  try:",
+    "    sd = machine.SDCard(slot=2, sck=machine.Pin(sck), mosi=machine.Pin(mosi), miso=machine.Pin(miso), cs=machine.Pin(cs), freq=20000000)",
+    '    os.mount(sd, "/sd")',
+    '    globals()["_sd"] = sd',
+    "    return True",
+    "  except (OSError, ValueError):",
+    "    return False",
+  ]);
+
 const ensureNvs = (): void => {
   ensureImport("esp32");
   internals().definitions_.hardware_nvs = '_nvs = esp32.NVS("visual_python")';
@@ -252,6 +307,29 @@ export function register(): void {
     return [`${ensureFileExistsHelper()}(${path})`, pythonOrder.FUNCTION_CALL];
   };
 
+  hardwareGenerator.forBlock.hardware_file_size = (block, generator) => {
+    if (storageGuard()) return ["-1", pythonOrder.ATOMIC];
+    ensureImport("os");
+    const path = generator.valueToCode(block, "PATH", pythonOrder.NONE) || '""';
+    return [`${ensureFileSizeHelper()}(${path})`, pythonOrder.FUNCTION_CALL];
+  };
+
+  hardwareGenerator.forBlock.hardware_sd_card = (block) => {
+    if (storageGuard()) return ["False", pythonOrder.ATOMIC];
+    ensureImport("machine");
+    ensureImport("os");
+    const helper = ensureSdCardHelper();
+    const action = block.getFieldValue("ACTION") === "unmount" ? "unmount" : "mount";
+    if (action === "unmount") return [`${helper}("unmount", 0, 0, 0, 0)`, pythonOrder.FUNCTION_CALL];
+    const targets = ["SCK", "MOSI", "MISO", "CS"].map((field) =>
+      pinTargetField(block, field === "MISO" ? "digital-input" : "digital-output", field));
+    const failure = targets.find((target) => typeof target === "string");
+    if (typeof failure === "string") return ["False", pythonOrder.ATOMIC];
+    const pins = targets.map((target) => (typeof target === "string" ? "" : target.pinId));
+    if (new Set(pins).size < 4) return unavailable("SD 卡的 SCK、MOSI、MISO、CS 必须使用不同引脚");
+    return [`${helper}("mount", ${pins.join(", ")})`, pythonOrder.FUNCTION_CALL];
+  };
+
   hardwareGenerator.forBlock.hardware_file_delete = (block, generator) => {
     const problem = storageGuard();
     if (problem) return unavailable(problem);
@@ -296,7 +374,7 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
   const profile = getBoardProfile(boardId);
   if (!profile?.deviceStorage) return [];
   const text = (value: string) => ({ shadow: { type: "text", fields: { TEXT: value } } });
-  return [
+  const contents: unknown[] = [
     { kind: "sep", gap: 20 },
     hardwareSectionLabel("设备存储"),
     {
@@ -311,10 +389,23 @@ export function toolboxContents(boardId?: HardwareBoardId): Blockly.utils.toolbo
     },
     { kind: "block", type: "hardware_file_read", inputs: { PATH: text("/data.txt") } },
     { kind: "block", type: "hardware_file_exists", inputs: { PATH: text("/data.txt") } },
+    { kind: "block", type: "hardware_file_size", inputs: { PATH: text("/data.txt") } },
     { kind: "block", type: "hardware_file_delete", inputs: { PATH: text("/data.txt") } },
     { kind: "block", type: "hardware_file_list", inputs: { PATH: text("/") } },
     { kind: "block", type: "hardware_nvs_set", inputs: { KEY: text("counter"), VALUE: text("1") } },
     { kind: "block", type: "hardware_nvs_get", inputs: { KEY: text("counter") } },
     { kind: "block", type: "hardware_nvs_delete", inputs: { KEY: text("counter") } },
-  ] as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
+  ];
+  if (profile.p2Modules) {
+    const outputs = boardPinChoices(profile, "digital-output").map((pin) => pin.id);
+    const inputs = boardPinChoices(profile, "digital-input").map((pin) => pin.id);
+    const used = outputs.slice(0, 3);
+    const input = inputs.find((id) => !used.includes(id)) ?? inputs[0] ?? "";
+    contents.push({
+      kind: "block",
+      type: "hardware_sd_card",
+      fields: { ACTION: "mount", SCK: used[0] ?? "", MOSI: used[1] ?? "", MISO: input, CS: used[2] ?? "" },
+    });
+  }
+  return contents as unknown as Blockly.utils.toolbox.FlyoutItemInfo[];
 }

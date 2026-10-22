@@ -3,7 +3,7 @@ import * as Blockly from "blockly/core";
 import { toolbox as baseToolbox } from "../../pythonBlocks";
 import { buildProfileToolbox } from "../../profiles/profileToolbox";
 import { getWorkbenchProfile } from "../../profiles/workbenchProfile";
-import { p0ModuleBlockTypes, setActiveHardwareBoard } from "../blocks/shared";
+import { p0ModuleBlockTypes, p1ModuleBlockTypes, p2ModuleBlockTypes, setActiveHardwareBoard } from "../blocks/shared";
 import type { HardwareBoardId } from "../firmwareCatalog";
 import { esp8266Esp12eToolbox } from "./esp8266-esp12e";
 import { esp32S3Toolbox } from "./esp32-s3";
@@ -35,6 +35,8 @@ type BoardCase = {
   advancedWireless: boolean;
   storage: boolean;
   p0Modules: boolean;
+  p1Modules: boolean;
+  p2Modules: boolean;
   spi: boolean;
 };
 
@@ -53,6 +55,8 @@ const boards: BoardCase[] = [
     advancedWireless: true,
     storage: true,
     p0Modules: true,
+    p1Modules: true,
+    p2Modules: true,
     spi: true,
   },
   {
@@ -68,7 +72,9 @@ const boards: BoardCase[] = [
     wifi: true,
     advancedWireless: false,
     storage: false,
-    p0Modules: false,
+    p0Modules: true,
+    p1Modules: false,
+    p2Modules: false,
     spi: false,
   },
   {
@@ -84,7 +90,9 @@ const boards: BoardCase[] = [
     wifi: true,
     advancedWireless: false,
     storage: false,
-    p0Modules: false,
+    p0Modules: true,
+    p1Modules: false,
+    p2Modules: false,
     spi: false,
   },
 ];
@@ -205,6 +213,12 @@ for (const board of boards) {
       expect(types.has("hardware_spi_transfer")).toBe(board.spi);
       for (const type of p0ModuleBlockTypes) {
         expect(types.has(type), `${board.boardId} 的 ${type}`).toBe(board.p0Modules);
+      }
+      for (const type of p1ModuleBlockTypes) {
+        expect(types.has(type), `${board.boardId} 的 ${type}`).toBe(board.p1Modules);
+      }
+      for (const type of p2ModuleBlockTypes) {
+        expect(types.has(type), `${board.boardId} 的 ${type}`).toBe(board.p2Modules);
       }
     });
 

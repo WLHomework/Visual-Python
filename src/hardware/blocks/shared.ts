@@ -43,6 +43,8 @@ export const pinUseByBlockType: Record<string, HardwarePinUse> = {
   hardware_light_percent: "analog",
   hardware_soil_percent: "analog",
   hardware_relay_set: "digital-output",
+  hardware_ds18b20_temperature: "digital-output",
+  hardware_ir_receive: "digital-input",
 };
 
 export const pinUseByBlockField: Record<string, Record<string, HardwarePinUse>> = {
@@ -67,6 +69,29 @@ export const pinUseByBlockField: Record<string, Record<string, HardwarePinUse>> 
     SCK: "digital-output",
     MOSI: "digital-output",
     MISO: "digital-input",
+  },
+  hardware_tm1637_init: {
+    CLK: "digital-output",
+    DIO: "digital-output",
+  },
+  hardware_stepper_move: {
+    IN1: "digital-output",
+    IN2: "digital-output",
+    IN3: "digital-output",
+    IN4: "digital-output",
+  },
+  hardware_rc522_uid: {
+    SCK: "digital-output",
+    MOSI: "digital-output",
+    MISO: "digital-input",
+    CS: "digital-output",
+    RST: "digital-output",
+  },
+  hardware_sd_card: {
+    SCK: "digital-output",
+    MOSI: "digital-output",
+    MISO: "digital-input",
+    CS: "digital-output",
   },
 };
 
@@ -103,6 +128,21 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_lcd1602_text: "LCD1602 显示文字",
   hardware_lcd1602_clear: "清空 LCD1602",
   hardware_bh1750_lux: "BH1750 光照",
+  hardware_ds18b20_temperature: "DS18B20 温度",
+  hardware_bmp280_read: "读取 BMP280",
+  hardware_sht30_read: "读取 SHT30",
+  hardware_mpu6050_read: "读取 MPU6050",
+  hardware_ds3231_read: "读取 DS3231",
+  hardware_ds3231_set: "设置 DS3231 时间",
+  hardware_vl53l0x_distance: "VL53L0X 测距",
+  hardware_ir_receive: "红外接收",
+  hardware_rc522_uid: "RFID 读卡",
+  hardware_tm1637_init: "初始化 TM1637",
+  hardware_tm1637_number: "TM1637 显示数字",
+  hardware_stepper_move: "步进电机转动",
+  hardware_oled_line: "OLED 画线",
+  hardware_oled_rect: "OLED 画矩形",
+  hardware_oled_progress: "OLED 进度条",
   hardware_uart_init: "初始化串口",
   hardware_uart_write: "串口发送",
   hardware_uart_read: "串口读取",
@@ -127,11 +167,16 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_wifi_rssi: "Wi-Fi 信号强度",
   hardware_http_get: "HTTP GET 请求",
   hardware_http_post: "HTTP POST 请求",
+  hardware_http_download: "HTTP 下载文件",
+  hardware_http_status: "最近 HTTP 状态码",
+  hardware_webserver_serve: "处理一次网页请求",
   hardware_ntp_sync: "NTP 校时",
   hardware_ntp_now: "设备当前时间",
   hardware_ntp_local: "设备本地时间",
   hardware_ble_start: "开启 BLE 广播",
   hardware_ble_stop: "停止 BLE 广播",
+  hardware_ble_gatt_start: "开启 BLE GATT 服务",
+  hardware_ble_gatt_notify: "BLE 通知",
   hardware_espnow_init: "初始化 ESP-NOW",
   hardware_espnow_mac: "ESP-NOW 本机 MAC",
   hardware_espnow_send: "ESP-NOW 发送",
@@ -142,11 +187,14 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_mqtt_subscribe: "MQTT 订阅",
   hardware_mqtt_wait: "等待 MQTT 消息",
   hardware_mqtt_last_topic: "最近 MQTT 主题",
+  hardware_mqtt_connected: "MQTT 已连接",
   hardware_mqtt_disconnect: "断开 MQTT",
   hardware_file_write: "写入设备文件",
   hardware_file_append: "追加设备文件",
   hardware_file_read: "读取设备文件",
   hardware_file_exists: "设备文件存在",
+  hardware_file_size: "设备文件大小",
+  hardware_sd_card: "SD 卡挂载/卸载",
   hardware_file_delete: "删除设备文件",
   hardware_file_list: "列出设备目录",
   hardware_nvs_set: "写入 NVS 键值",
@@ -154,6 +202,7 @@ export const hardwareBlockLabels: Record<string, string> = {
   hardware_nvs_delete: "删除 NVS 键值",
   hardware_mcu_temperature: "芯片温度",
   hardware_sleep_ms: "等待毫秒",
+  hardware_timer_every: "定时器",
   hardware_forever: "永远重复",
   hardware_ticks_ms: "毫秒计时器",
   hardware_ticks_diff: "计时差值",
@@ -225,6 +274,38 @@ export const p0ModuleBlockTypes: readonly string[] = [
   "hardware_lcd1602_text",
   "hardware_lcd1602_clear",
   "hardware_bh1750_lux",
+];
+
+/** P1-C 模块积木：先只在具备 `p1Modules` 的板卡上开放（H5 传感器驱动/显示/步进电机）。 */
+export const p1ModuleBlockTypes: readonly string[] = [
+  "hardware_ds18b20_temperature",
+  "hardware_bmp280_read",
+  "hardware_sht30_read",
+  "hardware_mpu6050_read",
+  "hardware_tm1637_init",
+  "hardware_tm1637_number",
+  "hardware_stepper_move",
+  "hardware_oled_line",
+  "hardware_oled_rect",
+];
+
+/** P2 模块积木：先只在具备 `p2Modules` 的板卡上开放（时钟/测距/进度条/下载/状态/红外）。 */
+export const p2ModuleBlockTypes: readonly string[] = [
+  "hardware_ds3231_read",
+  "hardware_ds3231_set",
+  "hardware_vl53l0x_distance",
+  "hardware_oled_progress",
+  "hardware_http_download",
+  "hardware_http_status",
+  "hardware_mqtt_connected",
+  "hardware_ir_receive",
+  "hardware_file_size",
+  "hardware_rc522_uid",
+  "hardware_sd_card",
+  "hardware_webserver_serve",
+  "hardware_timer_every",
+  "hardware_ble_gatt_start",
+  "hardware_ble_gatt_notify",
 ];
 
 export function isHardwareBlockType(type: string): boolean {
@@ -313,6 +394,11 @@ export const provideHardwareFunction = (name: string, code: string[]): string =>
 
 export const ensureImport = (moduleName: string) => {
   hardwareInternals().definitions_[`import_${moduleName}`] = `import ${moduleName}`;
+};
+
+/** 写入生成代码顶部的全局定义（例如按引脚/地址缓存的设备字典）。 */
+export const ensureHardwareGlobal = (key: string, line: string) => {
+  hardwareInternals().definitions_[key] = line;
 };
 
 export const unavailable = (reason: string) => `# 硬件积木未生成代码：${reason}\n`;

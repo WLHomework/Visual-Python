@@ -65,6 +65,24 @@ describe("useHardwareRunner", () => {
     expect(device.run).toHaveBeenCalledWith("import lcd1602\nfrom bh1750 import BH1750\n", "/main.py");
   });
 
+  it("uploads the H5 sensor, display and driver libraries before running", async () => {
+    const { runner, device } = createRunner({ getCode: () => "import bmp280\nimport sht30\nimport mpu6050\nimport tm1637\n" });
+    await expect(runner.run()).resolves.toEqual({ runId: 7 });
+    expect(device.uploadFile).toHaveBeenCalledTimes(4);
+    for (const name of ["bmp280", "sht30", "mpu6050", "tm1637"]) {
+      expect(device.uploadFile).toHaveBeenCalledWith(`/lib/${name}.py`, expect.any(Uint8Array));
+    }
+  });
+
+  it("uploads the DS3231, VL53L0X and RC522 drivers before running P2 code", async () => {
+    const { runner, device } = createRunner({ getCode: () => "import ds3231\nfrom vl53l0x import VL53L0X\nimport rc522\n" });
+    await expect(runner.run()).resolves.toEqual({ runId: 7 });
+    expect(device.uploadFile).toHaveBeenCalledTimes(3);
+    for (const name of ["ds3231", "vl53l0x", "rc522"]) {
+      expect(device.uploadFile).toHaveBeenCalledWith(`/lib/${name}.py`, expect.any(Uint8Array));
+    }
+  });
+
   it("does not run when a required device library upload fails", async () => {
     const { runner, device } = createRunner({
       getCode: () => "import ssd1306\n",

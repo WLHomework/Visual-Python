@@ -209,7 +209,7 @@ describe("esp32S3Toolbox", () => {
     const control = resolveS3().contents.find((category) => category.name === "控制");
 
     expect(control?.contents?.map((entry) => entry.type)).toEqual(
-      expect.arrayContaining(["hardware_ticks_ms", "hardware_ticks_diff", "hardware_reset", "hardware_deepsleep"]),
+      expect.arrayContaining(["hardware_ticks_ms", "hardware_ticks_diff", "hardware_reset", "hardware_deepsleep", "hardware_timer_every"]),
     );
   });
 
@@ -237,6 +237,48 @@ describe("esp32S3Toolbox", () => {
 
     expect(typesIn("显示")).toEqual(expect.arrayContaining(["hardware_lcd1602_init", "hardware_lcd1602_text", "hardware_lcd1602_clear"]));
     expect(typesIn("传感器")).toContain("hardware_bh1750_lux");
+  });
+
+  it("offers the H5 sensor, stepper, TM1637 and OLED graphics blocks", () => {
+    const categories = resolveS3().contents;
+    const typesIn = (name: string) => categories.find((category) => category.name === name)?.contents?.map((entry) => String(entry.type)) ?? [];
+
+    expect(typesIn("传感器")).toEqual(expect.arrayContaining([
+      "hardware_ds18b20_temperature",
+      "hardware_bmp280_read",
+      "hardware_sht30_read",
+      "hardware_mpu6050_read",
+    ]));
+    expect(typesIn("执行器")).toContain("hardware_stepper_move");
+    expect(typesIn("显示")).toEqual(expect.arrayContaining([
+      "hardware_tm1637_init",
+      "hardware_tm1637_number",
+      "hardware_oled_line",
+      "hardware_oled_rect",
+    ]));
+    const display = typesIn("显示");
+    expect(display.indexOf("hardware_oled_line")).toBeLessThan(display.indexOf("hardware_oled_write"));
+    expect(display.indexOf("hardware_oled_rect")).toBeLessThan(display.indexOf("hardware_oled_write"));
+    expect(display.indexOf("hardware_tm1637_init")).toBeGreaterThan(display.indexOf("hardware_oled_write"));
+  });
+
+  it("offers the P2 clock, time-of-flight, progress and download blocks", () => {
+    const categories = resolveS3().contents;
+    const typesIn = (name: string) => categories.find((category) => category.name === name)?.contents?.map((entry) => String(entry.type)) ?? [];
+
+    expect(typesIn("传感器")).toEqual(expect.arrayContaining([
+      "hardware_ds3231_read",
+      "hardware_ds3231_set",
+      "hardware_vl53l0x_distance",
+      "hardware_ir_receive",
+    ]));
+    expect(typesIn("网络")).toContain("hardware_http_download");
+    expect(typesIn("网络")).toContain("hardware_http_status");
+    expect(typesIn("网络")).toContain("hardware_mqtt_connected");
+    expect(typesIn("存储")).toContain("hardware_file_size");
+    const display = typesIn("显示");
+    expect(display).toContain("hardware_oled_progress");
+    expect(display.indexOf("hardware_oled_progress")).toBeLessThan(display.indexOf("hardware_oled_write"));
   });
 
   it("offers the onboard RGB block in the light category", () => {
@@ -273,11 +315,14 @@ describe("esp32S3Toolbox", () => {
       "hardware_spi_transfer_text",
       "hardware_ble_start",
       "hardware_ble_stop",
+      "hardware_ble_gatt_start",
+      "hardware_ble_gatt_notify",
       "hardware_espnow_init",
       "hardware_espnow_mac",
       "hardware_espnow_send",
       "hardware_espnow_receive",
       "hardware_espnow_last_mac",
+      "hardware_rc522_uid",
     ]);
   });
 
@@ -296,6 +341,8 @@ describe("esp32S3Toolbox", () => {
       "hardware_wifi_rssi",
       "hardware_http_get",
       "hardware_http_post",
+      "hardware_http_download",
+      "hardware_http_status",
       "hardware_ntp_sync",
       "hardware_ntp_now",
       "hardware_ntp_local",
@@ -304,7 +351,9 @@ describe("esp32S3Toolbox", () => {
       "hardware_mqtt_subscribe",
       "hardware_mqtt_wait",
       "hardware_mqtt_last_topic",
+      "hardware_mqtt_connected",
       "hardware_mqtt_disconnect",
+      "hardware_webserver_serve",
     ]);
   });
 
@@ -316,11 +365,13 @@ describe("esp32S3Toolbox", () => {
       "hardware_file_append",
       "hardware_file_read",
       "hardware_file_exists",
+      "hardware_file_size",
       "hardware_file_delete",
       "hardware_file_list",
       "hardware_nvs_set",
       "hardware_nvs_get",
       "hardware_nvs_delete",
+      "hardware_sd_card",
     ]);
   });
 
