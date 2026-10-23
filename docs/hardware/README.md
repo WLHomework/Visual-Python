@@ -1,8 +1,13 @@
-# H6.4 真机冒烟：WROOM / ESP8266 下放检查
+# 硬件真机冒烟记录（H6.4 + 集合积木）
 
-本目录的 `h6_4_smoke.py` 用于 H6.4：验证 H6 下放到 ESP32-WROOM 与 ESP8266-ESP12E 的 P0 通用包。脚本只用固件自带模块（`machine`、`os`、`sys`、`time`），不依赖工程、网络或额外文件；LCD1602 / BH1750 的检查在驱动存在时才执行。
+本目录有两套真机脚本：
 
-## 1. 接线
+- `h6_4_smoke.py`：H6.4 的 P0 通用包检查（LED / ADC / PWM / I2C / LCD1602 / BH1750）；
+- `collections_smoke.py`：元组 / 字典 / 集合积木的运行时检查，不需要任何外设或接线。
+
+两套脚本都只用固件自带模块，不依赖工程、网络或额外文件。真机结果记录在下面的表中；没有实际运行的板卡明确写“未执行”，不能把静态测试当成真机通过。
+
+## 1. H6.4 接线
 
 | 项目 | ESP32-WROOM | ESP8266-ESP12E | 说明 |
 | --- | --- | --- | --- |
@@ -68,3 +73,57 @@ H6.4 OK
 > WROOM 记录：2026-10-23 用户确认手头没有 WROOM，H6.4 的 WROOM 部分按“例外关闭”处理：保留脚本与接线表，等以后有板子时补跑，**当前不标记为通过**。
 >
 > 2026-10-22：代理首次尝试时 COM6 被运行中的 Visual Python 占用；2026-10-23 用户换接 ESP8266 到 COM3 后，代理发现板子启动复位循环，用 esptool 4.8.1 + 应用缓存的 `ESP8266_GENERIC-20260824-v1.29.0.bin` 重新烧录（4 MB flash，0x0），随后跑通上表。ESP32-WROOM 未接入，H6.4 以例外关闭，不标为整体通过。
+
+## 4. 集合积木冒烟
+
+`collections_smoke.py` 用于 T7/T8，验证元组、字典、集合积木生成的语法在设备上能实际执行。脚本不需要外设，只通过串口运行。
+
+### 4.1 运行
+
+方式 A（推荐，用本应用）：
+
+1. 打开 Visual Python，选择对应板卡工作台并连接串口。
+2. 把 `collections_smoke.py` 的内容贴到代码模式，或作为设备文件上传，运行。
+3. 在「输出」面板查看 PASS / FAIL / SKIP 行。
+
+方式 B（命令行）：
+
+```powershell
+mpremote connect COM3 run docs/hardware/collections_smoke.py
+```
+
+预期输出（以 ESP8266 为例）：
+
+```text
+Collections smoke test
+platform: esp8266
+uname: (sysname='esp8266', nodename='esp8266', release='1.29.0', ...)
+PASS tuple index/len index/len
+PASS tuple slice slice step=1
+PASS tuple query count/index/in
+PASS tuple combine/unpack concat/repeat/unpack
+PASS dict read get/in
+PASS dict modify set/pop/del
+PASS dict views keys/values/items/for
+PASS dict create fromkeys/zip
+PASS set create/modify add/discard/remove/update
+PASS set operations union/intersection/difference/relations
+PASS set in-place intersection/difference/symmetric_update
+COLLECTIONS RESULT: 11/11 checks passed
+COLLECTIONS OK
+```
+
+如果固件没有启用 `set`，脚本会输出 `SKIP set checks ...`，最终为 `8/8 checks passed` 并额外打印 `COLLECTIONS SKIPPED: 1`。这种情况下应从该板卡工具箱移除「集合」分类，不能把 SKIP 当成通过。
+
+### 4.2 记录表
+
+| 日期 | 板卡 | 固件版本 | 元组 | 字典 | 集合 | 结论 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-23 | ESP32-S3 | v1.29.0 | 未执行 | 未执行 | 未执行 | 未验证 | 手头没有 S3，待有硬件时运行 |
+| 2026-10-23 | ESP32-WROOM | v1.29.0 | 未执行 | 未执行 | 未执行 | 未验证 | 手头没有 WROOM，待有硬件时运行 |
+| 2026-10-23 | ESP8266-ESP12E | v1.29.0（2026-08-24） | PASS | PASS | PASS | 通过 | 11/11；固件不支持元组/字符串的带步长切片，硬件工具箱已改用仅支持步长 1 的 `python_slice_basic`；`set` 可用 |
+
+> 运行后把 PASS / FAIL / SKIP 的原始输出贴到本表；失败项要写具体异常，不能只写“失败”。
+> 元组、字典全部 PASS 且集合 PASS（或明确 SKIP 并移除分类）才算该板卡的集合工具箱通过。
+>
+> ESP8266 原始输出（2026-10-23，COM3，v1.29.0）：`platform: esp8266`、`COLLECTIONS RESULT: 11/11 checks passed`、`COLLECTIONS OK`。首次运行发现 `(1,2,3,4)[::2]` 和 `'abcd'[::2]` 会抛 `NotImplementedError: only slices with step=1 (aka None) are supported`；列表的扩展切片正常。硬件工具箱因此把元组切片改成不带步长的 `python_slice_basic`，桌面 Python 仍保留完整切片。

@@ -5,7 +5,7 @@ import { PLUGIN_API_VERSION, type PluginBlockDefinition, type PluginContext, typ
 
 const numpyColour = "#3d7fb5";
 const arrayOutput = "NumPyArray";
-const category = (name: string, colour: string, contents: Array<Record<string, unknown>>) => ({ kind: "category", name, colour, contents });
+const category = (name: string, contents: Array<Record<string, unknown>>) => ({ kind: "category", name, colour: numpyColour, contents });
 
 const numberShadow = (value: number) => ({ shadow: { type: "math_number", fields: { NUM: value } } });
 const listShadow = (values: number[]) => ({
@@ -200,7 +200,7 @@ export const numpyPlugin: VisualPythonPlugin = {
       name: "NumPy",
       colour: numpyColour,
       contents: [
-        category("数组创建", "#3d7fb5", [
+        category("数组创建", [
           { kind: "block", type: "visual_python_numpy_import", fields: { ALIAS: "np" } },
           { kind: "block", type: "visual_python_numpy_array", inputs: { DATA: listShadow([1, 2, 3]) } },
           { kind: "block", type: "visual_python_numpy_zeros", inputs: { SHAPE: numberShadow(3) } },
@@ -209,7 +209,7 @@ export const numpyPlugin: VisualPythonPlugin = {
           { kind: "block", type: "visual_python_numpy_arange", inputs: { START: numberShadow(0), STOP: numberShadow(10), STEP: numberShadow(1) } },
           { kind: "block", type: "visual_python_numpy_linspace", inputs: { START: numberShadow(0), STOP: numberShadow(1), COUNT: numberShadow(5) } },
         ]),
-        category("数组属性与变形", "#397ca5", [
+        category("数组属性与变形", [
           { kind: "block", type: "visual_python_numpy_shape", inputs: { ARRAY: arrayShadow([1, 2, 3]) } },
           { kind: "block", type: "visual_python_numpy_ndim", inputs: { ARRAY: arrayShadow([1, 2, 3]) } },
           { kind: "block", type: "visual_python_numpy_size", inputs: { ARRAY: arrayShadow([1, 2, 3]) } },
@@ -224,12 +224,12 @@ export const numpyPlugin: VisualPythonPlugin = {
           { kind: "block", type: "visual_python_numpy_argsort", inputs: { ARRAY: arrayShadow([3, 1, 2]) } },
           { kind: "block", type: "visual_python_numpy_unique", inputs: { ARRAY: arrayShadow([1, 2, 1]) } },
         ]),
-        category("计算", "#7b5aa6", [
+        category("计算", [
           { kind: "block", type: "visual_python_numpy_aggregate", fields: { FUNCTION: "mean" }, inputs: { ARRAY: arrayShadow([1, 2, 3]) } },
           { kind: "block", type: "visual_python_numpy_binary", fields: { OP: "add" }, inputs: { LEFT: arrayShadow([1, 2, 3]), RIGHT: arrayShadow([4, 5, 6]) } },
           { kind: "block", type: "visual_python_numpy_math", fields: { FUNCTION: "sqrt" }, inputs: { VALUE: numberShadow(9) } },
         ]),
-        category("拼接与筛选", "#b65f72", [
+        category("拼接与筛选", [
           { kind: "block", type: "visual_python_numpy_concatenate", fields: { AXIS: "0" }, inputs: { LEFT: arrayShadow([1, 2]), RIGHT: arrayShadow([3, 4]) } },
           { kind: "block", type: "visual_python_numpy_stack", fields: { AXIS: "0" }, inputs: { LEFT: arrayShadow([1, 2]), RIGHT: arrayShadow([3, 4]) } },
           { kind: "block", type: "visual_python_numpy_vstack", inputs: { LEFT: arrayShadow([1, 2]), RIGHT: arrayShadow([3, 4]) } },
@@ -239,7 +239,7 @@ export const numpyPlugin: VisualPythonPlugin = {
           { kind: "block", type: "visual_python_numpy_clip", inputs: { ARRAY: arrayShadow([-1, 2, 5]), MIN: numberShadow(0), MAX: numberShadow(3) } },
           { kind: "block", type: "visual_python_numpy_nonzero", inputs: { ARRAY: arrayShadow([0, 1, 0, 2]) } },
         ]),
-        category("随机数", "#5468a9", [
+        category("随机数", [
           { kind: "block", type: "visual_python_numpy_random_uniform", inputs: { SHAPE: numberShadow(3) } },
           { kind: "block", type: "visual_python_numpy_random_integer", inputs: { LOW: numberShadow(0), HIGH: numberShadow(10), SIZE: numberShadow(3) } },
           { kind: "block", type: "visual_python_numpy_random_normal", inputs: { SHAPE: numberShadow(3) } },

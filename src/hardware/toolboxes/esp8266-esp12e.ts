@@ -1,11 +1,14 @@
 import {
   assignmentCategory,
   callsCategory,
+  dictCategory,
   functionCategory,
   listCategory,
   logicCategory,
   serialCategory,
+  setCategory,
   textCategory,
+  tupleCategory,
   variablesCategory,
 } from "./common";
 import {
@@ -36,6 +39,9 @@ export const esp8266Esp12eToolbox: BoardToolboxSpec = {
     boardMathCategory({ random: false }),
     textCategory(),
     listCategory(),
+    tupleCategory(),
+    dictCategory(),
+    setCategory(),
     assignmentCategory(),
     variablesCategory,
     functionCategory(),

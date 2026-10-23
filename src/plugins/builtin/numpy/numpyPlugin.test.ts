@@ -46,6 +46,9 @@ describe("NumPy plugin", () => {
     expect(toolbox.contents).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "NumPy" }),
     ]));
+    const root = toolbox.contents.find((entry) => entry.name === "NumPy") as Record<string, any>;
+    expect(root.colour).toBe("#3d7fb5");
+    expect(root.contents.every((item: Record<string, any>) => item.colour === root.colour)).toBe(true);
   });
 
   it("generates array creation and shape operations with one automatic import", () => {

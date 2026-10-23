@@ -5,7 +5,7 @@ import { installFileBlockPickerFields } from "../../../fileBlockPicker";
 import { PLUGIN_API_VERSION, type PluginBlockDefinition, type PluginContext, type VisualPythonPlugin } from "../../api/types";
 
 const matplotlibColour = "#c45a4a";
-const category = (name: string, colour: string, contents: Array<Record<string, unknown>>) => ({ kind: "category", name, colour, contents });
+const category = (name: string, contents: Array<Record<string, unknown>>) => ({ kind: "category", name, colour: matplotlibColour, contents });
 
 const numberShadow = (value: number) => ({ shadow: { type: "math_number", fields: { NUM: value } } });
 const textShadow = (value: string) => ({ shadow: { type: "text", fields: { TEXT: value } } });
@@ -141,11 +141,11 @@ export const matplotlibPlugin: VisualPythonPlugin = {
       name: "Matplotlib",
       colour: matplotlibColour,
       contents: [
-        category("导入与画布", "#c45a4a", blocks(["visual_python_matplotlib_import", "visual_python_matplotlib_figure", "visual_python_matplotlib_clear"], {
+        category("导入与画布", blocks(["visual_python_matplotlib_import", "visual_python_matplotlib_figure", "visual_python_matplotlib_clear"], {
           visual_python_matplotlib_import: { fields: { ALIAS: "plt" } },
           visual_python_matplotlib_figure: { inputs: { WIDTH: numberShadow(8), HEIGHT: numberShadow(6) } },
         })),
-        category("基础绘图", "#c45a4a", blocks(["visual_python_matplotlib_plot", "visual_python_matplotlib_scatter", "visual_python_matplotlib_bar", "visual_python_matplotlib_barh", "visual_python_matplotlib_pie", "visual_python_matplotlib_hist", "visual_python_matplotlib_boxplot"], {
+        category("基础绘图", blocks(["visual_python_matplotlib_plot", "visual_python_matplotlib_scatter", "visual_python_matplotlib_bar", "visual_python_matplotlib_barh", "visual_python_matplotlib_pie", "visual_python_matplotlib_hist", "visual_python_matplotlib_boxplot"], {
           visual_python_matplotlib_plot: { inputs: { X: listShadow([1, 2, 3]), Y: listShadow([1, 4, 9]) } },
           visual_python_matplotlib_scatter: { inputs: { X: listShadow([1, 2, 3]), Y: listShadow([1, 4, 9]) } },
           visual_python_matplotlib_bar: { inputs: { X: listShadow([1, 2, 3]), HEIGHT: listShadow([3, 5, 2]) } },
@@ -154,26 +154,26 @@ export const matplotlibPlugin: VisualPythonPlugin = {
           visual_python_matplotlib_hist: { inputs: { DATA: listShadow([1, 2, 2, 3, 3, 3]), BINS: numberShadow(5) } },
           visual_python_matplotlib_boxplot: { inputs: { DATA: listShadow([1, 2, 3, 4, 5]) } },
         })),
-        category("图形配置", "#397ca5", blocks(["visual_python_matplotlib_title", "visual_python_matplotlib_xlabel", "visual_python_matplotlib_ylabel", "visual_python_matplotlib_legend", "visual_python_matplotlib_grid"], {
+        category("图形配置", blocks(["visual_python_matplotlib_title", "visual_python_matplotlib_xlabel", "visual_python_matplotlib_ylabel", "visual_python_matplotlib_legend", "visual_python_matplotlib_grid"], {
           visual_python_matplotlib_title: { inputs: { TITLE: textShadow("数据图表") } },
           visual_python_matplotlib_xlabel: { inputs: { LABEL: textShadow("横轴") } },
           visual_python_matplotlib_ylabel: { inputs: { LABEL: textShadow("纵轴") } },
         })),
-        category("坐标轴", "#397ca5", blocks(["visual_python_matplotlib_xlim", "visual_python_matplotlib_ylim", "visual_python_matplotlib_xticks", "visual_python_matplotlib_yticks"], {
+        category("坐标轴", blocks(["visual_python_matplotlib_xlim", "visual_python_matplotlib_ylim", "visual_python_matplotlib_xticks", "visual_python_matplotlib_yticks"], {
           visual_python_matplotlib_xlim: { inputs: { MIN: numberShadow(0), MAX: numberShadow(10) } },
           visual_python_matplotlib_ylim: { inputs: { MIN: numberShadow(0), MAX: numberShadow(10) } },
           visual_python_matplotlib_xticks: { inputs: { TICKS: listShadow([0, 1, 2, 3]) } },
           visual_python_matplotlib_yticks: { inputs: { TICKS: listShadow([0, 1, 2, 3]) } },
         })),
-        category("曲线样式", "#7b5aa6", blocks(["visual_python_matplotlib_line_color", "visual_python_matplotlib_line_style", "visual_python_matplotlib_line_width", "visual_python_matplotlib_marker", "visual_python_matplotlib_alpha"], {
+        category("曲线样式", blocks(["visual_python_matplotlib_line_color", "visual_python_matplotlib_line_style", "visual_python_matplotlib_line_width", "visual_python_matplotlib_marker", "visual_python_matplotlib_alpha"], {
           visual_python_matplotlib_line_width: { inputs: { WIDTH: numberShadow(2) } },
           visual_python_matplotlib_alpha: { inputs: { ALPHA: numberShadow(1) } },
         })),
-        category("多图布局", "#7b5aa6", blocks(["visual_python_matplotlib_subplot", "visual_python_matplotlib_subplots_adjust"], {
+        category("多图布局", blocks(["visual_python_matplotlib_subplot", "visual_python_matplotlib_subplots_adjust"], {
           visual_python_matplotlib_subplot: { inputs: { ROWS: numberShadow(1), COLUMNS: numberShadow(1), INDEX: numberShadow(1) } },
           visual_python_matplotlib_subplots_adjust: { inputs: { WIDTH: numberShadow(0.3), HEIGHT: numberShadow(0.3) } },
         })),
-        category("输出与保存", "#5468a9", blocks(["visual_python_matplotlib_savefig", "visual_python_matplotlib_show", "visual_python_matplotlib_close"], {
+        category("输出与保存", blocks(["visual_python_matplotlib_savefig", "visual_python_matplotlib_show", "visual_python_matplotlib_close"], {
           visual_python_matplotlib_savefig: { inputs: { PATH: textShadow("图形.png"), DPI: numberShadow(150) } },
         })),
       ],

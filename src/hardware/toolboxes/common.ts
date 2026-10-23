@@ -81,7 +81,7 @@ export const textCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec
     "text",
     "text_join",
     "text_length",
-    "python_convert",
+    { type: "python_convert", fromCategory: "输入输出" },
     "python_text_replace",
     "python_string_method",
     "python_f_string",
@@ -92,15 +92,82 @@ export const textCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec
 export const listCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
   id: "list",
   name: "列表",
-  colour: baseCategoryColour("集合"),
+  colour: baseCategoryColour("列表"),
   items: [
     // 基础工具箱里 python_sequence_collection 有 list / tuple / set 三条，必须用 KIND 选中列表这条。
     { type: "python_sequence_collection", fields: { KIND: "list" } },
     "python_list_method",
-    "python_index",
+    { type: "python_index", fromCategory: "列表" },
     "python_list_set",
     "python_list_insert",
     "lists_length",
+    ...extra,
+  ],
+});
+
+export const tupleCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
+  id: "tuple",
+  name: "元组",
+  colour: baseCategoryColour("元组"),
+  items: [
+    { type: "python_sequence_collection", fields: { KIND: "tuple" } },
+    "python_tuple_unpack",
+    { type: "python_convert", fromCategory: "元组" },
+    { type: "python_builtin_zip", fromCategory: "元组" },
+    { type: "python_index", fromCategory: "元组" },
+    "python_slice_basic",
+    { type: "python_length", fromCategory: "元组" },
+    { type: "python_membership", fromCategory: "元组" },
+    { type: "python_sequence_query", fromCategory: "元组", fields: { METHOD: "count" } },
+    { type: "python_sequence_query", fromCategory: "元组", fields: { METHOD: "index" } },
+    { type: "python_sequence_combine", fromCategory: "元组" },
+    { type: "python_for_in", fromCategory: "元组" },
+    { type: "python_for_enumerate", fromCategory: "元组" },
+    ...extra,
+  ],
+});
+
+export const dictCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
+  id: "dict",
+  name: "字典",
+  colour: baseCategoryColour("字典"),
+  items: [
+    "python_dynamic_dict",
+    "python_dict_from_pairs",
+    "python_dict_fromkeys",
+    { type: "python_dict_query", fields: { METHOD: "copy" } },
+    "python_dict_get",
+    "python_dict_item",
+    "python_dict_view",
+    "python_dict_view_list",
+    { type: "python_membership", fromCategory: "字典" },
+    { type: "python_length", fromCategory: "字典" },
+    "python_dict_set",
+    "python_dict_remove",
+    { type: "python_dict_method", fields: { METHOD: "update" } },
+    { type: "python_dict_query", fields: { METHOD: "pop" } },
+    "python_for_dict",
+    { type: "python_for_in", fromCategory: "字典" },
+    "python_dict_comprehension",
+    ...extra,
+  ],
+});
+
+export const setCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec => ({
+  id: "set",
+  name: "集合",
+  colour: baseCategoryColour("集合"),
+  items: [
+    { type: "python_sequence_collection", fields: { KIND: "set" } },
+    { type: "python_convert", fromCategory: "集合" },
+    "python_set_copy",
+    "python_set_method",
+    "python_set_operation",
+    "python_set_relation",
+    { type: "python_membership", fromCategory: "集合" },
+    { type: "python_length", fromCategory: "集合" },
+    { type: "python_for_in", fromCategory: "集合" },
+    "python_set_comprehension",
     ...extra,
   ],
 });

@@ -32,6 +32,8 @@ describe("Matplotlib plugin", () => {
     expect(root.contents.map((item: Record<string, any>) => item.name)).toEqual([
       "导入与画布", "基础绘图", "图形配置", "坐标轴", "曲线样式", "多图布局", "输出与保存",
     ]);
+    expect(root.colour).toBe("#c45a4a");
+    expect(root.contents.every((item: Record<string, any>) => item.colour === root.colour)).toBe(true);
   });
 
   it("generates plotting code with one automatic pyplot import", () => {

@@ -1,11 +1,14 @@
 import {
   assignmentCategory,
   callsCategory,
+  dictCategory,
   functionCategory,
   listCategory,
   logicCategory,
   serialCategory,
+  setCategory,
   textCategory,
+  tupleCategory,
   variablesCategory,
 } from "./common";
 import {
@@ -35,6 +38,9 @@ export const esp32S3Toolbox: BoardToolboxSpec = {
     boardMathCategory(),
     textCategory(),
     listCategory(),
+    tupleCategory(),
+    dictCategory(),
+    setCategory(),
     assignmentCategory(),
     variablesCategory,
     functionCategory(),

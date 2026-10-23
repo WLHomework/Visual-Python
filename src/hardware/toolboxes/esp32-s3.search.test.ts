@@ -118,7 +118,7 @@ describe("ESP32-S3 工具箱的积木搜索", () => {
   it("搜不到工具箱外的 Python 积木", () => {
     const index = buildIndex();
 
-    expect(searchBlockIndex(index, "字典")).toEqual([]);
+    expect(searchBlockIndex(index, "字典").some((entry) => entry.type === "python_dict_get")).toBe(true);
     expect(searchBlockIndex(index, "lambda")).toEqual([]);
     expect(searchBlockIndex(index, "装饰器")).toEqual([]);
   });

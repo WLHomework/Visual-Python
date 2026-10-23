@@ -27,11 +27,26 @@ function collectBaseBlocks(items: readonly unknown[], found: ToolboxEntry[]): vo
   }
 }
 
-function baseEntries(baseToolbox: Blockly.utils.toolbox.ToolboxDefinition, type: string): ToolboxEntry[] {
+function baseEntries(
+  baseToolbox: Blockly.utils.toolbox.ToolboxDefinition,
+  type: string,
+  fromCategory?: string,
+  categoryName?: string,
+): ToolboxEntry[] {
   const definition = baseToolbox as unknown as { contents?: unknown };
   if (!Array.isArray(definition.contents)) return [];
+  let items: readonly unknown[] = definition.contents;
+  if (fromCategory) {
+    // 同一类型可能同时出现在列表、元组、字典等分类里；fromCategory 让硬件白名单取到确定的那条预配置。
+    const category = findBaseCategory(baseToolbox, fromCategory);
+    if (!category) {
+      const context = categoryName ? `工具箱分类「${categoryName}」` : "工具箱";
+      throw new Error(`${context}引用了不存在的基础分类「${fromCategory}」`);
+    }
+    items = Array.isArray(category.contents) ? category.contents : [];
+  }
   const found: ToolboxEntry[] = [];
-  collectBaseBlocks(definition.contents, found);
+  collectBaseBlocks(items, found);
   return found.filter((entry) => entry.type === type);
 }
 
@@ -46,10 +61,11 @@ function findEntry(
   fields: Record<string, string | number> | undefined,
   categoryName: string,
   sources: ToolboxSources,
+  fromCategory?: string,
 ): ToolboxEntry | undefined {
   const candidates = type.startsWith("hardware_")
     ? sources.hardwareEntries.get(type) ?? []
-    : baseEntries(sources.baseToolbox, type);
+    : baseEntries(sources.baseToolbox, type, fromCategory, categoryName);
   const matched = candidates.filter((entry) => matchesFields(entry, fields));
   if (matched.length === 0) {
     if (isHardwareBlockType(type)) return undefined;
@@ -78,7 +94,7 @@ function resolveItems(items: ToolboxItemSpec[], categoryName: string, sources: T
       contents.push({ kind: "sep", gap: 20 });
       continue;
     }
-    const entry = findEntry(item.type, item.fields, categoryName, sources);
+    const entry = findEntry(item.type, item.fields, categoryName, sources, item.fromCategory);
     if (entry) contents.push(structuredClone(entry));
   }
   return contents;

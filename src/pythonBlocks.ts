@@ -79,7 +79,18 @@ const scheduleAnimationFrame = (callback: FrameRequestCallback): number =>
     : globalThis.setTimeout(() => callback(performance.now()), 0);
 
 const expressionColour = colours.call;
-const collectionColour = colours.collection;
+const collectionColours = {
+  list: "#7657b5",
+  tuple: "#2e8b57",
+  dict: "#b8860b",
+  set: "#c04a6a",
+} as const;
+const collectionColour = collectionColours.list;
+const tupleColour = collectionColours.tuple;
+const dictColour = collectionColours.dict;
+const setColour = collectionColours.set;
+const sequenceColour = (kind: string) =>
+  kind === "tuple" ? tupleColour : kind === "set" ? setColour : collectionColour;
 const objectColour = colours.object;
 const statementColour = colours.exception;
 
@@ -118,7 +129,7 @@ registerPythonSyntaxBlocks({
   exception: colours.exception,
   module: colours.module,
   call: colours.call,
-  collection: colours.collection,
+  collection: collectionColour,
   file: colours.file,
 });
 registerHardwareBlocks();
@@ -180,11 +191,18 @@ Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
   { type: "python_call", message0: "调用函数 %1 参数 %2", args0: [{ type: "field_input", name: "NAME", text: "len" }, { type: "input_value", name: "ARG" }], output: null, colour: expressionColour },
   { type: "python_call_statement", message0: "调用函数 %1 参数 %2", args0: [{ type: "field_input", name: "NAME", text: "print" }, { type: "input_value", name: "ARG" }], previousStatement: null, nextStatement: null, colour: expressionColour },
   { type: "python_keyword_argument", message0: "关键字参数 %1 = %2", args0: [{ type: "field_input", name: "NAME", text: "名称" }, { type: "input_value", name: "VALUE" }], output: "PythonArgument", colour: expressionColour },
-  { type: "python_tuple", message0: "元组 ( %1 , %2 )", args0: [{ type: "input_value", name: "A" }, { type: "input_value", name: "B" }], inputsInline: true, output: "PythonTuple", colour: collectionColour },
-  { type: "python_set", message0: "集合 { %1 , %2 }", args0: [{ type: "input_value", name: "A" }, { type: "input_value", name: "B" }], inputsInline: true, output: "PythonSet", colour: collectionColour },
-  { type: "python_dict", message0: "字典 { %1 : %2 , %3 : %4 }", args0: [{ type: "input_value", name: "K1" }, { type: "input_value", name: "V1" }, { type: "input_value", name: "K2" }, { type: "input_value", name: "V2" }], inputsInline: true, output: "PythonDict", colour: collectionColour },
+  { type: "python_tuple", message0: "元组 ( %1 , %2 )", args0: [{ type: "input_value", name: "A" }, { type: "input_value", name: "B" }], inputsInline: true, output: "PythonTuple", colour: tupleColour },
+  { type: "python_tuple_unpack", message0: "把元组 %1 解包为 %2", args0: [{ type: "input_value", name: "VALUE" }, { type: "input_value", name: "TARGET", check: "PythonAssignable" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: tupleColour, tooltip: "把元组或可迭代值解包到多个变量；目标可以用解包目标积木增减变量，并支持剩余项。" },
+  { type: "python_set", message0: "集合 { %1 , %2 }", args0: [{ type: "input_value", name: "A" }, { type: "input_value", name: "B" }], inputsInline: true, output: "PythonSet", colour: setColour },
+  { type: "python_dict", message0: "字典 { %1 : %2 , %3 : %4 }", args0: [{ type: "input_value", name: "K1" }, { type: "input_value", name: "V1" }, { type: "input_value", name: "K2" }, { type: "input_value", name: "V2" }], inputsInline: true, output: "PythonDict", colour: dictColour },
+  { type: "python_dict_item", message0: "字典 %1 的键 %2 的值（不存在时报错）", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }], inputsInline: true, output: null, colour: dictColour, tooltip: "直接按键读取字典的值；键不存在时会抛出 KeyError。" },
+  { type: "python_dict_view_list", message0: "字典 %1 的 %2 列表", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "field_dropdown", name: "VIEW", options: [["键", "keys"], ["值", "values"], ["键值对", "items"]] }], inputsInline: true, output: "Array", colour: dictColour, tooltip: "把字典的键、值或键值对转换为列表；键值对列表的每一项是 (键, 值) 元组。" },
+  { type: "python_for_dict", message0: "对于字典 %1 的键 %2 和值 %3 %4", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "field_variable", name: "KEY", variable: "键" }, { type: "field_variable", name: "VALUE", variable: "值" }, { type: "input_statement", name: "DO" }], previousStatement: null, nextStatement: null, colour: dictColour, tooltip: "同时遍历字典的键和值。" },
+  { type: "python_dict_merge", message0: "字典 %1 与字典 %2 合并为新字典", args0: [{ type: "input_value", name: "LEFT", check: "PythonDict" }, { type: "input_value", name: "RIGHT", check: "PythonDict" }], inputsInline: true, output: "PythonDict", colour: dictColour, tooltip: "返回新字典，不修改原字典；右侧同名键覆盖左侧。" },
+  { type: "python_dict_from_pairs", message0: "用键列表 %1 和值列表 %2 创建字典", args0: [{ type: "input_value", name: "KEYS", check: ["Array", "PythonTuple"] }, { type: "input_value", name: "VALUES", check: ["Array", "PythonTuple"] }], inputsInline: true, output: "PythonDict", colour: dictColour, tooltip: "按键列表和值列表配对创建字典；长度不一致时按较短的一侧截断。" },
   { type: "python_index", message0: "%1 的索引 %2", args0: [{ type: "input_value", name: "OBJECT" }, { type: "input_value", name: "INDEX" }], output: null, colour: collectionColour },
   { type: "python_slice", message0: "%1 切片 从 %2 到 %3 步长 %4", args0: [{ type: "input_value", name: "OBJECT" }, { type: "input_value", name: "START" }, { type: "input_value", name: "STOP" }, { type: "input_value", name: "STEP" }], output: null, colour: collectionColour },
+  { type: "python_slice_basic", message0: "%1 切片 从 %2 到 %3", args0: [{ type: "input_value", name: "OBJECT" }, { type: "input_value", name: "START" }, { type: "input_value", name: "STOP" }], output: null, colour: tupleColour, tooltip: "步长固定为 1 的切片，兼容不支持扩展切片的 MicroPython 固件。" },
   { type: "python_attribute", message0: "%1 的属性 %2", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "ATTRIBUTE", text: "名称" }], output: null, colour: objectColour },
   { type: "python_method_call", message0: "%1 调用方法 %2 参数 %3", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "METHOD", text: "append" }, { type: "input_value", name: "ARG" }], output: null, colour: objectColour },
   { type: "python_method_statement", message0: "%1 调用方法 %2 参数 %3", args0: [{ type: "input_value", name: "OBJECT" }, { type: "field_input", name: "METHOD", text: "append" }, { type: "input_value", name: "ARG" }], previousStatement: null, nextStatement: null, colour: objectColour },
@@ -208,8 +226,8 @@ Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
   { type: "python_try_full", message0: "尝试 %1 捕获 %2 命名为 %3 %4 否则 %5 最终 %6", args0: [{ type: "input_statement", name: "TRY" }, { type: "field_input", name: "ERROR", text: "Exception" }, { type: "field_variable", name: "ALIAS", variable: "错误" }, { type: "input_statement", name: "EXCEPT" }, { type: "input_statement", name: "ELSE" }, { type: "input_statement", name: "FINALLY" }], previousStatement: null, nextStatement: null, colour: statementColour },
   { type: "python_with", message0: "安全使用 %1 命名为 %2 %3", args0: [{ type: "input_value", name: "CONTEXT" }, { type: "field_variable", name: "ALIAS", variable: "资源" }, { type: "input_statement", name: "BODY" }], previousStatement: null, nextStatement: null, colour: colours.file },
   { type: "python_list_comprehension", message0: "列表 [ %1 对于 %2 在 %3 中 如果 %4 ]", args0: [{ type: "input_value", name: "EXPRESSION" }, { type: "field_input", name: "VAR", text: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "根据一个集合快速生成新列表，条件可以留空。" },
-  { type: "python_set_comprehension", message0: "集合 { %1 对于 %2 在 %3 中 如果 %4 }", args0: [{ type: "input_value", name: "EXPRESSION" }, { type: "field_input", name: "VAR", text: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "根据一个集合快速生成不重复值的集合，条件可以留空。" },
-  { type: "python_dict_comprehension", message0: "字典 { %1 : %2 对于 %3 在 %4 中 如果 %5 }", args0: [{ type: "input_value", name: "KEY" }, { type: "input_value", name: "VALUE" }, { type: "field_input", name: "VAR", text: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "根据一个集合快速生成键值对，条件可以留空。" },
+  { type: "python_set_comprehension", message0: "集合 { %1 对于 %2 在 %3 中 如果 %4 }", args0: [{ type: "input_value", name: "EXPRESSION" }, { type: "field_input", name: "VAR", text: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: setColour, tooltip: "根据一个集合快速生成不重复值的集合，条件可以留空。" },
+  { type: "python_dict_comprehension", message0: "字典 { %1 : %2 对于 %3 在 %4 中 如果 %5 }", args0: [{ type: "input_value", name: "KEY" }, { type: "input_value", name: "VALUE" }, { type: "field_input", name: "VAR", text: "项目" }, { type: "input_value", name: "ITERABLE" }, { type: "input_value", name: "CONDITION" }], inputsInline: true, output: null, colour: dictColour, tooltip: "根据一个集合快速生成键值对，条件可以留空。" },
   { type: "python_lambda", message0: "lambda 参数 %1 返回 %2", args0: [{ type: "field_input", name: "PARAMS", text: "数值" }, { type: "input_value", name: "EXPRESSION" }], inputsInline: true, output: null, colour: colours.function },
   { type: "python_decorated_definition", message0: "装饰器 @ %1 %2", args0: [{ type: "input_value", name: "DECORATOR" }, { type: "input_statement", name: "DEFINITION" }], previousStatement: null, nextStatement: null, colour: colours.function },
   { type: "python_range", message0: "数值范围 从 %1 到 %2 步长 %3", args0: [{ type: "input_value", name: "START", check: "Number" }, { type: "input_value", name: "STOP", check: "Number" }, { type: "input_value", name: "STEP", check: "Number" }], inputsInline: true, output: null, colour: colours.loop, tooltip: "生成从起始值到结束值之前的一组整数。" },
@@ -223,14 +241,14 @@ Blockly.common.defineBlocksWithJsonArray(localizeBlockDefinitions([
   { type: "python_sequence_query", message0: "在序列 %1 中 %2 %3", args0: [{ type: "input_value", name: "SEQUENCE", check: ["Array", "PythonTuple"] }, { type: "field_dropdown", name: "METHOD", options: [["统计值出现次数", "count"], ["查找值的位置", "index"]] }, { type: "input_value", name: "VALUE" }], inputsInline: true, output: "Number", colour: collectionColour, tooltip: "适用于列表和元组；可以统计某个值出现的次数，或查找它第一次出现的位置。" },
   { type: "python_sequence_combine", message0: "%1 %2 %3", args0: [{ type: "input_value", name: "SEQUENCE", check: ["Array", "PythonTuple"] }, { type: "field_dropdown", name: "OPERATION", options: [["拼接", "concat"], ["重复", "repeat"]] }, { type: "input_value", name: "OTHER" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "拼接两个同类的列表或元组，或者将一个列表或元组重复指定次数。" },
   { type: "python_list_copy", message0: "复制列表 %1", args0: [{ type: "input_value", name: "LIST", check: "Array" }], output: "Array", colour: collectionColour, tooltip: "创建一个内容相同但相互独立的新列表。" },
-  { type: "python_set_operation", message0: "集合 %1 与集合 %2 的 %3", args0: [{ type: "input_value", name: "LEFT", check: "PythonSet" }, { type: "input_value", name: "RIGHT", check: "PythonSet" }, { type: "field_dropdown", name: "OPERATION", options: [["并集", "union"], ["交集", "intersection"], ["差集", "difference"], ["对称差集", "symmetric_difference"]] }], inputsInline: true, output: "PythonSet", colour: collectionColour, tooltip: "计算两个集合的并集、交集、差集或对称差集，不修改原集合。" },
-  { type: "python_set_relation", message0: "集合 %1 %3 集合 %2", args0: [{ type: "input_value", name: "LEFT", check: "PythonSet" }, { type: "input_value", name: "RIGHT", check: "PythonSet" }, { type: "field_dropdown", name: "RELATION", options: [["是子集", "subset"], ["是真子集", "proper_subset"], ["是超集", "superset"], ["是真超集", "proper_superset"], ["互不相交", "disjoint"]] }], inputsInline: true, output: "Boolean", colour: collectionColour, tooltip: "判断两个集合之间的包含关系，或它们是否没有共同元素。" },
-  { type: "python_set_copy", message0: "复制集合 %1", args0: [{ type: "input_value", name: "SET", check: "PythonSet" }], output: "PythonSet", colour: collectionColour, tooltip: "创建一个内容相同但相互独立的新集合。" },
-  { type: "python_dict_get", message0: "从字典 %1 获取键 %2，找不到时返回 %3", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }, { type: "input_value", name: "DEFAULT" }], inputsInline: true, output: null, colour: collectionColour, tooltip: "读取键对应的值；键不存在时返回默认值。" },
-  { type: "python_dict_set", message0: "将字典 %1 的键 %2 设置为 %3", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour, tooltip: "新增键值对，或修改已有键的值。" },
-  { type: "python_dict_remove", message0: "从字典 %1 删除键 %2", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: collectionColour, tooltip: "删除指定键；键不存在时不会报错。" },
-  { type: "python_dict_view", message0: "字典 %1 的 %2", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "field_dropdown", name: "METHOD", options: [["键 keys", "keys"], ["值 values", "values"], ["键值对 items", "items"]] }], inputsInline: true, output: null, colour: collectionColour },
-  { type: "python_dict_fromkeys", message0: "用键集合 %1 创建字典，初始值 %2", args0: [{ type: "input_value", name: "KEYS", check: ["Array", "PythonTuple", "PythonSet"] }, { type: "input_value", name: "VALUE" }], inputsInline: true, output: "PythonDict", colour: collectionColour, tooltip: "使用一组键创建新字典；初始值可以留空。" },
+  { type: "python_set_operation", message0: "集合 %1 与集合 %2 的 %3", args0: [{ type: "input_value", name: "LEFT", check: "PythonSet" }, { type: "input_value", name: "RIGHT", check: "PythonSet" }, { type: "field_dropdown", name: "OPERATION", options: [["并集", "union"], ["交集", "intersection"], ["差集", "difference"], ["对称差集", "symmetric_difference"]] }], inputsInline: true, output: "PythonSet", colour: setColour, tooltip: "计算两个集合的并集、交集、差集或对称差集，不修改原集合。" },
+  { type: "python_set_relation", message0: "集合 %1 %3 集合 %2", args0: [{ type: "input_value", name: "LEFT", check: "PythonSet" }, { type: "input_value", name: "RIGHT", check: "PythonSet" }, { type: "field_dropdown", name: "RELATION", options: [["是子集", "subset"], ["是真子集", "proper_subset"], ["是超集", "superset"], ["是真超集", "proper_superset"], ["互不相交", "disjoint"]] }], inputsInline: true, output: "Boolean", colour: setColour, tooltip: "判断两个集合之间的包含关系，或它们是否没有共同元素。" },
+  { type: "python_set_copy", message0: "复制集合 %1", args0: [{ type: "input_value", name: "SET", check: "PythonSet" }], output: "PythonSet", colour: setColour, tooltip: "创建一个内容相同但相互独立的新集合。" },
+  { type: "python_dict_get", message0: "从字典 %1 获取键 %2，找不到时返回 %3", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }, { type: "input_value", name: "DEFAULT" }], inputsInline: true, output: null, colour: dictColour, tooltip: "读取键对应的值；键不存在时返回默认值。" },
+  { type: "python_dict_set", message0: "将字典 %1 的键 %2 设置为 %3", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }, { type: "input_value", name: "VALUE" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: dictColour, tooltip: "新增键值对，或修改已有键的值。" },
+  { type: "python_dict_remove", message0: "从字典 %1 删除键 %2，不存在时 %3", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "input_value", name: "KEY" }, { type: "field_dropdown", name: "MISSING", options: [["忽略", "ignore"], ["报错", "error"]] }], inputsInline: true, previousStatement: null, nextStatement: null, colour: dictColour, tooltip: "删除指定键；可以选择键不存在时忽略或抛出 KeyError。" },
+  { type: "python_dict_view", message0: "字典 %1 的 %2", args0: [{ type: "input_value", name: "DICT", check: "PythonDict" }, { type: "field_dropdown", name: "METHOD", options: [["键 keys", "keys"], ["值 values", "values"], ["键值对 items", "items"]] }], inputsInline: true, output: null, colour: dictColour },
+  { type: "python_dict_fromkeys", message0: "用键集合 %1 创建字典，初始值 %2", args0: [{ type: "input_value", name: "KEYS", check: ["Array", "PythonTuple", "PythonSet"] }, { type: "input_value", name: "VALUE" }], inputsInline: true, output: "PythonDict", colour: dictColour, tooltip: "使用一组键创建新字典；初始值可以留空。" },
   { type: "python_file_read_text", message0: "读取文本文件 %1 编码 %2", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_input", name: "ENCODING", text: "utf-8" }], inputsInline: true, output: "String", colour: colours.file, tooltip: "一次读取整个文本文件，读取完成后会自动关闭文件。" },
   { type: "python_file_write_text", message0: "把 %1 %2 文件 %3 编码 %4", args0: [{ type: "input_value", name: "VALUE", check: "String" }, { type: "field_dropdown", name: "MODE", options: [["覆盖写入到", "w"], ["追加到", "a"]] }, { type: "input_value", name: "PATH", check: "String" }, { type: "field_input", name: "ENCODING", text: "utf-8" }], inputsInline: true, previousStatement: null, nextStatement: null, colour: colours.file, tooltip: "写入文本并自动关闭文件；可以选择覆盖原内容或追加到末尾。" },
   { type: "python_open_file", message0: "打开文件 %1 模式 %2 编码 %3", args0: [{ type: "input_value", name: "PATH", check: "String" }, { type: "field_dropdown", name: "MODE", options: [["读取", "r"], ["覆盖写入", "w"], ["追加写入", "a"], ["独占创建", "x"], ["二进制读取", "rb"], ["二进制写入", "wb"], ["二进制追加", "ab"]] }, { type: "field_input", name: "ENCODING", text: "utf-8" }], inputsInline: true, output: null, colour: colours.file },
@@ -330,11 +348,12 @@ Blockly.Blocks.python_list_method = {
 const setMethodOptions: Array<[string, string]> = [
   ["添加一个值", "add"], ["合并多个值", "update"], ["删除值（不存在时报错）", "remove"],
   ["丢弃值（不存在时忽略）", "discard"], ["弹出一个值", "pop"], ["清空", "clear"],
+  ["原地交集", "intersection_update"], ["原地差集", "difference_update"], ["原地对称差集", "symmetric_difference_update"],
 ];
 
 Blockly.Blocks.python_set_method = {
   init(this: Blockly.Block) {
-    this.setColour(collectionColour);
+    this.setColour(setColour);
     this.setPreviousStatement(true);
     this.setNextStatement(true);
     this.setInputsInline(true);
@@ -347,8 +366,9 @@ Blockly.Blocks.python_set_method = {
       if (!argument) return;
       const labels: Record<string, string> = {
         add: "要添加的值", update: "要合并的内容", remove: "要删除的值", discard: "要丢弃的值",
+        intersection_update: "要比较的集合", difference_update: "要比较的集合", symmetric_difference_update: "要比较的集合",
       };
-      argument.setVisible(["add", "update", "remove", "discard"].includes(methodName));
+      argument.setVisible(["add", "update", "remove", "discard", "intersection_update", "difference_update", "symmetric_difference_update"].includes(methodName));
       this.setFieldValue(labels[methodName] ?? "参数", "ARG_LABEL");
     };
     method.setValidator((nextValue) => { update(String(nextValue)); return nextValue; });
@@ -359,7 +379,7 @@ Blockly.Blocks.python_set_method = {
 
 Blockly.Blocks.python_dict_method = {
   init(this: Blockly.Block) {
-    this.setColour(collectionColour);
+    this.setColour(dictColour);
     this.setPreviousStatement(true);
     this.setNextStatement(true);
     this.setInputsInline(true);
@@ -376,7 +396,7 @@ Blockly.Blocks.python_dict_method = {
 
 Blockly.Blocks.python_dict_query = {
   init(this: Blockly.Block) {
-    this.setColour(collectionColour);
+    this.setColour(dictColour);
     this.setOutput(true);
     this.setInputsInline(true);
     this.appendValueInput("DICT").setCheck("PythonDict").appendField("对字典");
@@ -408,8 +428,9 @@ Blockly.Blocks.python_sequence_collection = {
   init(this: any) {
     this.setColour(collectionColour); this.setOutput(true, sequenceOutputCheck()); this.setInputsInline(true);
     const kindField = new Blockly.FieldDropdown([["列表 [", "list"], ["元组 (", "tuple"], ["集合 {", "set"]]);
-    kindField.setValidator((nextValue) => { this.outputConnection?.setCheck(sequenceOutputCheck()); return nextValue; });
+    kindField.setValidator((nextValue) => { this.setColour(sequenceColour(String(nextValue))); this.outputConnection?.setCheck(sequenceOutputCheck()); return nextValue; });
     this.appendDummyInput("HEAD").appendField(kindField, "KIND");
+    this.setColour(sequenceColour(String(kindField.getValue())));
     this.itemCount_ = 2; this.updateShape_(); this.updateOutputCheck_();
     this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg));
     this.setTooltip("创建列表、元组或集合；下拉框选择类型，点击齿轮增减项目。");
@@ -418,7 +439,7 @@ Blockly.Blocks.python_sequence_collection = {
   saveExtraState(this: any) { return { itemCount: this.itemCount_ }; },
   loadExtraState(this: any, state: { itemCount?: number }) { this.itemCount_ = state.itemCount ?? 0; this.updateShape_(); this.updateOutputCheck_(); },
   onchange(this: any, event: Blockly.Events.Abstract) {
-    if (event.type === Blockly.Events.BLOCK_CHANGE && (event as Blockly.Events.BlockChange).blockId === this.id && (event as Blockly.Events.BlockChange).name === "KIND") { this.updateTail_(); this.updateOutputCheck_(); }
+    if (event.type === Blockly.Events.BLOCK_CHANGE && (event as Blockly.Events.BlockChange).blockId === this.id && (event as Blockly.Events.BlockChange).name === "KIND") { this.setColour(sequenceColour(String(this.getFieldValue("KIND")))); this.updateTail_(); this.updateOutputCheck_(); }
   },
   decompose(this: any, workspace: Blockly.WorkspaceSvg) {
     const container = workspace.newBlock("python_collection_container"); container.initSvg();
@@ -486,7 +507,7 @@ Blockly.Blocks.python_list_collection = {
 } as unknown as (typeof Blockly.Blocks)[string];
 
 Blockly.Blocks.python_dynamic_dict = {
-  init(this: any) { this.setColour(collectionColour); this.setOutput(true, "PythonDict"); this.setInputsInline(true); this.appendDummyInput("HEAD").appendField("字典 {"); this.itemCount_ = 2; this.updateShape_(); this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg)); },
+  init(this: any) { this.setColour(dictColour); this.setOutput(true, "PythonDict"); this.setInputsInline(true); this.appendDummyInput("HEAD").appendField("字典 {"); this.itemCount_ = 2; this.updateShape_(); this.setMutator(createMutatorIcon(["python_collection_item"], this as Blockly.BlockSvg)); },
   itemCount_: 2,
   saveExtraState(this: any) { return { itemCount: this.itemCount_ }; },
   loadExtraState(this: any, state: { itemCount?: number }) { this.itemCount_ = state.itemCount ?? 0; this.updateShape_(); },
@@ -969,6 +990,7 @@ pythonGenerator.forBlock.python_set = (block, generator) => [`{${value(generator
 pythonGenerator.forBlock.python_dict = (block, generator) => [`{${value(generator, block, "K1")}: ${value(generator, block, "V1")}, ${value(generator, block, "K2")}: ${value(generator, block, "V2")}}`, Order.COLLECTION];
 pythonGenerator.forBlock.python_index = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}[${value(generator, block, "INDEX", "0")}]`, Order.MEMBER];
 pythonGenerator.forBlock.python_slice = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}[${value(generator, block, "START", "")}:${value(generator, block, "STOP", "")}:${value(generator, block, "STEP", "")}]`, Order.MEMBER];
+pythonGenerator.forBlock.python_slice_basic = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}[${value(generator, block, "START", "")}:${value(generator, block, "STOP", "")}]`, Order.MEMBER];
 pythonGenerator.forBlock.python_attribute = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}.${safeIdentifier(block.getFieldValue("ATTRIBUTE"), "属性")}`, Order.MEMBER];
 pythonGenerator.forBlock.python_method_call = (block, generator) => [`${value(generator, block, "OBJECT", "None", Order.MEMBER)}.${safeIdentifier(block.getFieldValue("METHOD"), "自定义方法")}(${value(generator, block, "ARG", "")})`, Order.FUNCTION_CALL];
 pythonGenerator.forBlock.python_method_statement = (block, generator) => `${value(generator, block, "OBJECT")}.${safeIdentifier(block.getFieldValue("METHOD"), "自定义方法")}(${value(generator, block, "ARG", "")})\n`;
@@ -1081,7 +1103,7 @@ pythonGenerator.forBlock.python_set_relation = (block, generator) => {
 };
 pythonGenerator.forBlock.python_set_method = (block, generator) => {
   const method = block.getFieldValue("METHOD");
-  const argument = ["add", "update", "remove", "discard"].includes(method) ? value(generator, block, "ARG", "None") : "";
+  const argument = ["add", "update", "remove", "discard", "intersection_update", "difference_update", "symmetric_difference_update"].includes(method) ? value(generator, block, "ARG", "None") : "";
   return `${value(generator, block, "SET", "set()", Order.MEMBER)}.${method}(${argument})\n`;
 };
 pythonGenerator.forBlock.python_set_copy = (block, generator) => [`${value(generator, block, "SET", "set()", Order.MEMBER)}.copy()`, Order.FUNCTION_CALL];
@@ -1089,8 +1111,40 @@ pythonGenerator.forBlock.python_dict_get = (block, generator) => {
   const fallback = optionalValue(generator, block, "DEFAULT");
   return [`${value(generator, block, "DICT", "{}", Order.MEMBER)}.get(${value(generator, block, "KEY")}${fallback ? `, ${fallback}` : ""})`, Order.FUNCTION_CALL];
 };
+pythonGenerator.forBlock.python_dict_item = (block, generator) => [
+  `${value(generator, block, "DICT", "{}", Order.MEMBER)}[${value(generator, block, "KEY", "''")}]`,
+  Order.MEMBER,
+];
+pythonGenerator.forBlock.python_tuple_unpack = (block, generator) => {
+  const rawTarget = generator.valueToCode(block, "TARGET", Order.NONE) || "第一个值, 第二个值";
+  const target = rawTarget.startsWith("(") && rawTarget.endsWith(")") ? rawTarget.slice(1, -1) : rawTarget;
+  return `${target} = ${value(generator, block, "VALUE", "()")}\n`;
+};
 pythonGenerator.forBlock.python_dict_set = (block, generator) => `${value(generator, block, "DICT", "{}", Order.MEMBER)}[${value(generator, block, "KEY", "''")}] = ${value(generator, block, "VALUE", "None")}\n`;
-pythonGenerator.forBlock.python_dict_remove = (block, generator) => `${value(generator, block, "DICT", "{}", Order.MEMBER)}.pop(${value(generator, block, "KEY", "''")}, None)\n`;
+pythonGenerator.forBlock.python_dict_remove = (block, generator) => {
+  const dictionary = value(generator, block, "DICT", "{}", Order.MEMBER);
+  const key = value(generator, block, "KEY", "''");
+  if (block.getFieldValue("MISSING") === "error") return `del ${dictionary}[${key}]\n`;
+  return `${dictionary}.pop(${key}, None)\n`;
+};
+pythonGenerator.forBlock.python_dict_view_list = (block, generator) => [
+  `list(${value(generator, block, "DICT", "{}", Order.MEMBER)}.${block.getFieldValue("VIEW")}())`,
+  Order.FUNCTION_CALL,
+];
+pythonGenerator.forBlock.python_for_dict = (block, generator) => {
+  const dictionary = value(generator, block, "DICT", "{}", Order.MEMBER);
+  const key = variableName(generator, block, "KEY", "键");
+  const valueName = variableName(generator, block, "VALUE", "值");
+  return `for ${key}, ${valueName} in ${dictionary}.items():\n${suite(generator, block, "DO")}`;
+};
+pythonGenerator.forBlock.python_dict_merge = (block, generator) => [
+  `${value(generator, block, "LEFT", "{}", Order.BITWISE_OR)} | ${value(generator, block, "RIGHT", "{}", Order.BITWISE_OR)}`,
+  Order.BITWISE_OR,
+];
+pythonGenerator.forBlock.python_dict_from_pairs = (block, generator) => [
+  `dict(zip(${value(generator, block, "KEYS", "[]")}, ${value(generator, block, "VALUES", "[]")}))`,
+  Order.FUNCTION_CALL,
+];
 pythonGenerator.forBlock.python_dict_view = (block, generator) => [`${value(generator, block, "DICT", "{}", Order.MEMBER)}.${block.getFieldValue("METHOD")}()`, Order.FUNCTION_CALL];
 pythonGenerator.forBlock.python_dict_method = (block, generator) => {
   const method = block.getFieldValue("METHOD");
@@ -1244,6 +1298,53 @@ pythonGenerator.forBlock.python_method_call_structured = pythonGenerator.forBloc
 pythonGenerator.forBlock.python_method_statement_structured = pythonGenerator.forBlock.python_call_statement_structured;
 pythonGenerator.forBlock.python_new_object_structured = pythonGenerator.forBlock.python_call_structured;
 
+type CollectionPalette = keyof typeof collectionColours;
+const paletteColour = (palette: unknown): string | null =>
+  typeof palette === "string" && Object.prototype.hasOwnProperty.call(collectionColours, palette)
+    ? collectionColours[palette as CollectionPalette]
+    : null;
+
+/**
+ * 让同一个通用积木在列表、元组、字典、集合分类里显示对应分类色。
+ *
+ * 颜色放在 extraState 里，避免为了换色复制出多套积木类型；没有 palette 的旧积木保持默认色。
+ */
+function installCollectionPalette(types: readonly string[]) {
+  for (const type of types) {
+    const definition = Blockly.Blocks[type] as Record<string, any> | undefined;
+    if (!definition) throw new Error(`找不到要设置分类色的积木 ${type}`);
+    const loadExtraState = definition.loadExtraState;
+    const saveExtraState = definition.saveExtraState;
+    definition.loadExtraState = function(this: Blockly.Block, state: { palette?: unknown } | undefined) {
+      if (typeof loadExtraState === "function") loadExtraState.call(this, state);
+      const colour = paletteColour(state?.palette);
+      if (!colour) return;
+      (this as unknown as { palette_?: CollectionPalette }).palette_ = state!.palette as CollectionPalette;
+      this.setColour(colour);
+    };
+    definition.saveExtraState = function(this: Blockly.Block) {
+      const palette = (this as unknown as { palette_?: CollectionPalette }).palette_;
+      const state = typeof saveExtraState === "function" ? saveExtraState.call(this) : undefined;
+      if (!palette) return state;
+      return { ...(state ?? {}), palette };
+    };
+  }
+}
+
+installCollectionPalette([
+  "lists_length",
+  "python_index",
+  "python_slice",
+  "python_length",
+  "python_membership",
+  "python_sequence_query",
+  "python_sequence_combine",
+  "python_for_in",
+  "python_for_enumerate",
+  "python_convert",
+  "python_builtin_zip",
+]);
+
 const numberShadow = (value: number) => ({ shadow: { type: "math_number", fields: { NUM: value } } });
 const textShadow = (value: string) => ({ shadow: { type: "text", fields: { TEXT: value } } });
 const booleanShadow = (value: "TRUE" | "FALSE") => ({ shadow: { type: "logic_boolean", fields: { BOOL: value } } });
@@ -1373,43 +1474,87 @@ export const toolbox: Blockly.utils.toolbox.ToolboxDefinition = {
       { kind: "block", type: "python_text_replace", inputs: { TEXT: textShadow("你好，世界"), OLD: textShadow("世界"), NEW: textShadow("Python") } },
       ...pythonSyntaxToolbox.text,
     ] },
-    { kind: "category", name: "集合", colour: "#7657b5", contents: [
+    { kind: "category", name: "列表", colour: collectionColours.list, contents: [
       toolboxSectionLabel("创建"),
       collectionToolboxBlock("list", [1, 2, 3]),
-      collectionToolboxBlock("tuple", [1, 2]),
-      collectionToolboxBlock("set", [1, 2]),
-      { kind: "block", type: "python_dynamic_dict", extraState: { itemCount: 1 }, inputs: { KEY0: textShadow("名称"), VALUE0: textShadow("示例") } },
-      toolboxSectionLabel("列表与元组"),
+      toolboxSectionLabel("修改"),
       { kind: "block", type: "python_list_method", fields: { METHOD: "append" }, inputs: { LIST: listShadow([1, 2]), ARG: numberShadow(3) } },
-      { kind: "block", type: "lists_length", inputs: { VALUE: listShadow([1, 2, 3]) } },
       { kind: "block", type: "python_list_insert", inputs: { LIST: listShadow([1, 3]), INDEX: numberShadow(1), VALUE: numberShadow(2) } },
       { kind: "block", type: "python_list_set", inputs: { LIST: listShadow([1, 2, 3]), INDEX: numberShadow(0), VALUE: numberShadow(10) } },
       { kind: "block", type: "python_list_slice_set", inputs: { LIST: listShadow([1, 2, 3, 4]), START: numberShadow(1), STOP: numberShadow(3), STEP: numberShadow(1), VALUES: listShadow([20, 30]) } },
       { kind: "block", type: "python_list_slice_delete", inputs: { LIST: listShadow([1, 2, 3, 4]), START: numberShadow(1), STOP: numberShadow(3), STEP: numberShadow(1) } },
-      { kind: "block", type: "python_sequence_query", fields: { METHOD: "count" }, inputs: { SEQUENCE: listShadow([1, 2, 1]), VALUE: numberShadow(1) } },
-      { kind: "block", type: "python_sequence_query", fields: { METHOD: "index" }, inputs: { SEQUENCE: tupleShadow([10, 20, 30]), VALUE: numberShadow(20) } },
-      { kind: "block", type: "python_sequence_combine", fields: { OPERATION: "concat" }, inputs: { SEQUENCE: listShadow([1, 2]), OTHER: listShadow([3, 4]) } },
+      toolboxSectionLabel("查询"),
+      { kind: "block", type: "lists_length", extraState: { palette: "list" }, inputs: { VALUE: listShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_index", extraState: { palette: "list" }, inputs: { OBJECT: listShadow([1, 2, 3]), INDEX: numberShadow(0) } },
+      { kind: "block", type: "python_slice", extraState: { palette: "list" }, inputs: { OBJECT: listShadow([1, 2, 3]), START: numberShadow(0), STOP: numberShadow(2), STEP: numberShadow(1) } },
+      { kind: "block", type: "python_sequence_query", extraState: { palette: "list" }, fields: { METHOD: "count" }, inputs: { SEQUENCE: listShadow([1, 2, 1]), VALUE: numberShadow(1) } },
       { kind: "block", type: "python_list_copy", inputs: { LIST: listShadow([1, 2, 3]) } },
-      { kind: "block", type: "python_index", inputs: { OBJECT: listShadow([1, 2, 3]), INDEX: numberShadow(0) } },
-      { kind: "block", type: "python_slice", inputs: { OBJECT: listShadow([1, 2, 3]), START: numberShadow(0), STOP: numberShadow(2), STEP: numberShadow(1) } },
-      toolboxSectionLabel("集合运算与修改"),
-      { kind: "block", type: "python_set_operation", fields: { OPERATION: "union" }, inputs: { LEFT: setShadow([1, 2]), RIGHT: setShadow([2, 3]) } },
-      { kind: "block", type: "python_set_relation", fields: { RELATION: "subset" }, inputs: { LEFT: setShadow([1, 2]), RIGHT: setShadow([1, 2, 3]) } },
-      { kind: "block", type: "python_set_method", fields: { METHOD: "add" }, inputs: { SET: setShadow([1, 2]), ARG: numberShadow(3) } },
-      { kind: "block", type: "python_set_copy", inputs: { SET: setShadow([1, 2, 3]) } },
-      toolboxSectionLabel("字典"),
-      { kind: "block", type: "python_dict_get", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称"), DEFAULT: textShadow("") } },
-      { kind: "block", type: "python_dict_set", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称"), VALUE: textShadow("新值") } },
-      { kind: "block", type: "python_dict_remove", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称") } },
-      { kind: "block", type: "python_dict_view", fields: { METHOD: "keys" }, inputs: { DICT: dictionaryShadow() } },
-      { kind: "block", type: "python_dict_method", fields: { METHOD: "update" }, inputs: { DICT: dictionaryShadow(), OTHER: dictionaryShadow() } },
-      { kind: "block", type: "python_dict_query", fields: { METHOD: "copy" }, inputs: { DICT: dictionaryShadow() } },
-      { kind: "block", type: "python_dict_fromkeys", inputs: { KEYS: textListShadow(["名称", "语言"]), VALUE: textShadow("") } },
-      { kind: "sep", gap: 20 },
+      toolboxSectionLabel("组合与遍历"),
+      { kind: "block", type: "python_sequence_combine", extraState: { palette: "list" }, fields: { OPERATION: "concat" }, inputs: { SEQUENCE: listShadow([1, 2]), OTHER: listShadow([3, 4]) } },
+      { kind: "block", type: "python_for_in", extraState: { palette: "list" }, inputs: { ITERABLE: listShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_for_enumerate", extraState: { palette: "list" }, inputs: { ITERABLE: listShadow([1, 2, 3]) } },
       toolboxSectionLabel("推导式"),
       { kind: "block", type: "python_list_comprehension", fields: { VAR: "项目" }, inputs: { EXPRESSION: { shadow: { type: "python_raw_expression", fields: { CODE: "项目 * 2" } } }, ITERABLE: listShadow([1, 2, 3]) } },
-      { kind: "block", type: "python_set_comprehension", fields: { VAR: "项目" }, inputs: { EXPRESSION: { shadow: { type: "python_raw_expression", fields: { CODE: "项目" } } }, ITERABLE: listShadow([1, 2, 2, 3]) } },
+    ] },
+    { kind: "category", name: "元组", colour: collectionColours.tuple, contents: [
+      toolboxSectionLabel("创建"),
+      collectionToolboxBlock("tuple", [1, 2]),
+      { kind: "block", type: "python_tuple_unpack", inputs: { VALUE: tupleShadow([1, 2]), TARGET: { block: { type: "python_unpack_many_target", extraState: { itemCount: 2 }, inputs: { TARGET0: { shadow: { type: "python_variable_target", fields: { VAR: toolboxVariableField("第一个值") } } }, TARGET1: { shadow: { type: "python_variable_target", fields: { VAR: toolboxVariableField("第二个值") } } } } } } } },
+      { kind: "block", type: "python_convert", extraState: { palette: "tuple" }, fields: { TYPE: "tuple" }, inputs: { VALUE: listShadow([1, 2]) } },
+      { kind: "block", type: "python_builtin_zip", extraState: { palette: "tuple" }, inputs: { A: listShadow([1, 2]), B: textListShadow(["甲", "乙"]) } },
+      toolboxSectionLabel("读取"),
+      { kind: "block", type: "python_index", extraState: { palette: "tuple" }, inputs: { OBJECT: tupleShadow([10, 20, 30]), INDEX: numberShadow(0) } },
+      { kind: "block", type: "python_slice", extraState: { palette: "tuple" }, inputs: { OBJECT: tupleShadow([10, 20, 30]), START: numberShadow(0), STOP: numberShadow(2), STEP: numberShadow(1) } },
+      { kind: "block", type: "python_slice_basic", inputs: { OBJECT: tupleShadow([10, 20, 30]), START: numberShadow(0), STOP: numberShadow(2) } },
+      { kind: "block", type: "python_length", extraState: { palette: "tuple" }, inputs: { VALUE: tupleShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_membership", extraState: { palette: "tuple" }, inputs: { ITEM: numberShadow(20), COLLECTION: tupleShadow([10, 20, 30]) } },
+      { kind: "block", type: "python_sequence_query", extraState: { palette: "tuple" }, fields: { METHOD: "count" }, inputs: { SEQUENCE: tupleShadow([1, 2, 1]), VALUE: numberShadow(1) } },
+      { kind: "block", type: "python_sequence_query", extraState: { palette: "tuple" }, fields: { METHOD: "index" }, inputs: { SEQUENCE: tupleShadow([10, 20, 30]), VALUE: numberShadow(20) } },
+      toolboxSectionLabel("组合与遍历"),
+      { kind: "block", type: "python_sequence_combine", extraState: { palette: "tuple" }, fields: { OPERATION: "concat" }, inputs: { SEQUENCE: tupleShadow([1, 2]), OTHER: tupleShadow([3, 4]) } },
+      { kind: "block", type: "python_for_in", extraState: { palette: "tuple" }, inputs: { ITERABLE: tupleShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_for_enumerate", extraState: { palette: "tuple" }, inputs: { ITERABLE: tupleShadow([1, 2, 3]) } },
+    ] },
+    { kind: "category", name: "字典", colour: collectionColours.dict, contents: [
+      toolboxSectionLabel("创建"),
+      { kind: "block", type: "python_dynamic_dict", extraState: { itemCount: 1 }, inputs: { KEY0: textShadow("名称"), VALUE0: textShadow("示例") } },
+      { kind: "block", type: "python_dict_from_pairs", inputs: { KEYS: textListShadow(["姓名", "语言"]), VALUES: textListShadow(["小明", "Python"]) } },
+      { kind: "block", type: "python_dict_fromkeys", inputs: { KEYS: textListShadow(["名称", "语言"]), VALUE: textShadow("") } },
+      { kind: "block", type: "python_dict_query", fields: { METHOD: "copy" }, inputs: { DICT: dictionaryShadow() } },
+      toolboxSectionLabel("读取"),
+      { kind: "block", type: "python_dict_get", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称"), DEFAULT: textShadow("") } },
+      { kind: "block", type: "python_dict_item", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称") } },
+      { kind: "block", type: "python_membership", extraState: { palette: "dict" }, inputs: { ITEM: textShadow("名称"), COLLECTION: dictionaryShadow() } },
+      { kind: "block", type: "python_dict_view", fields: { METHOD: "keys" }, inputs: { DICT: dictionaryShadow() } },
+      { kind: "block", type: "python_dict_view_list", fields: { VIEW: "keys" }, inputs: { DICT: dictionaryShadow() } },
+      { kind: "block", type: "python_length", extraState: { palette: "dict" }, inputs: { VALUE: dictionaryShadow() } },
+      toolboxSectionLabel("修改"),
+      { kind: "block", type: "python_dict_set", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称"), VALUE: textShadow("新值") } },
+      { kind: "block", type: "python_dict_remove", inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称") } },
+      { kind: "block", type: "python_dict_method", fields: { METHOD: "update" }, inputs: { DICT: dictionaryShadow(), OTHER: dictionaryShadow() } },
+      { kind: "block", type: "python_dict_merge", inputs: { LEFT: dictionaryShadow(), RIGHT: dictionaryShadow() } },
+      { kind: "block", type: "python_dict_query", fields: { METHOD: "pop" }, inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称") } },
+      { kind: "block", type: "python_dict_query", fields: { METHOD: "setdefault" }, inputs: { DICT: dictionaryShadow(), KEY: textShadow("名称"), DEFAULT: textShadow("未填写") } },
+      toolboxSectionLabel("遍历与推导"),
+      { kind: "block", type: "python_for_dict", inputs: { DICT: dictionaryShadow() } },
+      { kind: "block", type: "python_for_in", extraState: { palette: "dict" }, inputs: { ITERABLE: dictionaryShadow() } },
       { kind: "block", type: "python_dict_comprehension", fields: { VAR: "项目" }, inputs: { KEY: { shadow: { type: "python_raw_expression", fields: { CODE: "项目" } } }, VALUE: { shadow: { type: "python_raw_expression", fields: { CODE: "项目 * 2" } } }, ITERABLE: listShadow([1, 2, 3]) } },
+    ] },
+    { kind: "category", name: "集合", colour: collectionColours.set, contents: [
+      toolboxSectionLabel("创建"),
+      collectionToolboxBlock("set", [1, 2]),
+      { kind: "block", type: "python_convert", extraState: { palette: "set" }, fields: { TYPE: "set" }, inputs: { VALUE: listShadow([1, 2, 2, 3]) } },
+      { kind: "block", type: "python_set_copy", inputs: { SET: setShadow([1, 2, 3]) } },
+      toolboxSectionLabel("查询与运算"),
+      { kind: "block", type: "python_membership", extraState: { palette: "set" }, inputs: { ITEM: numberShadow(2), COLLECTION: setShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_length", extraState: { palette: "set" }, inputs: { VALUE: setShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_set_relation", fields: { RELATION: "subset" }, inputs: { LEFT: setShadow([1, 2]), RIGHT: setShadow([1, 2, 3]) } },
+      { kind: "block", type: "python_set_operation", fields: { OPERATION: "union" }, inputs: { LEFT: setShadow([1, 2]), RIGHT: setShadow([2, 3]) } },
+      toolboxSectionLabel("修改与遍历"),
+      { kind: "block", type: "python_set_method", fields: { METHOD: "add" }, inputs: { SET: setShadow([1, 2]), ARG: numberShadow(3) } },
+      { kind: "block", type: "python_for_in", extraState: { palette: "set" }, inputs: { ITERABLE: setShadow([1, 2, 3]) } },
+      toolboxSectionLabel("推导式"),
+      { kind: "block", type: "python_set_comprehension", fields: { VAR: "项目" }, inputs: { EXPRESSION: { shadow: { type: "python_raw_expression", fields: { CODE: "项目" } } }, ITERABLE: listShadow([1, 2, 2, 3]) } },
     ] },
     { kind: "category", name: "内置函数", colour: "#397bc0", contents: [...pythonSyntaxToolbox.builtins] },
     { kind: "category", name: "变量", categorystyle: "variable_category", custom: "USED_VARIABLES" },

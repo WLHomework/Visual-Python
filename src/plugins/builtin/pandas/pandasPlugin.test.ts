@@ -156,6 +156,8 @@ describe("Pandas plugin", () => {
       "查看数据",
       "选择与整理",
     ]);
+    expect(pandasCategory.colour).toBe("#4c8b6b");
+    expect(categories.every((entry: Record<string, any>) => entry.colour === pandasCategory.colour)).toBe(true);
     expect(categories.every((entry: Record<string, any>) => entry.contents?.every((item: Record<string, any>) => item.kind === "block"))).toBe(true);
   });
 

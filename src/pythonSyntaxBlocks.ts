@@ -798,9 +798,10 @@ function inferPythonContainerKind(block: Blockly.Block | null, visited = new Set
   }
   if (["python_list_collection", "lists_create_with", "lists_repeat", "python_list_copy", "python_list_comprehension", "python_builtin_sorted", "python_random_sample", "python_os_listdir", "python_directory_find"].includes(block.type)) return "list";
   if (block.type === "python_string_method" && block.getFieldValue("METHOD") === "split") return "list";
+  if (block.type === "python_dict_view_list") return "list";
   if (block.type === "python_tuple") return "tuple";
   if (["python_set", "python_set_copy", "python_set_operation", "python_set_comprehension"].includes(block.type)) return "set";
-  if (["python_dict", "python_dynamic_dict", "python_dict_fromkeys", "python_dict_comprehension"].includes(block.type)) return "dict";
+  if (["python_dict", "python_dynamic_dict", "python_dict_fromkeys", "python_dict_merge", "python_dict_from_pairs", "python_dict_comprehension"].includes(block.type)) return "dict";
   if (block.type === "python_dict_query" && block.getFieldValue("METHOD") === "copy") return "dict";
   if (block.type === "python_sequence_combine") return inferPythonContainerKind(block.getInputTargetBlock("SEQUENCE"), visited);
   if (block.type === "python_convert") {
@@ -851,6 +852,7 @@ const containerInputExpectations: Record<string, ContainerInputExpectation[]> = 
   python_set_method: [{ input: "SET", kinds: ["set"], label: "集合操作" }],
   python_set_copy: [{ input: "SET", kinds: ["set"], label: "集合复制" }],
   python_dict_get: [{ input: "DICT", kinds: ["dict"], label: "字典操作" }],
+  python_dict_item: [{ input: "DICT", kinds: ["dict"], label: "字典按键读取" }],
   python_dict_set: [{ input: "DICT", kinds: ["dict"], label: "字典操作" }],
   python_dict_remove: [{ input: "DICT", kinds: ["dict"], label: "字典操作" }],
   python_dict_view: [{ input: "DICT", kinds: ["dict"], label: "字典操作" }],
@@ -860,6 +862,16 @@ const containerInputExpectations: Record<string, ContainerInputExpectation[]> = 
   ],
   python_dict_query: [{ input: "DICT", kinds: ["dict"], label: "字典操作" }],
   python_dict_fromkeys: [{ input: "KEYS", kinds: ["list", "tuple", "set"], label: "键集合" }],
+  python_dict_view_list: [{ input: "DICT", kinds: ["dict"], label: "字典视图" }],
+  python_for_dict: [{ input: "DICT", kinds: ["dict"], label: "字典遍历" }],
+  python_dict_merge: [
+    { input: "LEFT", kinds: ["dict"], label: "合并左侧" },
+    { input: "RIGHT", kinds: ["dict"], label: "合并右侧" },
+  ],
+  python_dict_from_pairs: [
+    { input: "KEYS", kinds: ["list", "tuple"], label: "键列表" },
+    { input: "VALUES", kinds: ["list", "tuple"], label: "值列表" },
+  ],
 };
 
 export function getPythonCollectionTypeWarning(block: Blockly.Block): string | null {
@@ -880,6 +892,45 @@ export function getPythonCollectionTypeWarning(block: Blockly.Block): string | n
     } else if (block.getFieldValue("OPERATION") === "repeat" && right) {
       messages.push(`重复次数需要数字，当前连接的是${pythonContainerLabels[right]}`);
     }
+  }
+
+  const unhashableKind = (child: Blockly.Block | null) => {
+    const kind = inferPythonContainerKind(child);
+    return kind === "list" || kind === "dict" || kind === "set" ? kind : null;
+  };
+  const inputNames = (pattern: RegExp) =>
+    block.inputList.map((input) => input.name).filter((name) => pattern.test(name));
+
+  if (block.type === "python_index" || block.type === "python_slice") {
+    if (inferPythonContainerKind(block.getInputTargetBlock("OBJECT")) === "set") {
+      messages.push("集合是无序的，不能按位置索引或切片");
+    }
+  }
+
+  if (block.type === "python_index_target" || block.type === "python_slice_target") {
+    if (inferPythonContainerKind(block.getInputTargetBlock("OBJECT")) === "tuple") {
+      messages.push("元组不可修改；请先转换成列表");
+    }
+  }
+
+  const setItemInputs = block.type === "python_sequence_collection" && block.getFieldValue("KIND") === "set"
+    ? inputNames(/^ITEM\d+$/)
+    : block.type === "python_set" ? ["A", "B"] : [];
+  for (const name of setItemInputs) {
+    const kind = unhashableKind(block.getInputTargetBlock(name));
+    if (kind) messages.push(`集合元素必须可哈希，当前连接的是${pythonContainerLabels[kind]}`);
+  }
+
+  const keyInputs = block.type === "python_dynamic_dict"
+    ? inputNames(/^KEY\d+$/)
+    : block.type === "python_dict" ? ["K1", "K2"] : [];
+  for (const name of keyInputs) {
+    const kind = unhashableKind(block.getInputTargetBlock(name));
+    if (kind) messages.push(`字典键必须可哈希，当前连接的是${pythonContainerLabels[kind]}`);
+  }
+
+  if (block.type === "python_dict_fromkeys" && unhashableKind(block.getInputTargetBlock("VALUE"))) {
+    messages.push("fromkeys 的默认值是可变的，所有键会共享同一个对象");
   }
 
   return messages.length ? `${[...new Set(messages)].join("；")}。` : null;

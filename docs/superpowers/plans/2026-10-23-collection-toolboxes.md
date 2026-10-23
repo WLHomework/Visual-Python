@@ -1,7 +1,8 @@
 # 元组 / 字典 / 集合工具箱实施计划
 
-> **状态**：规划完成，待实施。  
-> **日期**：2026-10-23  
+> **状态**：T1～T8 已完成（2026-10-23）。ESP8266 真机 11/11 通过；S3 / WROOM 无硬件，明确未验证。
+> **日期**：2026-10-23
+> **进展**：T1 工具箱解析器已支持 `fromCategory`；T2 已把 Python 工具箱拆成列表 / 元组 / 字典 / 集合四个分类，并让四个分类的积木与分类色一致；T3 已加入 P0 新积木与两个增强；T4 已补齐容器类型推断与中文告警；T5 已给 S3 / WROOM / 8266 加入四个容器分类；T6 已加入 `python_dict_item` 和 `python_tuple_unpack`；T7 已写 `collections_smoke.py` 并更新硬件文档；T8 已在 ESP8266 上跑通 11/11，并发现/修复元组带步长切片不兼容问题；`npm test` 为 119 个测试文件 / 1240 个测试全部通过。
 > **范围**：普通 Python 工作台，以及 ESP32-S3、ESP32-WROOM、ESP8266-ESP12E 三套硬件工具箱。  
 > **用户决定**：按「列表 / 元组 / 字典 / 集合」四个一级分类拆分；三块硬件板卡也一起加。  
 > **基线**：`npx tsc --noEmit` 通过；`npm test` 为 119 个测试文件 / 1227 个测试全部通过；`npm run build` 通过；Rust 硬件测试 72 项通过。  
@@ -97,7 +98,8 @@
 - 现有「集合」分类改名为「列表」，只放列表专属积木和预配置的通用积木。
 - 新增「元组」「字典」「集合」三个分类，放在「列表」之后。
 - 「标准库 > 集合工具」继续保留 `Counter`、`defaultdict`、`deque`、`namedtuple`，与数学集合分类不是一回事。建议把该小节标题改成「collections 容器」，避免和新的「集合」分类混淆。
-- 分类颜色可以四类都用 `#7657b5`；如果想区分，可做同色系微调，但同一积木的块颜色不变。
+- 四个分类使用不同色条，并且分类内的积木使用同一个颜色：列表 `#7657b5`、元组 `#2e8b57`、字典 `#b8860b`、集合 `#c04a6a`。通用积木（索引、切片、长度、包含、遍历等）通过工具箱条目的 `extraState.palette` 换色，不复制积木类型；`python_sequence_collection` 则跟随 `KIND` 自动换色。
+- 这些颜色要避开硬件现有分类色（见 `hardwareColours`），后续给三块板卡加分类时直接复用 `baseCategoryColour("元组")` 等，不要另写一套。
 
 ### 2.2 硬件工作台
 
@@ -114,6 +116,10 @@
 - `src/hardware/toolboxes/esp32-wroom.ts`
 - `src/hardware/toolboxes/esp8266-esp12e.ts`
 - 对应测试文件
+
+### 2.3 插件分类（本次附带修复）
+
+Matplotlib、Pandas、NumPy 的插件工具箱是「根分类 → 子分类」结构。子分类的色条统一使用插件主色（分别为 `#c45a4a`、`#4c8b6b`、`#3d7fb5`），与插件积木颜色一致；不再为每个子分类单独指定颜色。
 
 ---
 
@@ -492,6 +498,8 @@ export type ToolboxItemSpec =
 6. 分类顺序：列表 → 元组 → 字典 → 集合。
 7. 通用积木允许在多个分类重复出现；Python 工具箱不走唯一性检查。
 8. 旧分类名「集合」不再存在，但积木类型不变，旧工程加载不受影响。
+9. 通用积木颜色通过工具箱条目的 `extraState: { palette: "list" | "tuple" | "dict" | "set" }` 指定；`installCollectionPalette` 在 `loadExtraState` 时调用 `setColour`，因此同一个 `python_index` 在元组分类里显示绿色，在字典分类里显示金色，不需要复制积木类型。
+10. `python_sequence_collection` 不写 palette，颜色由 `KIND` 决定；列表分类的长度仍用 `lists_length`，但要加 `extraState: { palette: "list" }` 并纳入 `installCollectionPalette`，否则 Blockly 内置列表样式无法跟随分类色。
 
 ### 6.3 硬件通用分类
 
@@ -508,7 +516,7 @@ export const setCategory = (extra: ToolboxItemSpec[] = []): ToolboxCategorySpec 
 - 颜色继续用 `baseCategoryColour("列表")`，不要继续引用已不存在的「集合」。
 - 现有 `listCategory()` 里的 `"python_index"` 改成 `{ type: "python_index", fromCategory: "列表" }`。
 - 新增分类里所有重复的通用块都带 `fromCategory`，包括但不限于 `python_index`、`python_slice`、`python_length`、`python_membership`、`python_for_in`、`python_for_enumerate`、`python_sequence_query`、`python_sequence_combine`、`python_builtin_zip`。
-- `python_convert` 已经在 `textCategory()` 出现；字典/集合分类需要转换时，用 `{ type: "python_convert", fromCategory: "文本" }`，不要重复匹配。
+- `python_convert` 已经由硬件 `textCategory()` 暴露（基础条目在「输入输出」）；字典/集合分类需要转换时，用 `{ type: "python_convert", fromCategory: "输入输出" }`，不要重复匹配。
 - 如果某个类型只在某一个分类出现，可以继续用字符串写法；不要为了统一而给所有条目都加 `fromCategory`。
 - 硬件分类不直接引用 Python 的 `toolbox` 对象，仍走 `ToolboxItemSpec` 白名单。
 
@@ -614,6 +622,8 @@ setCategory(),
 
 ### T1：扩展工具箱解析器（前置）
 
+**状态**：已完成（2026-10-23）。`ToolboxItemSpec` 已增加 `fromCategory`；解析器只在指定基础分类里找条目，缺失分类报错，硬件类型忽略该字段；新增 3 个测试，全量 119 文件 / 1230 用例通过。
+
 **文件**
 
 - `src/hardware/toolboxes/types.ts`
@@ -643,10 +653,13 @@ setCategory(),
 
 ### T2：拆分 Python 四分类
 
+**状态**：已完成（2026-10-23）。Python 工具箱已拆成「列表 / 元组 / 字典 / 集合」四个一级分类；旧分类「集合」改为「列表」；新增分类先只放已有积木和预配置；四个分类使用不同色条（`#7657b5` / `#2e8b57` / `#b8860b` / `#c04a6a`），通用积木通过 `extraState.palette` 与分类同色，分类内所有积木颜色一致。另外把 Matplotlib / Pandas / NumPy 的嵌套子分类色统一为各自插件主色。为了保持现有硬件工具箱可用，`common.ts` 中重复的 `python_index`、`python_convert` 已改用 `fromCategory`（分别指向「列表」「输入输出」）；`listCategory` 的颜色改为取「列表」。全量 119 文件 / 1233 用例通过。
+
 **文件**
 
 - `src/pythonBlocks.ts`
 - `src/pythonBlocks.test.ts`
+- `src/hardware/toolboxes/common.ts`（只改重复条目的 `fromCategory` 和列表颜色）
 
 **步骤**
 
@@ -667,6 +680,8 @@ setCategory(),
 ---
 
 ### T3：P0 新积木与增强
+
+**状态**：已完成（2026-10-23）。已新增 `python_dict_view_list`、`python_for_dict`、`python_dict_merge`、`python_dict_from_pairs`；`python_dict_remove` 增加“不存在时忽略/报错”；`python_set_method` 增加三种原地集合运算。生成器、工具箱条目、输出类型和参数可见性测试均已补齐。
 
 **文件**
 
@@ -697,6 +712,8 @@ setCategory(),
 
 ### T4：类型推断与告警
 
+**状态**：已完成（2026-10-23）。已识别新字典积木的容器类型；新增字典视图/遍历/合并/双列表建字典的输入约束；增加集合索引/切片、元组修改、集合元素不可哈希、字典键不可哈希、`fromkeys` 可变默认值告警。错误类型连接会进入问题面板。
+
 **文件**
 
 - `src/pythonSyntaxBlocks.ts`
@@ -719,6 +736,8 @@ setCategory(),
 ---
 
 ### T5：硬件四分类
+
+**状态**：已完成（2026-10-23）。S3 / WROOM / 8266 均在「列表」后加入「元组 / 字典 / 集合」；分类通过 `fromCategory` 克隆带 palette 的 Python 工具箱条目，分类色与积木色一致；硬件白名单已同步，字典合并 `dict |` 只保留在桌面版。三块板卡的分类顺序、容器积木、颜色一致性和搜索索引均有测试。
 
 **文件**
 
@@ -748,6 +767,8 @@ setCategory(),
 
 ### T6：P1 积木（可选，但建议本次一起）
 
+**状态**：已完成（2026-10-23）。新增 `python_dict_item`（按键直接读取）和 `python_tuple_unpack`（复用解包目标，支持 2～3 个目标和星号剩余项）；`python_set_from` 按计划复用现有 `python_convert`，没有新增重复类型；两者已进入 Python 与三块硬件板卡的对应分类。
+
 **文件**
 
 - `src/pythonBlocks.ts`
@@ -771,6 +792,8 @@ setCategory(),
 ---
 
 ### T7：烟测脚本与文档
+
+**状态**：已完成（2026-10-23）。新增 `docs/hardware/collections_smoke.py`，覆盖元组、字典、集合的核心运行时行为；`docs/hardware/README.md` 增加运行方式、预期输出与三块板卡的“未执行”记录表；`docs/hardware-blocks.md` 更新条目数与验证状态。脚本已在本机 CPython 跑通，但**尚未在 MicroPython 真机运行**。
 
 **文件**
 
@@ -804,6 +827,8 @@ setCategory(),
 ---
 
 ### T8：真机验收
+
+**状态**：已完成（2026-10-23）。ESP8266-ESP12E（COM3，v1.29.0）运行 `collections_smoke.py`：**11/11 PASS**，元组、字典、集合全部通过。首次运行发现元组/字符串的扩展切片（`[::2]`）在 ESP8266 上抛 `NotImplementedError`，已把硬件元组切片改为不带步长的 `python_slice_basic`；列表扩展切片仍正常。S3 / WROOM 手头没有硬件，记录为**未验证**，不冒充通过。
 
 **步骤**
 

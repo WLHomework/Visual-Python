@@ -4,7 +4,8 @@ import type { HardwareBoardId } from "../firmwareCatalog";
 /** 工具箱里的一项：积木类型（字符串）、带字段的选择器、小节标题或分隔。 */
 export type ToolboxItemSpec =
   | string
-  | { type: string; fields?: Record<string, string | number> }
+  /** `fromCategory` 限定从基础工具箱的哪个分类取条目；同名类型在多个分类重复时使用。 */
+  | { type: string; fields?: Record<string, string | number>; fromCategory?: string }
   | { label: string }
   | { sep: true };
 

@@ -16,6 +16,7 @@ import type { BoardToolboxSpec } from "./types";
 type ResolvedCategory = {
   kind?: string;
   name?: string;
+  colour?: string | number;
   contents?: Array<Record<string, unknown>>;
 };
 type ResolvedDefinition = { kind?: string; contents: ResolvedCategory[] };
@@ -98,7 +99,7 @@ const boards: BoardCase[] = [
 ];
 
 const expectedCategoryNames = (storage: boolean) => [
-  "输入/输出", "控制", "逻辑", "数学", "文本", "列表", "赋值", "变量", "函数", "调用", "串口", "通信", "网络",
+  "输入/输出", "控制", "逻辑", "数学", "文本", "列表", "元组", "字典", "集合", "赋值", "变量", "函数", "调用", "串口", "通信", "网络",
   ...(storage ? ["存储"] : []),
   "传感器", "执行器", "灯光", "显示",
 ];
@@ -119,6 +120,33 @@ const allowedPythonTypes = new Set([
   "python_list_set",
   "python_list_insert",
   "python_length",
+  "python_builtin_zip",
+  "python_slice_basic",
+  "python_membership",
+  "python_sequence_query",
+  "python_sequence_combine",
+  "python_tuple_unpack",
+  "python_for_in",
+  "python_for_enumerate",
+  "python_dynamic_dict",
+  "python_dict_from_pairs",
+  "python_dict_fromkeys",
+  "python_dict_query",
+  "python_dict_get",
+  "python_dict_item",
+  "python_dict_view",
+  "python_dict_view_list",
+  "python_dict_set",
+  "python_dict_remove",
+  "python_dict_method",
+  "python_dict_merge",
+  "python_for_dict",
+  "python_dict_comprehension",
+  "python_set_copy",
+  "python_set_method",
+  "python_set_operation",
+  "python_set_relation",
+  "python_set_comprehension",
   "python_assign_target",
   "python_augmented_assign",
   "python_function_structured",
@@ -165,8 +193,52 @@ for (const board of boards) {
       for (const type of types.filter((value) => value.startsWith("python_"))) {
         expect(allowedPythonTypes.has(type), `不应出现的积木：${type}`).toBe(true);
       }
-      for (const type of ["python_dict_get", "python_try_except", "python_lambda", "python_import", "python_slice"]) {
+      for (const type of ["python_try_except", "python_lambda", "python_import"]) {
         expect(types).not.toContain(type);
+      }
+      expect(types).toContain("python_dict_get");
+      expect(types).toContain("python_slice_basic");
+    });
+
+    it("offers tuple, dictionary and set categories", () => {
+      const definition = resolveBoard(board.boardId);
+      const names = definition.contents.map((category) => category.name);
+      for (const name of ["列表", "元组", "字典", "集合"]) {
+        expect(names).toContain(name);
+      }
+      const types = new Set(blockTypes(definition));
+      expect(types.has("python_dict_view_list")).toBe(true);
+      expect(types.has("python_for_dict")).toBe(true);
+      expect(types.has("python_set_method")).toBe(true);
+      expect(types.has("python_dict_merge")).toBe(false);
+    });
+
+    it("uses the category colour for every container block", () => {
+      setActiveHardwareBoard(board.boardId);
+      const workspace = new Blockly.Workspace();
+      try {
+        const definition = resolveBoard(board.boardId);
+        for (const name of ["列表", "元组", "字典", "集合"]) {
+          const category = definition.contents.find((entry) => entry.name === name)!;
+          const colour = String(category.colour).toLowerCase();
+          for (const entry of category.contents ?? []) {
+            if (entry.kind !== "block") continue;
+            const block = Blockly.serialization.blocks.append({
+              type: String(entry.type),
+              fields: entry.fields as Record<string, unknown> | undefined,
+              inputs: entry.inputs as Record<string, unknown> | undefined,
+              extraState: entry.extraState,
+            } as unknown as Blockly.serialization.blocks.State, workspace);
+            try {
+              expect(block.getColour().toLowerCase(), `${name}/${String(entry.type)}`).toBe(colour);
+            } finally {
+              block.dispose(false);
+            }
+          }
+        }
+      } finally {
+        workspace.dispose();
+        setActiveHardwareBoard(undefined);
       }
     });
 

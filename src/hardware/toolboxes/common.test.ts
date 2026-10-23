@@ -7,12 +7,15 @@ import {
   baseCategoryColour,
   callsCategory,
   controlCategory,
+  dictCategory,
   functionCategory,
   listCategory,
   logicCategory,
   mathCategory,
   serialCategory,
+  setCategory,
   textCategory,
+  tupleCategory,
   variablesCategory,
 } from "./common";
 import { hardwareBlockEntries } from "./hardwareEntries";
@@ -33,6 +36,9 @@ const categorySpecs: ToolboxCategorySpec[] = [
   mathCategory(),
   textCategory(),
   listCategory(),
+  tupleCategory(),
+  dictCategory(),
+  setCategory(),
   assignmentCategory(),
   variablesCategory,
   functionCategory(),
@@ -53,6 +59,10 @@ afterEach(() => {
 describe("common 分类声明", () => {
   it("reuses the colour of the same-named Python category", () => {
     expect(baseCategoryColour("输入输出")).toBe("#2f9e8f");
+    expect(baseCategoryColour("列表")).toBe("#7657b5");
+    expect(baseCategoryColour("元组")).toBe("#2e8b57");
+    expect(baseCategoryColour("字典")).toBe("#b8860b");
+    expect(baseCategoryColour("集合")).toBe("#c04a6a");
 
     const classicStyles = (Blockly.Themes.Classic as unknown as { categoryStyles: Record<string, { colour: string | number }> }).categoryStyles;
     expect(baseCategoryColour("循环")).toBe(String(classicStyles.loop_category.colour));
@@ -64,7 +74,7 @@ describe("common 分类声明", () => {
     const definition = resolveCategories(categorySpecs);
 
     expect(definition.contents.map((category) => category.name)).toEqual([
-      "控制", "逻辑", "数学", "文本", "列表", "赋值", "变量", "函数", "调用", "串口",
+      "控制", "逻辑", "数学", "文本", "列表", "元组", "字典", "集合", "赋值", "变量", "函数", "调用", "串口",
     ]);
     for (const category of definition.contents) {
       // 「变量」「调用」是动态分类：整体复制基础工具箱的分类，没有静态条目，颜色由 categorystyle 决定。

@@ -27,12 +27,24 @@ const tupleEntry: ToolboxEntry = {
 };
 const countEntry: ToolboxEntry = { kind: "block", type: "python_sequence_query", fields: { METHOD: "count" } };
 const indexEntry: ToolboxEntry = { kind: "block", type: "python_sequence_query", fields: { METHOD: "index" } };
+const listIndexEntry: ToolboxEntry = {
+  kind: "block",
+  type: "python_index",
+  inputs: { OBJECT: { shadow: { type: "text", fields: { TEXT: "列表" } } } },
+};
+const tupleIndexEntry: ToolboxEntry = {
+  kind: "block",
+  type: "python_index",
+  inputs: { OBJECT: { shadow: { type: "text", fields: { TEXT: "元组" } } } },
+};
 const variablesCategory = { kind: "category", name: "变量", categorystyle: "variable_category", custom: "USED_VARIABLES" };
 
 const baseToolbox = {
   kind: "categoryToolbox",
   contents: [
     { kind: "category", name: "逻辑", colour: "#111111", contents: [logicCompare, controlsIf] },
+    { kind: "category", name: "列表", colour: "#222222", contents: [listIndexEntry] },
+    { kind: "category", name: "元组", colour: "#222222", contents: [tupleIndexEntry] },
     { kind: "category", name: "集合", colour: "#222222", contents: [listEntry, tupleEntry, countEntry, indexEntry] },
     variablesCategory,
   ],
@@ -87,6 +99,35 @@ describe("resolveBoardToolbox", () => {
     ]).contents;
 
     expect(contentsOf(category)).toEqual([listEntry]);
+  });
+
+  it("uses fromCategory to choose one of several same-type base entries", () => {
+    const [category] = resolve([
+      { id: "tuple", name: "元组", colour: "#222222", items: [{ type: "python_index", fromCategory: "元组" }] },
+    ]).contents;
+
+    expect(contentsOf(category)).toEqual([tupleIndexEntry]);
+  });
+
+  it("rejects a missing fromCategory and still rejects ambiguous selectors", () => {
+    expect(() =>
+      resolve([
+        { id: "tuple", name: "元组", colour: "#222222", items: [{ type: "python_index", fromCategory: "不存在" }] },
+      ]),
+    ).toThrow(/不存在的基础分类「不存在」/);
+
+    // 没有 fromCategory 时，python_index 在「列表」「元组」各有一条，必须继续报歧义。
+    expect(() =>
+      resolve([{ id: "index", name: "索引", colour: "#222222", items: ["python_index"] }]),
+    ).toThrow(/匹配到多个条目/);
+  });
+
+  it("ignores fromCategory for hardware selectors", () => {
+    const [category] = resolve([
+      { id: "io", name: "输入输出", colour: "#333333", items: [{ type: "hardware_pin_write", fromCategory: "不存在" }] },
+    ]).contents;
+
+    expect(contentsOf(category)).toEqual([pinWrite]);
   });
 
   it("requires fields when the source has several entries of the same type", () => {

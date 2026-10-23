@@ -6,7 +6,7 @@ import { setActiveHardwareBoard } from "./hardware/hardwareBlocks";
 
 const variableFields: Record<string, string[]> = {
   variables_set: ["VAR"], variables_get: ["VAR"],
-  python_input_assign: ["VAR"], python_input_many_assign: ["VAR0", "VAR1", "VAR2"], python_csv_read: ["VAR"], python_for_in: ["VAR"], python_for_enumerate: ["INDEX", "VALUE"], python_for_else: ["VAR"],
+  python_input_assign: ["VAR"], python_input_many_assign: ["VAR0", "VAR1", "VAR2"], python_csv_read: ["VAR"], python_for_in: ["VAR"], python_for_enumerate: ["INDEX", "VALUE"], python_for_else: ["VAR"], python_for_dict: ["KEY", "VALUE"],
   python_try_except: ["ALIAS"], python_try_full: ["ALIAS"], python_with: ["ALIAS"],
   python_variable_target: ["VAR"], python_annotated_assign: ["VAR"], python_walrus: ["VAR"],
   python_generator_expression: ["VAR"], python_with_two: ["ALIAS1", "ALIAS2"],
@@ -284,6 +284,7 @@ describe("Python block generators", () => {
   it("generates indexing and slicing", () => {
     expect(generatePython(state({ type: "python_index", inputs: { OBJECT: { block: { type: "python_raw_expression", fields: { CODE: "items" } } }, INDEX: number(0) } }))).toContain("items[0]");
     expect(generatePython(state({ type: "python_slice", inputs: { OBJECT: { block: { type: "python_raw_expression", fields: { CODE: "items" } } }, START: number(1), STOP: number(5), STEP: number(2) } }))).toContain("items[1:5:2]");
+    expect(generatePython(state({ type: "python_slice_basic", inputs: { OBJECT: { block: { type: "python_raw_expression", fields: { CODE: "items" } } }, START: number(1), STOP: number(5) } }))).toBe("items[1:5]\n");
   });
 
   it("generates calls, attributes and methods", () => {
@@ -651,9 +652,9 @@ describe("Python block generators", () => {
   });
 
   it("provides complete comprehension, generator and decorator templates", () => {
-    expect(generatePython(state(configuredToolboxBlock("集合", "python_list_comprehension")))).toBe("[项目 * 2 for 项目 in [1, 2, 3]]\n");
+    expect(generatePython(state(configuredToolboxBlock("列表", "python_list_comprehension")))).toBe("[项目 * 2 for 项目 in [1, 2, 3]]\n");
     expect(generatePython(state(configuredToolboxBlock("集合", "python_set_comprehension")))).toBe("{项目 for 项目 in [1, 2, 2, 3]}\n");
-    expect(generatePython(state(configuredToolboxBlock("集合", "python_dict_comprehension")))).toBe("{项目: 项目 * 2 for 项目 in [1, 2, 3]}\n");
+    expect(generatePython(state(configuredToolboxBlock("字典", "python_dict_comprehension")))).toBe("{项目: 项目 * 2 for 项目 in [1, 2, 3]}\n");
     expect(generatePython(state(configuredToolboxBlock("函数", "python_generator_expression")))).toBe("(项目 * 2 for 项目 in [1, 2, 3])\n");
 
     const decoratorCode = generatePython(state(configuredToolboxBlock("函数", "python_decorated_definition")));
@@ -666,6 +667,51 @@ describe("Python block generators", () => {
     const textCategory = (toolbox as any).contents.find((item: any) => item.name === "文本");
     expect(inputOutput.contents.some((item: any) => item.type === "text")).toBe(false);
     expect(textCategory.contents.some((item: any) => item.type === "text")).toBe(true);
+  });
+
+  it("splits container blocks into four top-level categories", () => {
+    const categories = (toolbox as any).contents;
+    const containerNames = categories
+      .map((item: any) => item.name)
+      .filter((name: string) => ["列表", "元组", "字典", "集合"].includes(name));
+    expect(containerNames).toEqual(["列表", "元组", "字典", "集合"]);
+    const containerColours = containerNames.map(
+      (name: string) => categories.find((item: any) => item.name === name).colour,
+    );
+    expect(new Set(containerColours).size).toBe(4);
+
+    const typesOf = (name: string) => (categories.find((item: any) => item.name === name).contents as any[])
+      .filter((item) => item.kind === "block")
+      .map((item) => item.type);
+    expect(typesOf("列表")).toEqual(expect.arrayContaining(["python_list_method", "lists_length", "python_list_comprehension"]));
+    expect(typesOf("元组")).toEqual(expect.arrayContaining(["python_sequence_collection", "python_tuple_unpack", "python_sequence_query", "python_length"]));
+    expect(typesOf("字典")).toEqual(expect.arrayContaining(["python_dynamic_dict", "python_dict_get", "python_dict_item", "python_dict_set", "python_dict_view_list", "python_for_dict", "python_dict_merge", "python_dict_from_pairs"]));
+    expect(typesOf("集合")).toEqual(expect.arrayContaining(["python_set_operation", "python_set_method", "python_set_comprehension"]));
+  });
+
+  it("uses the category colour for container blocks", () => {
+    const categories = (toolbox as any).contents;
+    for (const categoryName of ["列表", "元组", "字典", "集合"]) {
+      const category = categories.find((item: any) => item.name === categoryName);
+      for (const item of category.contents.filter((entry: any) => entry.kind === "block")) {
+        const { kind: _kind, ...state } = structuredClone(item);
+        const workspace = new Blockly.Workspace();
+        const block = Blockly.serialization.blocks.append(state, workspace);
+        expect(block.getColour(), `${categoryName}/${item.type}`).toBe(category.colour);
+        workspace.dispose();
+      }
+    }
+  });
+
+  it("colours sequence collections by their KIND", () => {
+    const category = (toolbox as any).contents.find((item: any) => item.name === "元组");
+    const item = category.contents.find((entry: any) => entry.type === "python_sequence_collection");
+    for (const [kind, colour] of [["list", "#7657b5"], ["tuple", "#2e8b57"], ["set", "#c04a6a"]] as const) {
+      const workspace = new Blockly.Workspace();
+      const block = Blockly.serialization.blocks.append({ ...structuredClone(item), fields: { KIND: kind } }, workspace);
+      expect(block.getColour()).toBe(colour);
+      workspace.dispose();
+    }
   });
 
   it("generates core math, random and JSON standard library blocks", () => {
@@ -944,12 +990,35 @@ describe("Python block generators", () => {
     expect(generatePython(state({ type: "python_set_operation", fields: { OPERATION: "intersection" }, inputs: { LEFT: expression("left"), RIGHT: expression("right") } }))).toBe("left.intersection(right)\n");
     expect(generatePython(state({ type: "python_set_relation", fields: { RELATION: "proper_subset" }, inputs: { LEFT: expression("left"), RIGHT: expression("right") } }))).toBe("left < right\n");
     expect(generatePython(state({ type: "python_set_method", fields: { METHOD: "discard" }, inputs: { SET: expression("items"), ARG: number(2) } }))).toBe("items.discard(2)\n");
+    expect(generatePython(state({ type: "python_set_method", fields: { METHOD: "intersection_update" }, inputs: { SET: expression("items"), ARG: expression("other") } }))).toBe("items.intersection_update(other)\n");
+    expect(generatePython(state({ type: "python_set_method", fields: { METHOD: "difference_update" }, inputs: { SET: expression("items"), ARG: expression("other") } }))).toBe("items.difference_update(other)\n");
+    expect(generatePython(state({ type: "python_set_method", fields: { METHOD: "symmetric_difference_update" }, inputs: { SET: expression("items"), ARG: expression("other") } }))).toBe("items.symmetric_difference_update(other)\n");
     expect(generatePython(state({ type: "python_set_method", fields: { METHOD: "clear" }, inputs: { SET: expression("items") } }))).toBe("items.clear()\n");
     expect(generatePython(state({ type: "python_set_copy", inputs: { SET: expression("items") } }))).toBe("items.copy()\n");
     expect(generatePython(state({ type: "python_dict_get", inputs: { DICT: expression("data"), KEY: text("name") } }))).toBe("data.get('name')\n");
+    expect(generatePython(state({ type: "python_dict_item", inputs: { DICT: expression("data"), KEY: text("name") } }))).toBe("data['name']\n");
+    expect(generatePython(state({ type: "python_tuple_unpack", inputs: {
+      VALUE: expression("(1, 2)"),
+      TARGET: { block: { type: "python_unpack_many_target", extraState: { itemCount: 2 }, inputs: {
+        TARGET0: { shadow: { type: "python_variable_target", fields: { VAR: "第一个值" } } },
+        TARGET1: { shadow: { type: "python_variable_target", fields: { VAR: "第二个值" } } },
+      } } },
+    } }))).toBe("第一个值, 第二个值 = (1, 2)\n");
+    expect(generatePython(state({ type: "python_tuple_unpack", inputs: {
+      VALUE: expression("(1, 2, 3)"),
+      TARGET: { block: { type: "python_unpack_many_target", extraState: { itemCount: 2 }, inputs: {
+        TARGET0: { shadow: { type: "python_variable_target", fields: { VAR: "第一个值" } } },
+        TARGET1: { block: { type: "python_starred_target", inputs: { TARGET: { shadow: { type: "python_variable_target", fields: { VAR: "其余值" } } } } } },
+      } } },
+    } }))).toBe("第一个值, *其余值 = (1, 2, 3)\n");
     expect(generatePython(state({ type: "python_dict_set", inputs: { DICT: expression("data"), KEY: text("name"), VALUE: text("Ada") } }))).toBe("data['name'] = 'Ada'\n");
     expect(generatePython(state({ type: "python_dict_remove", inputs: { DICT: expression("data"), KEY: text("name") } }))).toBe("data.pop('name', None)\n");
+    expect(generatePython(state({ type: "python_dict_remove", fields: { MISSING: "error" }, inputs: { DICT: expression("data"), KEY: text("name") } }))).toBe("del data['name']\n");
     expect(generatePython(state({ type: "python_dict_view", fields: { METHOD: "keys" }, inputs: { DICT: expression("data") } }))).toBe("data.keys()\n");
+    expect(generatePython(state({ type: "python_dict_view_list", fields: { VIEW: "items" }, inputs: { DICT: expression("data") } }))).toBe("list(data.items())\n");
+    expect(generatePython(state({ type: "python_for_dict", fields: { KEY: "key", VALUE: "value" }, inputs: { DICT: expression("data"), DO: { block: { type: "python_print", inputs: { VALUE: expression("key") } } } } }))).toBe("for key, value in data.items():\n  print(key)\n");
+    expect(generatePython(state({ type: "python_dict_merge", inputs: { LEFT: expression("left"), RIGHT: expression("right") } }))).toBe("left | right\n");
+    expect(generatePython(state({ type: "python_dict_from_pairs", inputs: { KEYS: expression("keys"), VALUES: expression("values") } }))).toBe("dict(zip(keys, values))\n");
     expect(generatePython(state({ type: "python_dict_method", fields: { METHOD: "update" }, inputs: { DICT: expression("data"), OTHER: expression("defaults") } }))).toBe("data.update(defaults)\n");
     expect(generatePython(state({ type: "python_dict_method", fields: { METHOD: "clear" }, inputs: { DICT: expression("data") } }))).toBe("data.clear()\n");
     expect(generatePython(state({ type: "python_dict_query", fields: { METHOD: "setdefault" }, inputs: { DICT: expression("data"), KEY: text("name"), DEFAULT: text("Ada") } }))).toBe("data.setdefault('name', 'Ada')\n");
@@ -1000,6 +1069,8 @@ describe("Python block generators", () => {
     expect(setMethod.getInput("ARG")!.isVisible()).toBe(true);
     setMethod.setFieldValue("clear", "METHOD");
     expect(setMethod.getInput("ARG")!.isVisible()).toBe(false);
+    setMethod.setFieldValue("intersection_update", "METHOD");
+    expect(setMethod.getInput("ARG")!.isVisible()).toBe(true);
 
     const dictMethod = workspace.newBlock("python_dict_method");
     expect(dictMethod.getInput("OTHER")!.isVisible()).toBe(true);
@@ -1025,6 +1096,12 @@ describe("Python block generators", () => {
     expect(workspace.newBlock("python_list_comprehension").outputConnection?.getCheck()).toEqual(["Array"]);
     expect(workspace.newBlock("python_set_comprehension").outputConnection?.getCheck()).toEqual(["PythonSet"]);
     expect(workspace.newBlock("python_dict_comprehension").outputConnection?.getCheck()).toEqual(["PythonDict"]);
+    expect(workspace.newBlock("python_dict_view_list").outputConnection?.getCheck()).toEqual(["Array"]);
+    expect(workspace.newBlock("python_dict_merge").outputConnection?.getCheck()).toEqual(["PythonDict"]);
+    expect(workspace.newBlock("python_dict_from_pairs").outputConnection?.getCheck()).toEqual(["PythonDict"]);
+    expect(workspace.newBlock("python_dict_item").outputConnection?.getCheck()).toBeNull();
+    expect(workspace.newBlock("python_for_dict").outputConnection).toBeNull();
+    expect(workspace.newBlock("python_tuple_unpack").outputConnection).toBeNull();
     expect(workspace.newBlock("python_sequence_combine").outputConnection?.getCheck()).toEqual(["Array", "PythonTuple"]);
     expect(workspace.newBlock("python_builtin_sorted").outputConnection?.getCheck()).toEqual(["Array"]);
     expect(workspace.newBlock("python_random_sample").outputConnection?.getCheck()).toEqual(["Array"]);
@@ -1059,6 +1136,66 @@ describe("Python block generators", () => {
 
     combine.setFieldValue("repeat", "OPERATION");
     expect(getPythonCollectionTypeWarning(combine)).toBe("重复次数需要数字，当前连接的是元组。");
+    workspace.dispose();
+  });
+
+  it("warns about dictionary operations, set indexing and unhashable values", () => {
+    const workspace = new Blockly.Workspace();
+    const converted = (kind: string) => {
+      const block = workspace.newBlock("python_convert");
+      block.setFieldValue(kind, "TYPE");
+      return block;
+    };
+
+    const merge = workspace.newBlock("python_dict_merge");
+    merge.getInput("LEFT")!.connection!.connect(converted("list").outputConnection!);
+    expect(getPythonCollectionTypeWarning(merge)).toBe("合并左侧需要字典，当前连接的是列表。");
+
+    const forDict = workspace.newBlock("python_for_dict");
+    forDict.getInput("DICT")!.connection!.connect(converted("list").outputConnection!);
+    expect(getPythonCollectionTypeWarning(forDict)).toBe("字典遍历需要字典，当前连接的是列表。");
+
+    const viewList = workspace.newBlock("python_dict_view_list");
+    viewList.getInput("DICT")!.connection!.connect(converted("list").outputConnection!);
+    expect(getPythonCollectionTypeWarning(viewList)).toBe("字典视图需要字典，当前连接的是列表。");
+
+    const dictItem = workspace.newBlock("python_dict_item");
+    dictItem.getInput("DICT")!.connection!.connect(converted("list").outputConnection!);
+    expect(getPythonCollectionTypeWarning(dictItem)).toBe("字典按键读取需要字典，当前连接的是列表。");
+
+    const fromPairs = workspace.newBlock("python_dict_from_pairs");
+    fromPairs.getInput("KEYS")!.connection!.connect(converted("set").outputConnection!);
+    expect(getPythonCollectionTypeWarning(fromPairs)).toBe("键列表需要列表或元组，当前连接的是集合。");
+
+    const index = workspace.newBlock("python_index");
+    const setValue = workspace.newBlock("python_sequence_collection");
+    setValue.setFieldValue("set", "KIND");
+    index.getInput("OBJECT")!.connection!.connect(setValue.outputConnection!);
+    expect(getPythonCollectionTypeWarning(index)).toBe("集合是无序的，不能按位置索引或切片。");
+
+    const target = workspace.newBlock("python_index_target");
+    const tupleValue = workspace.newBlock("python_sequence_collection");
+    tupleValue.setFieldValue("tuple", "KIND");
+    target.getInput("OBJECT")!.connection!.connect(tupleValue.outputConnection!);
+    expect(getPythonCollectionTypeWarning(target)).toBe("元组不可修改；请先转换成列表。");
+
+    const setCollection = workspace.newBlock("python_sequence_collection");
+    setCollection.setFieldValue("set", "KIND");
+    setCollection.getInput("ITEM0")!.connection!.connect(workspace.newBlock("python_list_collection").outputConnection!);
+    expect(getPythonCollectionTypeWarning(setCollection)).toBe("集合元素必须可哈希，当前连接的是列表。");
+
+    const dictionary = workspace.newBlock("python_dynamic_dict");
+    dictionary.getInput("KEY0")!.connection!.connect(workspace.newBlock("python_list_collection").outputConnection!);
+    expect(getPythonCollectionTypeWarning(dictionary)).toBe("字典键必须可哈希，当前连接的是列表。");
+
+    const fromKeys = workspace.newBlock("python_dict_fromkeys");
+    fromKeys.getInput("VALUE")!.connection!.connect(workspace.newBlock("python_list_collection").outputConnection!);
+    expect(getPythonCollectionTypeWarning(fromKeys)).toBe("fromkeys 的默认值是可变的，所有键会共享同一个对象。");
+
+    const validMerge = workspace.newBlock("python_dict_merge");
+    validMerge.getInput("LEFT")!.connection!.connect(workspace.newBlock("python_dynamic_dict").outputConnection!);
+    validMerge.getInput("RIGHT")!.connection!.connect(workspace.newBlock("python_dynamic_dict").outputConnection!);
+    expect(getPythonCollectionTypeWarning(validMerge)).toBeNull();
     workspace.dispose();
   });
 
