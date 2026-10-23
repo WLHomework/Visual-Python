@@ -1,5 +1,5 @@
 import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ArrowDown, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, RefreshCw, SearchCheck, Send, Settings, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -17,7 +17,7 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { createCodeChangePreview } from "./agentV2/codeChanges";
 import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiFollowUpSuggestion, AiTaskChangeSnapshot } from "./agentV2/types";
-import { getAiAgentPermissionMode, getAiReasoningEffort, saveAiReasoningEffort, type AiAgentPermissionMode, type AiReasoningEffort } from "./aiConfig";
+import { getAiAgentPermissionMode, getAiModelConfig, getAiReasoningEffort, saveAiAgentPermissionMode, saveAiReasoningEffort, type AiAgentPermissionMode, type AiReasoningEffort } from "./aiConfig";
 import { MAX_IMAGE_COUNT, pickImageFiles, prepareImageFile, restorePersistedImageAttachment, toPersistedImageAttachment, validateImageFiles, type AiImageAttachment, type PersistedAiImageAttachment } from "./aiImageAttachments";
 import { buildAiConversationHistory } from "./aiConversationContext";
 import { CONVERSATION_STORES_PREFIX, conversationStoreKey, conversationStoreTimestamp, isStorageQuotaError } from "./sessionPersistence";
@@ -158,6 +158,10 @@ const reasoningEffortLabels: Record<AiReasoningEffort, string> = {
   medium: "中",
   high: "高",
   xhigh: "极高",
+};
+const permissionModeLabels: Record<AiAgentPermissionMode, string> = {
+  auto: "完全权限",
+  confirm: "操作前确认",
 };
 
 function createConversationId() {
@@ -1366,9 +1370,10 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [dropDepth, setDropDepth] = useState(0);
   const [agentMode, setAgentMode] = useState<AiAgentMode>("agent");
-  const [agentModeMenuOpen, setAgentModeMenuOpen] = useState(false);
+  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<AiReasoningEffort>(() => getAiReasoningEffort());
-  const [reasoningEffortMenuOpen, setReasoningEffortMenuOpen] = useState(false);
+  const [permissionMode, setPermissionMode] = useState<AiAgentPermissionMode>(() => getAiAgentPermissionMode());
+  const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
   const [conversationPersistenceFailed, setConversationPersistenceFailed] = useState(false);
@@ -1388,14 +1393,15 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const conversationMenuRef = useRef<HTMLDivElement>(null);
-  const agentModeMenuRef = useRef<HTMLDivElement>(null);
-  const agentModeTriggerRef = useRef<HTMLButtonElement>(null);
-  const reasoningEffortMenuRef = useRef<HTMLDivElement>(null);
-  const reasoningEffortTriggerRef = useRef<HTMLButtonElement>(null);
+  const composerMenuRef = useRef<HTMLDivElement>(null);
+  const composerMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const permissionMenuRef = useRef<HTMLDivElement>(null);
+  const permissionMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const runsRef = useRef(runs);
   const stickToLatestRef = useRef(true);
   const running = runs.some((run) => run.status === "running");
   const awaitingClarification = runs.at(-1)?.status === "done" && Boolean(runs.at(-1)?.result?.clarification);
+  const modelName = getAiModelConfig().model;
 
   const addImageFiles = async (files: readonly File[]) => {
     if (!files.length) return;
@@ -1610,14 +1616,21 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   }, [conversationMenuOpen]);
 
   useEffect(() => {
-    if (!agentModeMenuOpen) return;
+    if (!composerMenuOpen && !permissionMenuOpen) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!agentModeMenuRef.current?.contains(event.target as Node)) setAgentModeMenuOpen(false);
+      if (composerMenuOpen && !composerMenuRef.current?.contains(event.target as Node)) setComposerMenuOpen(false);
+      if (permissionMenuOpen && !permissionMenuRef.current?.contains(event.target as Node)) setPermissionMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      setAgentModeMenuOpen(false);
-      agentModeTriggerRef.current?.focus();
+      if (composerMenuOpen) {
+        setComposerMenuOpen(false);
+        composerMenuTriggerRef.current?.focus();
+      }
+      if (permissionMenuOpen) {
+        setPermissionMenuOpen(false);
+        permissionMenuTriggerRef.current?.focus();
+      }
     };
     document.addEventListener("pointerdown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
@@ -1625,30 +1638,12 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       document.removeEventListener("pointerdown", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [agentModeMenuOpen]);
-
-  useEffect(() => {
-    if (!reasoningEffortMenuOpen) return;
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!reasoningEffortMenuRef.current?.contains(event.target as Node)) setReasoningEffortMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setReasoningEffortMenuOpen(false);
-      reasoningEffortTriggerRef.current?.focus();
-    };
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [reasoningEffortMenuOpen]);
+  }, [composerMenuOpen, permissionMenuOpen]);
 
   useEffect(() => {
     if (running) {
-      setAgentModeMenuOpen(false);
-      setReasoningEffortMenuOpen(false);
+      setComposerMenuOpen(false);
+      setPermissionMenuOpen(false);
     }
   }, [running]);
 
@@ -1725,7 +1720,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         ...(initialPlan.length ? { initialPlan } : {}),
         onActivity: (activity) => updateActivity(id, activity),
         onProgress: (progress) => updateRun(id, { progress }),
-        permissionMode: getAiAgentPermissionMode(),
+        permissionMode,
         onPermissionRequest: (request) => new Promise<boolean>((resolve) => {
           let settled = false;
           const finish = (approved: boolean) => {
@@ -1950,33 +1945,37 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
           </div>)}
         </div>}
         {attachmentError && <div className="ai-composer-attachment-error" role="alert"><AlertCircle size={13}/><span>{attachmentError}</span></div>}
-        <textarea ref={promptRef} value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} onPaste={handleComposerPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); running ? enqueuePrompt() : void runAgent(); } }} placeholder={running ? "输入后续指令..." : awaitingClarification ? "输入序号或补充要求..." : agentMode === "plan" ? "描述需要规划的任务..." : "输入任务..."} aria-label="AI 指令" rows={2}/>
+        <textarea ref={promptRef} value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} onPaste={handleComposerPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); running ? enqueuePrompt() : void runAgent(); } }} placeholder={running ? "输入后续指令..." : awaitingClarification ? "输入序号或补充要求..." : agentMode === "plan" ? "描述需要规划的任务..." : "输入任务..."} aria-label="AI 指令" title={`${contextName} · ${lineCount} 行代码`} rows={1}/>
         <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={handleImageInputChange}/>
         <div className="ai-composer-footer">
-          <div className="ai-agent-mode-menu" ref={agentModeMenuRef}>
-            <button ref={agentModeTriggerRef} type="button" className={`ai-agent-mode-trigger ${agentModeMenuOpen ? "open" : ""}`} onClick={() => { setReasoningEffortMenuOpen(false); setAgentModeMenuOpen((open) => !open); }} onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setReasoningEffortMenuOpen(false); setAgentModeMenuOpen(true); } }} title={agentMode === "plan" ? "只读分析并制定计划" : "直接执行任务"} aria-label={`智能体模式：${agentMode === "plan" ? "计划" : "智能体"}`} aria-haspopup="menu" aria-expanded={agentModeMenuOpen}>
-              {agentMode === "plan" ? <ListChecks size={13}/> : <Sparkles size={13}/>}<span>{agentMode === "plan" ? "计划" : "智能体"}</span><ChevronDown size={13}/>
+          <button type="button" className="ai-composer-add" onClick={() => imageInputRef.current?.click()} disabled={!canAddAiAttachments(pendingAttachments)} title="添加图片" aria-label="添加图片"><Plus size={18}/></button>
+          <div className="ai-composer-menu" ref={permissionMenuRef}>
+            <button ref={permissionMenuTriggerRef} type="button" className={`ai-composer-control ai-composer-permission ${permissionMenuOpen ? "open" : ""}`} onClick={() => { setComposerMenuOpen(false); setPermissionMenuOpen((open) => !open); }} title={`工具权限：${permissionModeLabels[permissionMode]}`} aria-label={`工具权限：${permissionModeLabels[permissionMode]}`} aria-haspopup="menu" aria-expanded={permissionMenuOpen}>
+              <ShieldCheck size={14}/><span>{permissionModeLabels[permissionMode]}</span><ChevronDown size={12}/>
             </button>
-            {agentModeMenuOpen && <div className="ai-agent-mode-options" role="menu" aria-label="选择智能体模式">
-              <button type="button" role="menuitemradio" aria-checked={agentMode === "agent"} className={agentMode === "agent" ? "selected" : ""} onClick={() => { setAgentMode("agent"); setAgentModeMenuOpen(false); requestAnimationFrame(() => agentModeTriggerRef.current?.focus()); }}><Sparkles size={14}/><span>智能体</span>{agentMode === "agent" && <Check size={13}/>}</button>
-              <button type="button" role="menuitemradio" aria-checked={agentMode === "plan"} className={agentMode === "plan" ? "selected" : ""} onClick={() => { setAgentMode("plan"); setAgentModeMenuOpen(false); requestAnimationFrame(() => agentModeTriggerRef.current?.focus()); }}><ListChecks size={14}/><span>计划</span>{agentMode === "plan" && <Check size={13}/>}</button>
+            {permissionMenuOpen && <div className="ai-composer-popover ai-composer-permission-popover" role="menu" aria-label="选择工具权限">
+              <span className="ai-composer-menu-heading">工具权限</span>
+              {(["auto", "confirm"] as AiAgentPermissionMode[]).map((mode) => <button type="button" role="menuitemradio" aria-checked={permissionMode === mode} className={permissionMode === mode ? "selected" : ""} key={mode} onClick={() => { setPermissionMode(saveAiAgentPermissionMode(mode)); setPermissionMenuOpen(false); requestAnimationFrame(() => permissionMenuTriggerRef.current?.focus()); }}><ShieldCheck size={14}/><span>{permissionModeLabels[mode]}</span>{permissionMode === mode && <Check size={13}/>}</button>)}
             </div>}
           </div>
-          <div className="ai-agent-mode-menu ai-reasoning-effort-menu" ref={reasoningEffortMenuRef}>
-            <button ref={reasoningEffortTriggerRef} type="button" className={`ai-agent-mode-trigger ai-reasoning-effort-trigger ${reasoningEffortMenuOpen ? "open" : ""}`} onClick={() => { setAgentModeMenuOpen(false); setReasoningEffortMenuOpen((open) => !open); }} title={`思考强度：${reasoningEffortLabels[reasoningEffort]}`} aria-label={`思考强度：${reasoningEffortLabels[reasoningEffort]}`} aria-haspopup="menu" aria-expanded={reasoningEffortMenuOpen}>
-              <span>{reasoningEffortLabels[reasoningEffort]}</span><ChevronDown size={13}/>
-            </button>
-            {reasoningEffortMenuOpen && <div className="ai-agent-mode-options ai-reasoning-effort-options" role="menu" aria-label="选择思考强度">
-              <span className="ai-reasoning-effort-heading">思考强度</span>
-              {(Object.keys(reasoningEffortLabels) as AiReasoningEffort[]).map((effort) => <button type="button" role="menuitemradio" aria-checked={reasoningEffort === effort} className={reasoningEffort === effort ? "selected" : ""} key={effort} onClick={() => { setReasoningEffort(saveAiReasoningEffort(effort)); setReasoningEffortMenuOpen(false); requestAnimationFrame(() => reasoningEffortTriggerRef.current?.focus()); }}><span>{reasoningEffortLabels[effort]}</span>{reasoningEffort === effort && <Check size={13}/>}</button>)}
-            </div>}
-          </div>
-          <span className="ai-composer-scope" title={`${contextName} · ${lineCount} 行代码`}><Code2 size={14}/><span>{contextName}</span><small>{lineCount} 行</small></span>
           <span className="ai-composer-footer-spacer"/>
-          <button type="button" className="ai-composer-attach" onClick={() => imageInputRef.current?.click()} disabled={!canAddAiAttachments(pendingAttachments)} title="添加图片" aria-label="添加图片"><ImagePlus size={16}/></button>
+          <div className="ai-composer-menu ai-composer-model-menu" ref={composerMenuRef}>
+            <button ref={composerMenuTriggerRef} type="button" className={`ai-composer-control ai-composer-model ${composerMenuOpen ? "open" : ""}`} onClick={() => { setPermissionMenuOpen(false); setComposerMenuOpen((open) => !open); }} title={`${modelName} · ${agentMode === "plan" ? "计划模式" : "智能体模式"} · 思考强度${reasoningEffortLabels[reasoningEffort]}`} aria-label={`模型与思考强度：${modelName}，${reasoningEffortLabels[reasoningEffort]}`} aria-haspopup="menu" aria-expanded={composerMenuOpen}>
+              {agentMode === "plan" ? <ListChecks size={14}/> : <Sparkles size={14}/>}<span className="ai-composer-model-name">{modelName}</span><small>{reasoningEffortLabels[reasoningEffort]}</small><ChevronDown size={12}/>
+            </button>
+            {composerMenuOpen && <div className="ai-composer-popover ai-composer-model-popover" role="menu" aria-label="模型、模式与思考强度">
+              <span className="ai-composer-menu-heading">工作模式</span>
+              <button type="button" role="menuitemradio" aria-checked={agentMode === "agent"} className={agentMode === "agent" ? "selected" : ""} onClick={() => { setAgentMode("agent"); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><Sparkles size={14}/><span>智能体</span>{agentMode === "agent" && <Check size={13}/>}</button>
+              <button type="button" role="menuitemradio" aria-checked={agentMode === "plan"} className={agentMode === "plan" ? "selected" : ""} onClick={() => { setAgentMode("plan"); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><ListChecks size={14}/><span>计划</span>{agentMode === "plan" && <Check size={13}/>}</button>
+              <span className="ai-composer-menu-heading">思考强度</span>
+              {(Object.keys(reasoningEffortLabels) as AiReasoningEffort[]).map((effort) => <button type="button" role="menuitemradio" aria-checked={reasoningEffort === effort} className={`ai-composer-menu-plain ${reasoningEffort === effort ? "selected" : ""}`} key={effort} onClick={() => { setReasoningEffort(saveAiReasoningEffort(effort)); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><span>{reasoningEffortLabels[effort]}</span>{reasoningEffort === effort && <Check size={13}/>}</button>)}
+              <span className="ai-composer-popover-separator"/>
+              <button type="button" className="ai-composer-settings" onClick={() => { setComposerMenuOpen(false); onOpenSettings(); }}><Settings size={14}/><span>模型设置</span></button>
+            </div>}
+          </div>
           {running
-            ? <button className="stop" onClick={stopAgent} title="停止智能体" aria-label="停止智能体"><Square size={13}/></button>
-            : <button onClick={() => void runAgent()} disabled={!canSubmitAiPrompt(prompt, pendingAttachments)} title="发送" aria-label="发送"><Send size={16}/></button>}
+            ? <button type="button" className="ai-composer-send stop" onClick={stopAgent} title="停止智能体" aria-label="停止智能体"><Square size={13}/></button>
+            : <button type="button" className="ai-composer-send" onClick={() => void runAgent()} disabled={!canSubmitAiPrompt(prompt, pendingAttachments)} title="发送" aria-label="发送"><ArrowUp size={18}/></button>}
         </div>
       </div>
     </div>
