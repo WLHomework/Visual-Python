@@ -31,7 +31,7 @@ describe("workbench profiles", () => {
     expect(isHardwareWorkbench(python)).toBe(false);
 
     const hardware = getWorkbenchProfile("esp32-wroom");
-    expect(hardware.features).toMatchObject({ manim: false, pythonEnvironment: false, renderPreview: false, devicePanel: true, stdin: false, projectResources: false, multipleDocuments: false });
+    expect(hardware.features).toMatchObject({ manim: false, pythonEnvironment: false, renderPreview: false, devicePanel: true, stdin: false, projectResources: false, multipleDocuments: true });
     expect(isHardwareWorkbench(hardware)).toBe(true);
     expect(hardware.boardId).toBe("esp32-wroom");
   });

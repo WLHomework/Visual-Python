@@ -23,7 +23,7 @@ describe("硬件命令错误格式化", () => {
   });
 
   it("把首次握手失败转换成 MicroPython 刷写引导", () => {
-    const hint = "设备上没有可用的 MicroPython。请到 设置 → 硬件设备 刷写固件后再连接。";
+    const hint = "设备上没有可用的 MicroPython。请到 设备 → 固件刷写 刷写固件后再连接。";
     expect(
       hardwareErrorMessage({
         code: "protocol",

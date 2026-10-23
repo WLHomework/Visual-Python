@@ -1,6 +1,7 @@
 use crate::hardware::errors::HardwareError;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// 统一字节流抽象：串口、以及测试用的模拟设备都实现它。
@@ -64,6 +65,8 @@ pub struct ReadUntilOptions<'a> {
     pub cancel: Option<&'a AtomicBool>,
     /// true：把读到的字节放进返回值；false：通过 `on_chunk` 按到达顺序流出，返回值不含数据。
     pub keep_all: bool,
+    /// 运行期间待发送到设备的程序输入；读循环空闲时把它写进串口。
+    pub stdin: Option<&'a Mutex<VecDeque<u8>>>,
 }
 
 impl<'a> ReadUntilOptions<'a> {
@@ -74,6 +77,7 @@ impl<'a> ReadUntilOptions<'a> {
             overall_timeout: None,
             cancel: None,
             keep_all: true,
+            stdin: None,
         }
     }
 
@@ -94,6 +98,11 @@ impl<'a> ReadUntilOptions<'a> {
 
     pub fn keep_all(mut self, keep_all: bool) -> Self {
         self.keep_all = keep_all;
+        self
+    }
+
+    pub fn stdin(mut self, stdin: Option<&'a Mutex<VecDeque<u8>>>) -> Self {
+        self.stdin = stdin;
         self
     }
 }
@@ -177,6 +186,16 @@ pub fn read_until<T: Transport + ?Sized>(
             if flush > 0 {
                 let chunk: Vec<u8> = pending.drain(..flush).collect();
                 on_chunk(&chunk);
+            }
+        }
+
+        // 程序运行时把界面输入的字节写进串口；没有输入就继续读设备输出。
+        if let Some(stdin) = options.stdin {
+            let mut queue = stdin.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !queue.is_empty() {
+                let data: Vec<u8> = queue.drain(..).collect();
+                drop(queue);
+                transport.write_all(&data)?;
             }
         }
 

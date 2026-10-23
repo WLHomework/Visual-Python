@@ -88,7 +88,7 @@ export function hardwareErrorCode(error: unknown): string | null {
   return null;
 }
 
-export const hardwareMicroPythonSetupHint = "设备上没有可用的 MicroPython。请到 设置 → 硬件设备 刷写固件后再连接。";
+export const hardwareMicroPythonSetupHint = "设备上没有可用的 MicroPython。请到 设备 → 固件刷写 刷写固件后再连接。";
 
 export function hardwareErrorMessage(error: unknown): string {
   let message: string;

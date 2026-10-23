@@ -384,7 +384,7 @@ ESP8266 当前工具箱没有 UART 积木，不建议为了这一组单独开放
 
 ## 8. 技术落地顺序
 
-> 执行状态（2026-10-22）：H0 基础设施、H1 P0-A、H2 P0-B、H3 P1-A、H4 P1-B、H5 P1-C、P2 追加批次与 H6 板卡下放已静态完成（新增按键、PIR、光敏、土壤、继电器、直流电机、NeoPixel 填充、LCD1602、BH1750、存储/串口/SPI、网络增强、DS18B20、BMP280、SHT30、MPU6050、TM1637、OLED 画线/矩形、步进电机、DS3231、VL53L0X、OLED 进度条、HTTP 下载/状态码、MQTT 连接状态、红外 NEC、设备文件大小、RFID 读卡、SD 卡挂载、网页服务器、定时器、BLE GATT；既有音调已带持续时间）。P0 通用包已进入 S3/WROOM/ESP8266 三块板卡，P1/P2 仍只进 S3；S3 的 M3/M5 已由用户真机通过，ESP8266 的 H6.4 最小项（LED/ADC/PWM/I2C 扫描）已于 2026-10-23 通过，WROOM 待复核。详见 `2026-10-22-hardware-block-expansion-plan.md`。
+> 执行状态（2026-10-22）：H0 基础设施、H1 P0-A、H2 P0-B、H3 P1-A、H4 P1-B、H5 P1-C、P2 追加批次与 H6 板卡下放已静态完成（新增按键、PIR、光敏、土壤、继电器、直流电机、NeoPixel 填充、LCD1602、BH1750、存储/串口/SPI、网络增强、DS18B20、BMP280、SHT30、MPU6050、TM1637、OLED 画线/矩形、步进电机、DS3231、VL53L0X、OLED 进度条、HTTP 下载/状态码、MQTT 连接状态、红外 NEC、设备文件大小、RFID 读卡、SD 卡挂载、网页服务器、定时器、BLE GATT；既有音调已带持续时间）。P0 通用包已进入 S3/WROOM/ESP8266 三块板卡，P1/P2 仍只进 S3；S3 的 M3/M5 已由用户真机通过，ESP8266 的 H6.4 最小项（LED/ADC/PWM/I2C 扫描）已于 2026-10-23 通过；WROOM 因无硬件按“例外关闭”，未验证、不标通过。详见 `2026-10-22-hardware-block-expansion-plan.md`。
 >
 > H7 收尾（2026-10-22）：硬件积木与驱动清单见 `docs/hardware-blocks.md`；H6.4 的接线、冒烟脚本与记录表见 `docs/hardware/README.md`。S3 已 154 条、超过 150 条自定上限，下一周期优先分类折叠/搜索优化与 H6.4 真机。
 

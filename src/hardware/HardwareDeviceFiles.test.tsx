@@ -62,10 +62,12 @@ describe("hardware device files view", () => {
     expect(busy.match(/disabled=""/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
   });
 
-  it("读取到的文件内容显示在只读预览里", () => {
+  it("读取文件后显示代码容器与可拖动分隔条，加载时用同色占位", () => {
     const html = render({ device, preview: { path: "/main.py", content: "while True:\n    pass\n" } });
     expect(html).toContain("/main.py");
-    expect(html).toContain("while True:");
     expect(html).toContain("关闭文件内容");
+    expect(html).toContain('aria-label="调整文件列表高度"');
+    expect(html).toContain('title="拖动调整文件列表与代码区域的比例"');
+    expect(html).toContain("hardware-files-code-loading");
   });
 });

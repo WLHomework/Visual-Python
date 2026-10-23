@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { listHardwareSerialPorts, type HardwareSerialPort } from "./hardwareApi";
+import { listHardwareSerialPorts, sendHardwareSerial, type HardwareSerialPort } from "./hardwareApi";
 import type { HardwareBoardId } from "./firmwareCatalog";
 import {
   connectHardwareDevice,
@@ -47,8 +47,8 @@ import {
 export type HardwareDeviceOptions = {
   /** 当前 MicroPython 工作台选定的板卡；连接时用它做握手校验。 */
   boardId: HardwareBoardId | undefined;
-  /** 设备输出（stdout）转发给控制台，让用户不必盯着面板也能看到。 */
-  onOutput?: (stream: DeviceLogStream, text: string) => void;
+  /** 设备输出（stdout）和用户发送的内容转发给控制台，让用户不必盯着面板也能看到。 */
+  onOutput?: (stream: DeviceLogStream | "input", text: string) => void;
   onNotice?: (message: string) => void;
   onRunFinished?: (payload: HardwareRunFinishedPayload) => void;
 };
@@ -83,6 +83,8 @@ export type HardwareDeviceController = {
   runAndWait: (code: string, timeoutMs?: number) => Promise<{ accepted: HardwareRunAccepted | null; outcome: HardwareRunFinishedPayload | null }>;
   stop: () => Promise<void>;
   reset: () => Promise<void>;
+  /** 发送到设备：空闲执行 REPL，运行中写入程序 stdin。 */
+  sendSerial: (text: string, lineEnding?: "crlf" | "lf" | "none") => Promise<string | null>;
   clearLog: () => void;
   clearError: () => void;
 };
@@ -108,6 +110,11 @@ export function useHardwareDevice(options: HardwareDeviceOptions): HardwareDevic
   const waiters = useRef(new Map<number, (payload: HardwareRunFinishedPayload) => void>());
   const finishedRuns = useRef(new Map<number, HardwareRunFinishedPayload>());
   const disposed = useRef(false);
+  // 轮询串口时读最新状态：连接中/运行中不重新枚举，避免和会话抢串口或打断下拉框。
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
 
   const pushLog = useCallback((stream: DeviceLogStream, text: string) => {
     if (disposed.current || !text) return;
@@ -231,21 +238,54 @@ export function useHardwareDevice(options: HardwareDeviceOptions): HardwareDevic
     })();
   }, []);
 
-  const refreshPorts = useCallback(async () => {
+  const loadPorts = useCallback(async (quiet: boolean) => {
     try {
       const next = await listHardwareSerialPorts();
-      setPorts(next);
-      setPortName((current) => (current && next.some((port) => port.portName === current) ? current : next[0]?.portName ?? ""));
+      // 列表没变化时保留原数组，避免每 2 秒触发一次无意义的重渲染、把打开的下拉框关掉。
+      setPorts((current) => (
+        current.length === next.length
+        && current.every((port, index) => port.portName === next[index].portName && port.label === next[index].label)
+          ? current
+          : next
+      ));
+      setPortName((current) => {
+        if (current && next.some((port) => port.portName === current)) return current;
+        // 没有用户选择时优先 USB 串口：COM1 往往是主板自带串口，不是开发板。
+        const preferred = next.find((port) => port.portType === "usb") ?? next[0];
+        return preferred?.portName ?? "";
+      });
     } catch (caught) {
-      setError(hardwareErrorMessage(caught));
+      // 后台轮询失败不打扰用户；手动刷新/首次枚举才把错误显示出来。
+      if (!quiet) setError(hardwareErrorMessage(caught));
     }
   }, []);
 
-  // 选定板卡（切到硬件目标）时自动枚举串口，用户不必先点一次「刷新」。
+  const refreshPorts = useCallback(() => loadPorts(false), [loadPorts]);
+
+  /**
+   * 串口热插拔：未连接且空闲时每 2 秒重新枚举，并在窗口重新获得焦点/切回前台时立即刷新。
+   * 连接期间不轮询，避免与设备会话抢串口；断开后下一轮会自动恢复。
+   */
   useEffect(() => {
     if (!boardId) return;
-    void refreshPorts();
-  }, [boardId, refreshPorts]);
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (phaseRef.current !== "idle" || snapshotRef.current) return;
+      void loadPorts(true);
+    };
+    void loadPorts(true);
+    const timer = window.setInterval(tick, 2000);
+    window.addEventListener("focus", tick);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", tick);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [boardId, loadPorts]);
 
   const connect = useCallback(async () => {
     if (!portName) {
@@ -292,6 +332,26 @@ export function useHardwareDevice(options: HardwareDeviceOptions): HardwareDevic
   const refreshFiles = useCallback(() => loadFiles(filesPath), [filesPath, loadFiles]);
   const openDirectory = useCallback((path: string) => loadFiles(path), [loadFiles]);
   const goToParentDirectory = useCallback(() => loadFiles(deviceParentPath(filesPath)), [filesPath, loadFiles]);
+
+  const sendSerial = useCallback(async (text: string, lineEnding: "crlf" | "lf" | "none" = "crlf") => {
+    // 控制台里直接回显用户这一行，而不是“已发送”的提示；运行中的 stdin 也不会有设备回显。
+    optionsRef.current.onOutput?.("input", text.endsWith("\n") ? text : `${text}\n`);
+    try {
+      const output = await sendHardwareSerial(text, lineEnding);
+      if (output) {
+        const line = output.endsWith("\n") ? output : `${output}\n`;
+        // 空闲时命令是走 Raw REPL 执行的，输出只从命令返回值回来，不会走设备事件。
+        optionsRef.current.onOutput?.("stdout", line);
+        pushLog("stdout", line);
+      }
+      return output;
+    } catch (caught) {
+      const message = hardwareErrorMessage(caught);
+      setError(message);
+      pushLog("stderr", `${message}\n`);
+      return null;
+    }
+  }, [pushLog]);
 
   const readFile = useCallback(
     async (path: string) => {
@@ -461,6 +521,7 @@ export function useHardwareDevice(options: HardwareDeviceOptions): HardwareDevic
     runAndWait,
     stop,
     reset,
+    sendSerial,
     clearLog,
     clearError,
   };

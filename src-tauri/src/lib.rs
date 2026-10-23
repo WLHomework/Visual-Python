@@ -7190,6 +7190,7 @@ pub fn run() {
             hardware::commands::hardware_connect,
             hardware::commands::hardware_disconnect,
             hardware::commands::hardware_device_state,
+            hardware::commands::hardware_send_serial,
             hardware::commands::hardware_list_files,
             hardware::commands::hardware_read_file,
             hardware::commands::hardware_delete_file,

@@ -17,7 +17,7 @@ button { font: inherit; }
 .render-button { height: 32px; min-width: 74px; border: 1px solid #6d55c7; border-radius: 4px; background: #46318f; color: #f0edff; display: flex; gap: 7px; align-items: center; justify-content: center; cursor: pointer; font-size: 12px; }.render-button:hover:not(:disabled) { background: #5a3fba; border-color: #8068dd; color: #fff; }.render-button:disabled { opacity: .48; cursor: default; }
 .render-button.stopping { border-color: #b95b5b; background: #7d3636; color: #fff0f0; }.render-button.stopping:hover:not(:disabled) { background: #a34848; border-color: #c66b6b; color: #fff; }
 .workbench { min-width: 0; min-height: 0; width: 100%; display: flex; overflow: hidden; }
-.workspace-shell { flex: 1 1 0; min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0,1fr) 5px var(--bottom-panel-height); overflow: hidden; }
+.workspace-shell { flex: 1 1 0; min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0,1fr) 7px var(--bottom-panel-height); overflow: hidden; }
 .workbench.bottom-panel-collapsed .workspace-shell { grid-template-rows: minmax(0,1fr) 0 38px; }
 .workspace-content { min-width: 0; min-height: 0; display: flex; overflow: hidden; }
 .panel-resizer { position: relative; flex: 0 0 5px; width: 5px; min-width: 0; background: var(--surface-1); cursor: col-resize; touch-action: none; z-index: 5; }.panel-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px; background: var(--border); transition: background-color .15s,width .15s; }.panel-resizer:hover::after,.resizing-right-panel .panel-resizer::after { left: 1px; width: 3px; background: #2f9e8f; }.resizing-right-panel,.resizing-right-panel * { cursor: col-resize !important; user-select: none !important; }
@@ -37,6 +37,10 @@ button { font: inherit; }
 .console-content.has-manim-render-status { grid-template-rows: 31px minmax(0,1fr) auto; }.manim-render-status { position: relative; min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 0 10px 3px; border-bottom: 1px solid var(--border); background: color-mix(in srgb,var(--surface-2),#2f9e8f 10%); color: var(--text); font-size: 10px; }.manim-render-status-text { min-width: 0; display: flex; align-items: center; gap: 6px; }.manim-render-status-text svg { flex: 0 0 auto; color: #58bdab; }.manim-render-status-text strong { flex: 0 1 auto; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }.manim-render-status-text span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }.manim-render-status time { color: var(--muted); font: 10px "Cascadia Code",Consolas,monospace; }.manim-render-progress-track { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; overflow: hidden; background: color-mix(in srgb,var(--surface-3),transparent 15%); }.manim-render-progress-track > span { display: block; width: 0; height: 100%; background: #2f9e8f; transition: width .15s linear; }.manim-render-progress-track.indeterminate > span { width: 30%; animation: manim-render-progress 1.15s ease-in-out infinite; }.phase-stopping .manim-render-status-text svg { color: #c66b6b; }.phase-stopping .manim-render-progress-track > span { background: #b95b5b; }@keyframes manim-render-progress { from { transform: translateX(-110%); } to { transform: translateX(440%); } }
 .console-scroll { scrollbar-color: #5f6975 #1e232a; scrollbar-width: auto; }.console-scroll::-webkit-scrollbar { width: 12px; height: 12px; }.console-scroll::-webkit-scrollbar-track { background: #1e232a; }.console-scroll::-webkit-scrollbar-thumb { background: #5f6975; border: 2px solid #1e232a; border-radius: 8px; }.console-scroll::-webkit-scrollbar-thumb:hover { background: #788391; }.console-scroll::-webkit-scrollbar-corner { background: #1e232a; }
 .stdin-row { display: grid; grid-template-columns: 22px minmax(0,1fr) 34px; align-items: center; border-top: 1px solid #303741; background: #242a32; padding: 0 6px 0 10px; }.stdin-prompt { color: #55c69a; font: 18px/1 "Cascadia Code", Consolas, monospace; }.stdin-row input { min-width: 0; height: 28px; border: 0; outline: 0; background: transparent; color: #e4e8ed; font: 12px "Cascadia Code", Consolas, monospace; }.stdin-row input::placeholder { color: #68727e; }.stdin-row input:disabled { cursor: not-allowed; }.stdin-row button { width: 28px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 3px; background: transparent; color: #8e98a5; cursor: pointer; }.stdin-row button:hover:not(:disabled) { background: #35413f; color: #69d1aa; }.stdin-row button:disabled { opacity: .35; cursor: default; }
+
+.hardware-serial-row { grid-template-columns: 22px minmax(0, 1fr) auto auto auto; }
+.hardware-serial-ending { height: 26px; padding: 0 4px; border: 0; outline: 0; background: transparent; color: var(--muted); font: 10px "Cascadia Code", Consolas, monospace; }
+.hardware-serial-row .hardware-serial-interrupt { width: auto; padding: 0 7px; font-size: 10px; }
 .problem-list { --problem-warning: #f0c77e; --problem-warning-badge: #c58b32; --problem-environment: #8dc0eb; --problem-plugin: #bca8e8; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: 5px; scrollbar-color: #5f6975 #1e232a; scrollbar-width: auto; }.problem-list::-webkit-scrollbar { width: 12px; height: 12px; }.problem-list::-webkit-scrollbar-track { background: #1e232a; }.problem-list::-webkit-scrollbar-thumb { background: #5f6975; border: 2px solid #1e232a; border-radius: 8px; }.problem-list::-webkit-scrollbar-thumb:hover { background: #788391; }.problem-list::-webkit-scrollbar-corner { background: #1e232a; }.problem-list > div:not(.no-problems) { width: max-content; min-width: 100%; min-height: 52px; display: grid; grid-template-columns: 24px max-content; align-items: center; gap: 8px; padding: 7px 9px; color: var(--text); }.problem-badge { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: #a84b4b; color: #fff; font-size: 10px; font-weight: 700; }.problem-badge svg { width: 11px; height: 11px; stroke-width: 2.5; }.problem-timeout .problem-badge { background: var(--problem-warning-badge); }.problem-environment .problem-badge { background: #397bc0; }.problem-plugin .problem-badge { background: #7657b5; }.problem-list > div > span:last-child { width: max-content; min-width: 0; display: grid; gap: 4px; }.problem-list strong { overflow: visible; text-overflow: clip; white-space: nowrap; color: var(--diagnostic-error); font: 12px "Cascadia Code", Consolas, monospace; }.problem-timeout strong { color: var(--problem-warning); }.problem-environment strong { color: var(--problem-environment); }.problem-plugin strong { color: var(--problem-plugin); }.problem-list small { color: color-mix(in srgb,var(--text),var(--muted) 25%); font-size: 11px; font-weight: 500; white-space: nowrap; }.no-problems { padding: 16px; color: var(--muted); font-size: 12px; }
 .problem-list > .problem-locatable { cursor: pointer; border-radius: 4px; }.problem-list > .problem-locatable:hover { background: var(--hover); }
 .problem-context .problem-badge { background: var(--problem-warning-badge); }.problem-context strong { color: var(--problem-warning); }
@@ -6468,6 +6472,91 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   overflow: auto;
 }
 
+.firmware-flash-dialog {
+  width: min(480px, calc(100vw - 48px));
+  max-height: min(560px, calc(100vh - 48px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.firmware-flash-body {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.firmware-flash-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.firmware-flash-summary strong,
+.firmware-flash-summary code {
+  color: var(--text);
+}
+
+.firmware-flash-file {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.firmware-flash-file > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.firmware-flash-file > code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font: 11px "Cascadia Code", Consolas, monospace;
+}
+
+.firmware-flash-file > small {
+  color: var(--muted);
+  font: 10px "Cascadia Code", Consolas, monospace;
+}
+
+.firmware-flash-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.firmware-flash-actions button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.firmware-flash-actions button.primary {
+  border-color: #2f9e78;
+  background: #2f9e78;
+  color: #fff;
+}
+
+.firmware-flash-actions button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
 .hardware-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6656,7 +6745,6 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   border-left: 1px solid var(--border);
 }
 
-.hardware-bar-board,
 .hardware-bar-port {
   height: 30px;
   padding: 0 6px;
@@ -6667,12 +6755,8 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   font-size: 11px;
 }
 
-.hardware-bar-board {
-  width: 118px;
-}
-
 .hardware-bar-port {
-  width: 132px;
+  width: 78px;
 }
 
 .hardware-bar-board:disabled,
@@ -6737,6 +6821,9 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 .console-device {
   min-width: 0;
   min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -6744,12 +6831,13 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   min-width: 0;
   min-height: 0;
   height: 100%;
-  display: grid;
-  grid-template-rows: 34px minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
 .hardware-files-bar {
+  flex: 0 0 34px;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -6805,11 +6893,18 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 }
 
 .hardware-files-list {
+  flex: 0 1 auto;
+  max-height: 45%;
   min-height: 0;
   margin: 0;
   padding: 0;
   overflow: auto;
   list-style: none;
+}
+
+.hardware-files:not(.has-preview) .hardware-files-list {
+  flex: 1 1 auto;
+  max-height: none;
 }
 
 .hardware-files-list li {
@@ -6865,6 +6960,7 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 }
 
 .hardware-files-empty {
+  flex: 1 1 auto;
   margin: 0;
   padding: 14px 10px;
   color: var(--muted);
@@ -6872,10 +6968,44 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
 }
 
 .hardware-files-preview {
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 140px;
   display: grid;
-  grid-template-rows: 28px minmax(0, 1fr);
+  grid-template-rows: 6px 28px minmax(0, 1fr);
+  overflow: hidden;
   border-top: 1px solid var(--border);
+}
+
+.hardware-files-preview-resizer {
+  position: relative;
+  min-height: 0;
+  background: var(--surface-1);
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.hardware-files-preview-resizer::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border);
+  transition: background-color .15s, height .15s, top .15s;
+}
+
+.hardware-files-preview-resizer:hover::after,
+body.resizing-hardware-preview .hardware-files-preview-resizer::after {
+  top: 1px;
+  height: 3px;
+  background: #2f9e8f;
+}
+
+body.resizing-hardware-preview,
+body.resizing-hardware-preview * {
+  cursor: row-resize !important;
+  user-select: none !important;
 }
 
 .hardware-files-preview > header {
@@ -6901,16 +7031,18 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   color: var(--text);
 }
 
-.hardware-files-preview pre {
-  margin: 0;
-  padding: 8px 10px;
-  overflow: auto;
+.hardware-files-code {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   border-top: 1px solid var(--border);
-  background: #171a1f;
-  color: #b9c1cc;
-  font: 11px/1.55 "Cascadia Code", Consolas, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  background: #1e1e1e;
+}
+
+.hardware-files-code-loading {
+  height: 100%;
+  min-height: 0;
 }
 .hardware-menu {
   width: 268px;

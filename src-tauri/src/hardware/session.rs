@@ -16,6 +16,7 @@ use crate::hardware::micropython::{
 use crate::hardware::serial::{SerialTransport, DEFAULT_BAUD_RATE};
 use crate::hardware::transport::Transport;
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
@@ -163,6 +164,8 @@ pub struct HardwareState {
     session: Mutex<Option<DeviceSession>>,
     /// 与 `session` 分开加锁：**「停止」绝不能因为设备被运行作业独占而失效**。
     control: Mutex<Option<RunSignal>>,
+    /// 运行期间界面写入、读循环再转给设备 stdin 的字节。
+    stdin: Arc<Mutex<VecDeque<u8>>>,
     running: AtomicBool,
     next_run_id: AtomicU64,
     /// 等待上一个作业释放设备的时间上限（测试里会缩短）。
@@ -174,6 +177,7 @@ impl Default for HardwareState {
         Self {
             session: Mutex::new(None),
             control: Mutex::new(None),
+            stdin: Arc::new(Mutex::new(VecDeque::new())),
             running: AtomicBool::new(false),
             next_run_id: AtomicU64::new(0),
             idle_wait: RUN_IDLE_WAIT,
@@ -192,6 +196,15 @@ impl HardwareState {
 
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
+    }
+
+    /// 运行期间把界面输入排进设备 stdin；读循环会在空闲时写入串口。
+    pub fn push_stdin(&self, bytes: &[u8]) {
+        lock(&self.stdin).extend(bytes.iter().copied());
+    }
+
+    pub fn clear_stdin(&self) {
+        lock(&self.stdin).clear();
     }
 
     /// 当前连接快照；未连接时为 `None`。
@@ -252,6 +265,7 @@ impl HardwareState {
 
     /// 开始一次后台作业：**取消上一个作业**并登记新的取消标志。
     pub fn begin_run(&self) -> RunTicket {
+        self.clear_stdin();
         let cancel = Arc::new(AtomicBool::new(false));
         let run_id = self.next_run_id.fetch_add(1, Ordering::SeqCst) + 1;
         let mut control = lock(&self.control);
@@ -474,6 +488,7 @@ fn execute_run(
         // 不设观察窗口：程序没结束就一直等，直到用户点「停止」。
         timeout: None,
         cancel: Some(Arc::clone(&ticket.cancel)),
+        stdin: Some(Arc::clone(&state.stdin)),
     };
     state.with_device_for_run(|session| {
         let mut upload = None;

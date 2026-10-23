@@ -18,7 +18,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const CTRL_A: u8 = 0x01;
@@ -201,6 +201,8 @@ pub struct ProgramRunReport {
 pub struct RunOptions {
     pub timeout: Option<Duration>,
     pub cancel: Option<Arc<AtomicBool>>,
+    /// 运行期间由界面写入、再转给设备 stdin 的字节。
+    pub stdin: Option<Arc<Mutex<VecDeque<u8>>>>,
 }
 
 impl RunOptions {
@@ -209,6 +211,7 @@ impl RunOptions {
         Self {
             timeout: None,
             cancel: None,
+            stdin: None,
         }
     }
 
@@ -217,11 +220,17 @@ impl RunOptions {
         Self {
             timeout: Some(timeout),
             cancel: None,
+            stdin: None,
         }
     }
 
     pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
         self.cancel = Some(cancel);
+        self
+    }
+
+    pub fn with_stdin(mut self, stdin: Arc<Mutex<VecDeque<u8>>>) -> Self {
+        self.stdin = Some(stdin);
         self
     }
 }
@@ -240,6 +249,8 @@ pub struct MicroPythonDevice<T: Transport> {
     timeouts: ReplTimeouts,
     in_raw_repl: bool,
     raw_paste: RawPasteSupport,
+    /// 运行期间由界面写入、转给设备 stdin 的字节。
+    stdin: Option<Arc<Mutex<VecDeque<u8>>>>,
 }
 
 impl<T: Transport> MicroPythonDevice<T> {
@@ -250,6 +261,7 @@ impl<T: Transport> MicroPythonDevice<T> {
             timeouts: ReplTimeouts::default(),
             in_raw_repl: false,
             raw_paste: RawPasteSupport::Unknown,
+            stdin: None,
         }
     }
 
@@ -405,12 +417,16 @@ impl<T: Transport> MicroPythonDevice<T> {
         keep_all: bool,
         on_chunk: impl FnMut(&[u8]),
     ) -> Result<ReadUntil, HardwareError> {
+        let stdin = self.stdin.clone();
         let mut options = ReadUntilOptions::new(ending)
             .char_timeout(char_timeout)
             .overall_timeout(overall)
             .keep_all(keep_all);
         if let Some(cancel) = cancel {
             options = options.cancel(cancel);
+        }
+        if let Some(stdin) = stdin.as_deref() {
+            options = options.stdin(Some(stdin));
         }
         read_until(&mut self.transport, &mut self.pending, &options, on_chunk)
     }
@@ -751,6 +767,7 @@ impl<T: Transport> MicroPythonDevice<T> {
         mut on_output: impl FnMut(&[u8]),
     ) -> Result<RunOutcome, HardwareError> {
         self.reset()?;
+        self.stdin = options.stdin.clone();
         let mut watcher = OutputWatcher::new(HOST_TAIL_LIMIT);
         let cancel = options.cancel.as_deref();
         let outcome = {
@@ -771,6 +788,7 @@ impl<T: Transport> MicroPythonDevice<T> {
             Ok(outcome) => outcome,
             Err(error) if error.kind() == HardwareErrorKind::Cancelled => {
                 // “停止”= 中断但不软复位；中断后设备回到友好 REPL。
+                self.stdin = None;
                 self.interrupt()?;
                 return Ok(RunOutcome {
                     status: RunStatus::Interrupted,
@@ -788,6 +806,7 @@ impl<T: Transport> MicroPythonDevice<T> {
         } else {
             RunStatus::Finished
         };
+        self.stdin = None;
         Ok(RunOutcome {
             status,
             streamed_bytes: watcher.bytes,

@@ -230,6 +230,29 @@ pub fn hardware_stop(state: State<'_, HardwareState>) -> bool {
 }
 
 #[tauri::command]
+pub async fn hardware_send_serial(
+    app: AppHandle,
+    text: String,
+    line_ending: Option<String>,
+) -> Result<Option<String>, HardwareCommandError> {
+    run_blocking(app, move |state, _events| {
+        if state.is_running() {
+            let ending = match line_ending.as_deref() {
+                Some("none") => "",
+                Some("lf") => "\n",
+                _ => "\r\n",
+            };
+            state.push_stdin(format!("{text}{ending}").as_bytes());
+            return Ok(None);
+        }
+        state
+            .with_device("发送串口消息", |session| session.device.exec(&text))
+            .map(Some)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn hardware_list_files(
     app: AppHandle,
     path: String,

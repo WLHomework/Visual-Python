@@ -37,6 +37,11 @@ export function listHardwareSerialPorts(): Promise<HardwareSerialPort[]> {
   return invoke<HardwareSerialPort[]>("hardware_list_serial_ports");
 }
 
+/** 发送一行到设备：空闲时执行 REPL，运行中写入程序 stdin。返回 REPL 输出（运行中为 null）。 */
+export function sendHardwareSerial(text: string, lineEnding: "crlf" | "lf" | "none" = "crlf"): Promise<string | null> {
+  return invoke<string | null>("hardware_send_serial", { text, lineEnding });
+}
+
 export function downloadFirmware(boardId: string): Promise<FirmwareDownloadResult> {
   return invoke<FirmwareDownloadResult>("hardware_download_firmware", { boardId });
 }

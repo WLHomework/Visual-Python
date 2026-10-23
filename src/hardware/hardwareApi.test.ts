@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { downloadFirmware, flashFirmware, getFirmwareCatalog, listHardwareSerialPorts } from "./hardwareApi";
+import { downloadFirmware, flashFirmware, getFirmwareCatalog, listHardwareSerialPorts, sendHardwareSerial } from "./hardwareApi";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -33,6 +33,13 @@ describe("hardware API", () => {
 
     await expect(listHardwareSerialPorts()).resolves.toEqual([]);
     expect(invoke).toHaveBeenCalledWith("hardware_list_serial_ports");
+  });
+
+  it("sends serial text through the typed command", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce("hello from board\n");
+
+    await expect(sendHardwareSerial("print('hello')", "crlf")).resolves.toBe("hello from board\n");
+    expect(invoke).toHaveBeenCalledWith("hardware_send_serial", { text: "print('hello')", lineEnding: "crlf" });
   });
 
   it("downloads a fixed firmware image by board id", async () => {

@@ -20,7 +20,7 @@ export type WorkbenchFeatures = {
   stdin: boolean;
   /** 工程资源（音频等随工程保存的文件）。 */
   projectResources: boolean;
-  /** 代码模式下可以建多个文档；硬件工程只有设备上的 main.py 一个。 */
+  /** 代码模式下可以建多个文档；硬件工程也可以保存多份本地程序，运行时只上传当前文档。 */
   multipleDocuments: boolean;
 };
 
@@ -51,7 +51,7 @@ const hardwareProfile = (boardId: HardwareBoardId): WorkbenchProfile => ({
   label: getBoardProfile(boardId)?.displayName ?? boardId,
   description: "通过 USB 串口上传到开发板运行（MicroPython）",
   boardId,
-  features: { manim: false, pythonEnvironment: false, renderPreview: false, devicePanel: true, stdin: false, projectResources: false, multipleDocuments: false },
+  features: { manim: false, pythonEnvironment: false, renderPreview: false, devicePanel: true, stdin: false, projectResources: false, multipleDocuments: true },
 });
 
 const profiles: readonly WorkbenchProfile[] = [pythonProfile, ...supportedHardwareBoards.map(hardwareProfile)];

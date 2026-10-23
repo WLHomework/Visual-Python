@@ -3,8 +3,11 @@ use crate::hardware::session::HardwareState;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -118,6 +121,60 @@ pub fn flash_command_args(image: &FirmwareImage, port_name: &str, operation: &st
         "460800".to_string(),
         esptool_operation.to_string(),
     ]
+}
+
+/// ESP8266 的镜像头里不总是带正确的 4 MB Flash 配置，写入时显式让 esptool 探测。
+/// 注意 `--flash_size` 属于 `write_flash` 子命令，必须放在命令之后。
+fn write_flash_command_args(image: &FirmwareImage, port_name: &str, firmware_path: &Path) -> Vec<String> {
+    let mut args = flash_command_args(image, port_name, "write-flash");
+    args.push("--flash_size=detect".to_string());
+    args.push(format!("0x{:x}", image.flash_offset));
+    args.push(firmware_path.to_string_lossy().into_owned());
+    args
+}
+
+/// 刷写前确认串口上实际连接的芯片与工程选择的板卡一致，避免把 S3/WROOM 镜像刷进 8266。
+fn verify_flash_target(tool_path: &Path, port_name: &str, chip_family: &str) -> Result<(), String> {
+    let output = Command::new(tool_path)
+        .args(["--port", port_name, "--baud", "115200", "chip_id"])
+        .output()
+        .map_err(|error| format!("识别芯片失败，无法启动 esptool：{error}"))?;
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if !output.status.success() {
+        return Err(format!("识别芯片失败：{}", text.trim()));
+    }
+    let detected = text
+        .lines()
+        .find(|line| line.contains("Chip is "))
+        .map(str::trim)
+        .ok_or_else(|| format!("无法识别串口上的芯片：{}", text.trim()))?;
+    if chip_matches_family(detected, chip_family) {
+        Ok(())
+    } else {
+        Err(format!(
+            "串口 {port_name} 上的芯片是「{detected}」，与当前工程选择的板卡（{chip_family}）不匹配；请切换开发板或串口后再刷写。"
+        ))
+    }
+}
+
+fn chip_matches_family(detected: &str, chip_family: &str) -> bool {
+    let lower = detected.to_ascii_lowercase();
+    match chip_family {
+        "esp8266" => lower.contains("esp8266"),
+        "esp32s3" => lower.contains("esp32-s3"),
+        "esp32" => {
+            lower.contains("esp32")
+                && !lower.contains("esp32-s3")
+                && !lower.contains("esp32-c")
+                && !lower.contains("esp32-h")
+                && !lower.contains("esp32-p")
+        }
+        _ => false,
+    }
 }
 
 pub fn verify_firmware_bytes(bytes: &[u8], image: &FirmwareImage) -> Result<(), String> {
@@ -299,19 +356,33 @@ pub async fn hardware_flash_firmware(
                 },
             );
         };
+        emit_progress("正在识别芯片", 3);
+        verify_flash_target(&tool_path, &port_for_result, &image_for_flash.chip_family)
+            .map_err(HardwareCommandError::internal)?;
         emit_progress("准备刷写", 5);
+        emit_progress("正在擦除 Flash", 10);
         run_esptool_command(
             &tool_path,
             flash_command_args(&image_for_flash, &port_for_result, "erase-flash"),
             "擦除 Flash",
+            (10, 34),
+            |_| {},
         )
         .map_err(HardwareCommandError::internal)?;
         emit_progress("擦除完成", 35);
-        let mut write_args = flash_command_args(&image_for_flash, &port_for_result, "write-flash");
-        write_args.push(format!("0x{:x}", image_for_flash.flash_offset));
-        write_args.push(firmware_path_for_flash.to_string_lossy().into_owned());
-        run_esptool_command(&tool_path, write_args, "写入 MicroPython 固件")
-            .map_err(HardwareCommandError::internal)?;
+        let write_args = write_flash_command_args(
+            &image_for_flash,
+            &port_for_result,
+            &firmware_path_for_flash,
+        );
+        run_esptool_command(
+            &tool_path,
+            write_args,
+            "写入 MicroPython 固件",
+            (35, 99),
+            |progress| emit_progress("正在写入固件", progress),
+        )
+        .map_err(HardwareCommandError::internal)?;
         emit_progress("刷写完成", 100);
         Ok(FirmwareFlashResult {
             board_id: board_for_result,
@@ -323,19 +394,139 @@ pub async fn hardware_flash_firmware(
     .map_err(|error| HardwareCommandError::internal(format!("刷写任务异常退出：{error}")))?
 }
 
-fn run_esptool_command(tool_path: &Path, args: Vec<String>, stage: &str) -> Result<(), String> {
-    let output = Command::new(tool_path)
+/// 运行 esptool 并实时解析 `Writing at 0x... (NN %)`，把原始百分比映射到整体刷写区间。
+/// stdout/stderr 由两个线程持续读取，避免 esptool 因管道写满而阻塞。
+fn run_esptool_command<F>(
+    tool_path: &Path,
+    args: Vec<String>,
+    stage: &str,
+    progress_range: (u8, u8),
+    mut on_progress: F,
+) -> Result<(), String>
+where
+    F: FnMut(u8),
+{
+    let mut child = Command::new(tool_path)
         .args(args)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("{stage}失败，无法启动 esptool：{error}"))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let detail = if stderr.is_empty() { stdout } else { stderr };
-        Err(format!("{stage}失败：{detail}"))
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("{stage}失败：无法读取 esptool 输出"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("{stage}失败：无法读取 esptool 错误输出"))?;
+    let (sender, receiver) = mpsc::channel::<(bool, String)>();
+    let stdout_sender = sender.clone();
+    thread::spawn(move || pump_esptool_output(stdout, stdout_sender, false));
+    let stderr_sender = sender.clone();
+    thread::spawn(move || pump_esptool_output(stderr, stderr_sender, true));
+    drop(sender);
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut last_progress = progress_range.0;
+    for (is_stderr, line) in receiver {
+        if is_stderr {
+            lines.push(format!("stderr: {line}"));
+        } else {
+            lines.push(line.clone());
+        }
+        if lines.len() > 200 {
+            lines.remove(0);
+        }
+        if let Some(raw) = parse_esptool_percent(&line) {
+            let mapped = scale_esptool_progress(raw, progress_range);
+            if mapped > last_progress {
+                last_progress = mapped;
+                on_progress(mapped);
+            }
+        }
     }
+    let status = child
+        .wait()
+        .map_err(|error| format!("{stage}失败：等待 esptool 结束失败：{error}"))?;
+    if status.success() {
+        return Ok(());
+    }
+    let detail = lines
+        .iter()
+        .rev()
+        .take(12)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(format!(
+        "{stage}失败：{}",
+        if detail.is_empty() {
+            "esptool 未返回错误详情".to_string()
+        } else {
+            detail
+        }
+    ))
+}
+
+fn pump_esptool_output<R: Read + Send + 'static>(
+    mut reader: R,
+    sender: mpsc::Sender<(bool, String)>,
+    is_stderr: bool,
+) {
+    let mut buffer = [0u8; 4096];
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                for byte in &buffer[..read] {
+                    if *byte == b'\r' || *byte == b'\n' {
+                        if !pending.is_empty() {
+                            let line = String::from_utf8_lossy(&pending).trim().to_string();
+                            pending.clear();
+                            if !line.is_empty() {
+                                let _ = sender.send((is_stderr, line));
+                            }
+                        }
+                    } else {
+                        pending.push(*byte);
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    if !pending.is_empty() {
+        let line = String::from_utf8_lossy(&pending).trim().to_string();
+        if !line.is_empty() {
+            let _ = sender.send((is_stderr, line));
+        }
+    }
+}
+
+/// esptool 写入阶段会输出 `Writing at 0x00063f0e... (66 %)`，取括号里的百分比。
+fn parse_esptool_percent(line: &str) -> Option<u8> {
+    if !line.contains("Writing at") {
+        return None;
+    }
+    let open = line.rfind('(')? + 1;
+    let rest = &line[open..];
+    let end = rest.find('%')?;
+    rest[..end]
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .map(|value| value.min(100) as u8)
+}
+
+fn scale_esptool_progress(raw: u8, (start, end): (u8, u8)) -> u8 {
+    let span = end.saturating_sub(start) as u32;
+    let scaled = start as u32 + span * raw as u32 / 100;
+    scaled.min(end as u32) as u8
 }
 
 #[cfg(test)]
@@ -343,6 +534,22 @@ mod tests {
     use super::*;
     use crate::hardware::session::DeviceSession;
     use crate::hardware::simulated::SimulatedDevice;
+
+    #[test]
+    fn parses_and_scales_esptool_write_progress() {
+        assert_eq!(
+            parse_esptool_percent("Writing at 0x00063f0e... (66 %)"),
+            Some(66)
+        );
+        assert_eq!(
+            parse_esptool_percent("Writing at 0x00000000... (100 %)"),
+            Some(100)
+        );
+        assert_eq!(parse_esptool_percent("Wrote 643424 bytes"), None);
+        assert_eq!(scale_esptool_progress(0, (35, 99)), 35);
+        assert_eq!(scale_esptool_progress(66, (35, 99)), 77);
+        assert_eq!(scale_esptool_progress(100, (35, 99)), 99);
+    }
 
     #[test]
     fn exposes_supported_board_families() {
@@ -356,6 +563,26 @@ mod tests {
             vec!["esp32-wroom", "esp8266-esp12e", "esp32-s3"]
         );
         assert!(catalog.iter().all(|image| image.version == "1.29.0"));
+    }
+
+    #[test]
+    fn matches_detected_chip_against_board_family() {
+        assert!(chip_matches_family("Chip is ESP8266EX", "esp8266"));
+        assert!(chip_matches_family("Chip is ESP32-S3 (QFN56)", "esp32s3"));
+        assert!(chip_matches_family("Chip is ESP32-D0WD-V3", "esp32"));
+        assert!(!chip_matches_family("Chip is ESP8266EX", "esp32"));
+        assert!(!chip_matches_family("Chip is ESP32-D0WD", "esp32s3"));
+    }
+
+    #[test]
+    fn write_flash_detects_flash_size() {
+        let catalog = firmware_catalog();
+        let args = write_flash_command_args(&catalog[1], "COM3", Path::new("fw.bin"));
+        let command = args.iter().position(|arg| arg == "write_flash").expect("write_flash command");
+
+        assert_eq!(args[command + 1], "--flash_size=detect");
+        assert_eq!(args[command + 2], "0x0");
+        assert_eq!(args.last().map(String::as_str), Some("fw.bin"));
     }
 
     #[test]
