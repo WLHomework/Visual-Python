@@ -428,6 +428,13 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
       markDirty();
       return { deleted: true, changed: true, id: documentId, name: target.name, activeDocumentId: services.activeDocumentIdRef.current };
     }
+    if (name === "web_search") {
+      const query = checkedString(args, "query");
+      if (query.length > 300) throw new Error("搜索词不能超过 300 个字符");
+      const requested = typeof args.maxResults === "number" && Number.isFinite(args.maxResults) ? Math.round(args.maxResults) : 5;
+      const maxResults = Math.max(1, Math.min(10, requested));
+      return services.invoke<Record<string, unknown>>("web_search", { query, maxResults });
+    }
     if (name === "get_context") {
       const currentDocument = services.documentsRef.current.find((document) => document.id === services.activeDocumentIdRef.current);
       return {

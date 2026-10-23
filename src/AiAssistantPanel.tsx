@@ -1,5 +1,5 @@
 import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -89,6 +89,12 @@ type AgentRun = {
   persistedAttachments?: PersistedAiImageAttachment[];
 };
 
+type AiImagePreview = {
+  src: string;
+  alt: string;
+  title: string;
+};
+
 type AiConversation = {
   id: string;
   title: string;
@@ -108,7 +114,7 @@ type AgentActivityEntry =
   | { kind: "activity"; activity: AiAgentActivity }
   | { kind: "group"; id: string; summary: string; activities: AiAgentActivity[] };
 
-type AgentToolCategory = "explore" | "edit" | "verify" | "execute" | "other";
+type AgentToolCategory = "explore" | "web" | "edit" | "verify" | "execute" | "other";
 
 export function mergePendingAiAttachments(current: readonly AiImageAttachment[], incoming: readonly AiImageAttachment[]): AiImageAttachment[] {
   return [...current, ...incoming].slice(0, MAX_IMAGE_COUNT);
@@ -884,6 +890,7 @@ export function removeFinalMessageActivity(activities: AiAgentActivity[], summar
 
 function agentToolCategory(toolName?: AiAgentToolName | "inspect_rendered_video"): AgentToolCategory {
   if (!toolName) return "other";
+  if (toolName === "web_search") return "web";
   if (["get_context", "list_scenes", "get_scene", "list_resources", "get_resource", "get_voiceover_context", "inspect_python_structure", "inspect_plugin_api", "list_installed_plugins", "read_plugin_draft_file"].includes(toolName)) return "explore";
   if (["create_document", "switch_document", "rename_document", "delete_document", "create_scene", "switch_scene", "rename_scene", "delete_scene", "replace_code", "edit_code", "insert_statements", "replace_function_body", "add_import", "add_voiceover", "add_synchronized_voiceover", "format_code", "undo_code", "redo_code", "create_plugin_plan", "create_plugin_draft", "update_plugin_draft", "import_installed_plugin_draft"].includes(toolName)) return "edit";
   if (["validate_scene", "check_resources", "check_dependencies", "check_voiceover", "check_code", "inspect_rendered_output", "inspect_rendered_video", "validate_plugin_draft", "run_plugin_draft_checks"].includes(toolName)) return "verify";
@@ -899,6 +906,7 @@ export function summarizeAgentActivities(activities: AiAgentActivity[]): string 
   }
   const labels: Array<[AgentToolCategory, string]> = [
     ["explore", "查看"],
+    ["web", "搜索"],
     ["edit", "修改"],
     ["verify", "检查"],
     ["execute", "执行"],
@@ -910,6 +918,23 @@ export function summarizeAgentActivities(activities: AiAgentActivity[]): string 
   const other = counts.get("other") ?? 0;
   if (other) parts.push(`其他 ${other} 项`);
   return parts.length ? parts.join(" · ") : `完成 ${activities.length} 项操作`;
+}
+
+/** 给人看的一次运行摘要；没有工具活动时返回空串，避免显示“完成 0 项操作”。 */
+export function summarizeAgentRun(activities: AiAgentActivity[]): string {
+  const categories = new Set(activities.map((activity) => agentToolCategory(activity.toolName)));
+  const hasEdit = activities.some((activity) => Boolean(activity.codeChange) || agentToolCategory(activity.toolName) === "edit");
+  const hasVerify = categories.has("verify") || activities.some((activity) => activity.channel === "verification");
+  const parts: string[] = [];
+  if (categories.has("explore")) parts.push("读取了工程");
+  if (categories.has("web")) parts.push("搜索了网页");
+  if (hasEdit) parts.push("修改了文件");
+  if (hasVerify) {
+    const failed = activities.some((activity) => (agentToolCategory(activity.toolName) === "verify" || activity.channel === "verification") && activity.status === "error");
+    parts.push(failed ? "检查未通过" : "检查通过");
+  }
+  if (categories.has("execute") || activities.some((activity) => Boolean(activity.execution))) parts.push("运行了命令");
+  return parts.join("，");
 }
 
 export function isNearLatestScroll(scrollTop: number, clientHeight: number, scrollHeight: number, threshold = 48): boolean {
@@ -950,8 +975,22 @@ type AiNestedScrollTarget = Pick<HTMLElement, "scrollTop" | "scrollHeight" | "cl
 
 function findNestedAiScrollTarget(target: EventTarget | null): AiNestedScrollTarget | null {
   if (!target || typeof (target as { closest?: unknown }).closest !== "function") return null;
-  const candidate = (target as Element).closest(".ai-agent-thinking > .ai-markdown, .ai-agent-thinking > .ai-markdown-stream");
-  return candidate ? candidate as AiNestedScrollTarget : null;
+  const element = target as Element;
+  if (typeof (element as { matches?: unknown }).matches !== "function") {
+    const fallback = element.closest(".ai-agent-thinking > .ai-markdown, .ai-agent-thinking > .ai-markdown-stream, .ai-agent-log-detail > .ai-markdown, .ai-agent-log-detail > .ai-markdown-stream, .ai-agent-log-detail pre");
+    return fallback ? fallback as AiNestedScrollTarget : null;
+  }
+  const container = element.closest(".ai-agent-log-detail, .ai-agent-thinking");
+  if (!container) return null;
+  let node: Element | null = element;
+  while (node && node !== container.parentElement) {
+    if (node.matches(".ai-markdown, .ai-markdown-stream, pre")) {
+      const scrollable = node as HTMLElement;
+      if (scrollable.scrollHeight > scrollable.clientHeight) return scrollable;
+    }
+    node = node.parentElement;
+  }
+  return null;
 }
 
 export function attachAiThreadWheelHandler(thread: AiThreadWheelTarget, onLeaveLatest: () => void): () => void {
@@ -965,8 +1004,8 @@ export function attachAiThreadWheelHandler(thread: AiThreadWheelTarget, onLeaveL
       if (nextNestedScrollTop !== nestedTarget.scrollTop) {
         event.preventDefault();
         nestedTarget.scrollTop = nextNestedScrollTop;
+        return;
       }
-      return;
     }
     const next = nextAiThreadScrollTop(thread.scrollTop, deltaY, thread.clientHeight, thread.scrollHeight);
     if (next === thread.scrollTop) {
@@ -999,6 +1038,13 @@ export function formatAgentElapsed(startedAt?: number, finishedAt = Date.now()):
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = elapsedSeconds % 60;
   return seconds ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
+}
+
+export function formatAgentClockTime(timestamp?: number): string {
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return "";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 export function formatAiTokenCount(total?: number): string {
@@ -1149,6 +1195,18 @@ export function formatAgentToolResult(activity: AiAgentActivity): string | null 
   if (!parsed) return sanitizeAgentDisplayText(raw);
   const pluginResult = formatPluginWorkflowResult(activity.toolName, parsed);
   if (pluginResult) return pluginResult;
+  if (activity.toolName === "web_search") {
+    if (parsed.ok === false) return structuredAgentMessage(parsed) || "网页搜索失败";
+    const results = Array.isArray(parsed.results) ? parsed.results : [];
+    if (!results.length) return "没有找到相关网页";
+    return results.slice(0, 10).map((item, index) => {
+      const result = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      const title = typeof result.title === "string" ? result.title : "未命名结果";
+      const url = typeof result.url === "string" ? result.url : "";
+      const snippet = typeof result.snippet === "string" ? result.snippet : "";
+      return `${index + 1}. ${title}${url ? `\n${url}` : ""}${snippet ? `\n${snippet}` : ""}`;
+    }).join("\n\n");
+  }
   if (activity.toolName === "check_dependencies") {
     const missing = Array.isArray(parsed.missing)
       ? parsed.missing.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
@@ -1254,6 +1312,42 @@ export function AgentResponseFooter({ meta, metaTitle, children }: { status: Rea
   return <div className="ai-agent-response-footer">{meta && <small title={metaTitle}>{meta}</small>}{children && <span className="ai-agent-response-footer-actions">{children}</span>}</div>;
 }
 
+function AgentResponseTime({ timestamp }: { timestamp?: number }) {
+  const clock = formatAgentClockTime(timestamp);
+  if (!timestamp || !clock) return null;
+  const date = new Date(timestamp);
+  return <time className="ai-agent-response-time" dateTime={date.toISOString()} title={date.toLocaleString("zh-CN")}>{clock}</time>;
+}
+
+function AiUserMessageMeta({ text, timestamp }: { text: string; timestamp?: number }) {
+  const { copyState, copyText } = useCopyFeedback();
+  const clock = formatAgentClockTime(timestamp);
+  const copyTitle = copyState === "copied" ? "已复制消息" : copyState === "error" ? "复制失败" : "复制消息";
+  return <div className="ai-agent-user-message-meta">
+    {clock && timestamp && <time dateTime={new Date(timestamp).toISOString()} title={new Date(timestamp).toLocaleString("zh-CN")}>{clock}</time>}
+    <button type="button" title={copyTitle} aria-label={copyTitle} onClick={() => void copyText(text)}>{copyState === "copied" ? <Check size={12}/> : copyState === "error" ? <AlertCircle size={12}/> : <Copy size={12}/>}</button>
+  </div>;
+}
+
+function AiImageLightbox({ image, onClose }: { image: AiImagePreview; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+  return <div className="ai-image-lightbox" role="dialog" aria-modal="true" aria-label="查看图片" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <button ref={closeRef} type="button" className="ai-image-lightbox-close" onClick={onClose} aria-label="关闭图片预览"><X size={18}/></button>
+    <figure>
+      <img src={image.src} alt={image.alt}/>
+      <figcaption>{image.title}</figcaption>
+    </figure>
+  </div>;
+}
+
 export const AgentActivityRow = memo(function AgentActivityRow({ activity, onRevealCodeChange, onRevealProblem }: {
   activity: AiAgentActivity;
   onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void;
@@ -1308,23 +1402,219 @@ export const AgentActivityRow = memo(function AgentActivityRow({ activity, onRev
   </details>;
 });
 
-export function AgentRunBody({ activities, hiddenToolName, onRevealCodeChange, onRevealProblem }: {
-  activities: AiAgentActivity[];
-  hiddenToolName?: AiAgentToolName;
+type AgentLogKind = "thinking" | "read" | "search" | "verify" | "edit" | "command" | "message" | "question" | "decision" | "other";
+
+const agentLogLabels: Record<AgentLogKind, string> = {
+  thinking: "思考",
+  read: "读取",
+  search: "搜索",
+  verify: "检查",
+  edit: "编辑",
+  command: "运行命令",
+  message: "说明",
+  question: "确认",
+  decision: "决定",
+  other: "过程",
+};
+
+function agentLogKind(activity: AiAgentActivity): AgentLogKind {
+  if (activity.channel === "thinking") return "thinking";
+  if (activity.channel === "question") return "question";
+  if (activity.channel === "decision") return "decision";
+  if (activity.toolName === "web_search") return "search";
+  if (activity.codeChange) return "edit";
+  const category = agentToolCategory(activity.toolName);
+  if (category === "edit") return "edit";
+  if (activity.execution || category === "execute") return "command";
+  if (category === "explore") return "read";
+  if (category === "verify" || activity.channel === "verification") return "verify";
+  if (activity.kind === "message") return "message";
+  return "other";
+}
+
+function firstDisplayLine(value?: string): string {
+  const text = sanitizeAgentDisplayText(value);
+  return text?.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
+}
+
+function stripAgentLogPrefix(text: string, kind: AgentLogKind): string {
+  const prefixes: Partial<Record<AgentLogKind, string[]>> = {
+    read: ["读取", "查看", "读取了"],
+    search: ["搜索", "搜索了", "网页搜索"],
+    verify: ["检查", "验证", "检查了"],
+    edit: ["编辑", "修改", "生成了"],
+    command: ["运行", "执行", "运行了"],
+  };
+  const prefix = prefixes[kind]?.find((item) => text.startsWith(item));
+  return prefix && text.length > prefix.length ? text.slice(prefix.length).trim() : text;
+}
+
+function agentLogText(activity: AiAgentActivity, kind: AgentLogKind): string {
+  if (kind === "thinking" || kind === "message") {
+    return firstDisplayLine(activityDisplayText(activity)) || sanitizeAgentDisplayText(activity.title) || "…";
+  }
+  if (kind === "edit") return activity.codeChange?.documentName?.trim() || sanitizeAgentDisplayText(activity.title) || "当前文档";
+  if (kind === "command") {
+    const text = activity.execution?.label || sanitizeAgentDisplayText(activity.title) || "运行命令";
+    return stripAgentLogPrefix(text, kind);
+  }
+  const title = sanitizeAgentDisplayText(activity.title) || sanitizeAgentDisplayText(activity.detail) || "完成";
+  return stripAgentLogPrefix(title, kind);
+}
+
+function agentLogHasDetail(activity: AiAgentActivity, kind: AgentLogKind): boolean {
+  if (kind === "thinking" || kind === "message" || kind === "question" || kind === "decision") return true;
+  if (activity.codeChange || activity.execution || activity.status === "error") return true;
+  return Boolean(activity.detail || formatAgentToolResult(activity));
+}
+
+function AgentLogIcon({ activity, kind }: { activity: AiAgentActivity; kind: AgentLogKind }) {
+  const icon = activity.status === "running"
+    ? <LoaderCircle className="spin" size={13}/>
+    : activity.status === "error"
+      ? <AlertCircle size={13}/>
+      : kind === "thinking" ? <Sparkles size={13}/>
+        : kind === "edit" ? <Code2 size={13}/>
+          : kind === "command" ? <Terminal size={13}/>
+            : kind === "message" ? <MessageSquarePlus size={13}/>
+              : kind === "question" ? <ShieldQuestion size={13}/>
+                : kind === "decision" ? <ListChecks size={13}/>
+                  : <SearchCheck size={13}/>;
+  return <span className={`ai-agent-log-icon ${kind} ${activity.status}`} aria-hidden="true">{icon}</span>;
+}
+
+function agentLogMeta(activity: AiAgentActivity, kind: AgentLogKind, onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void) {
+  if (kind === "edit" && activity.codeChange) {
+    const diff = formatAgentToolResult(activity) || createCodeChangePreview(activity.codeChange.before, activity.codeChange.after);
+    const stats = formatCodeChangeStats(diff);
+    const startLine = codeDiffStartLine(diff);
+    return <button type="button" className="ai-agent-log-diff" disabled={!startLine} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onRevealCodeChange(diff, startLine || undefined, activity.codeChange); }}>
+      <b className="added">+{stats.added}</b><b className="removed">-{stats.removed}</b><span>查看变更</span>
+    </button>;
+  }
+  if (activity.status === "error") return <span className="ai-agent-log-meta error">失败</span>;
+  if (kind === "verify" && activity.status === "done") return <span className="ai-agent-log-meta ok">通过</span>;
+  if (activity.execution?.state === "completed") return <span className="ai-agent-log-meta ok">完成</span>;
+  if (activity.execution?.state === "failed") return <span className="ai-agent-log-meta error">失败</span>;
+  return null;
+}
+
+function AgentLogDetail({ activity, kind, onRevealCodeChange, onRevealProblem }: {
+  activity: AiAgentActivity;
+  kind: AgentLogKind;
   onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void;
   onRevealProblem: (line: number) => void;
 }) {
-  return <>
-    {composeAgentRunBody(activities, hiddenToolName).map((block) => block.kind === "reply"
-      ? <AgentActivityRow key={block.activity.id} activity={block.activity} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>
-      : <div className="ai-agent-worklog" key={block.id}><div className="ai-agent-activity-list">{block.entries.map((entry) => entry.kind === "group"
-        ? <details className="ai-agent-tool-group" key={entry.id}>
-          <summary><ChevronRight className="ai-agent-tool-chevron" size={14}/><strong>{entry.summary}</strong></summary>
-          <div>{entry.activities.map((activity) => <span key={activity.id}><strong>{activity.title}</strong>{activity.detail && <small>{activity.detail}</small>}</span>)}</div>
-        </details>
-        : <AgentActivityRow key={entry.activity.id} activity={entry.activity} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>)}
-      </div></div>)}
-  </>;
+  if (kind === "thinking" || kind === "message") return <StreamingRichText id={activity.id} text={activityDisplayText(activity)} live={activity.status === "running"}/>;
+  if (kind === "question" || kind === "decision") return <MarkdownContent>{activity.title}</MarkdownContent>;
+  if (activity.execution) return <AgentExecutionResult execution={activity.execution} onRevealProblem={onRevealProblem}/>;
+  if (activity.codeChange) {
+    const diff = formatAgentToolResult(activity);
+    return diff ? <ToolResult activity={activity} onRevealCodeChange={onRevealCodeChange}/> : <CodeChangeSummary activity={activity} onRevealCodeChange={onRevealCodeChange}/>;
+  }
+  if (activity.status === "error") return <p className="ai-agent-log-error">{formatAgentFailure(activity) || "执行失败"}</p>;
+  if (formatAgentToolResult(activity)) return <ToolResult activity={activity} onRevealCodeChange={onRevealCodeChange}/>;
+  return activity.detail ? <p>{sanitizeAgentDisplayText(activity.detail)}</p> : null;
+}
+
+function AgentLogRow({ activity, runStatus, onRevealCodeChange, onRevealProblem }: {
+  activity: AiAgentActivity;
+  runStatus: AgentRun["status"];
+  onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void;
+  onRevealProblem: (line: number) => void;
+}) {
+  const kind = agentLogKind(activity);
+  const hasDetail = agentLogHasDetail(activity, kind);
+  const [open, setOpen] = useState(runStatus === "running" && activity.status === "running");
+  const detailRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setOpen(runStatus === "running" && activity.status === "running");
+  }, [activity.status, runStatus]);
+
+  useEffect(() => {
+    const detail = detailRef.current;
+    if (!detail) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.deltaY) return;
+      let node = event.target instanceof Element ? event.target : null;
+      let scroller: HTMLElement | null = null;
+      while (node && node !== detail) {
+        if (node.matches(".ai-markdown, .ai-markdown-stream, pre") && node.scrollHeight > node.clientHeight) {
+          scroller = node as HTMLElement;
+          break;
+        }
+        node = node.parentElement;
+      }
+      if (!scroller) return;
+      const atTop = scroller.scrollTop <= 0 && event.deltaY < 0;
+      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1 && event.deltaY > 0;
+      if (!atTop && !atBottom) event.stopPropagation();
+    };
+    detail.addEventListener("wheel", handleWheel, { passive: true });
+    return () => detail.removeEventListener("wheel", handleWheel);
+  }, [hasDetail, open]);
+
+  const text = agentLogText(activity, kind);
+  const summary = <><AgentLogIcon activity={activity} kind={kind}/><span className="ai-agent-log-label">{agentLogLabels[kind]}</span><span className="ai-agent-log-text" title={text}>{text}</span>{agentLogMeta(activity, kind, onRevealCodeChange)}{hasDetail && <ChevronRight className="ai-agent-log-chevron" size={12}/>}</>;
+  if (!hasDetail) return <div className={`ai-agent-log-row ${activity.status}`}><div className="ai-agent-log-row-inner">{summary}</div></div>;
+  return <details className={`ai-agent-log-row ${activity.status}`} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary className="ai-agent-log-row-inner">{summary}</summary>
+    <div ref={detailRef} className="ai-agent-log-detail"><AgentLogDetail activity={activity} kind={kind} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/></div>
+  </details>;
+}
+
+export function AgentRunLog({ activities, status = "done", startedAt, finishedAt, hiddenToolName, taskPlan, onRevealCodeChange, onRevealProblem }: {
+  activities: AiAgentActivity[];
+  status?: AgentRun["status"];
+  startedAt?: number;
+  finishedAt?: number;
+  hiddenToolName?: AiAgentToolName;
+  taskPlan?: AiAgentPlanStep[];
+  onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void;
+  onRevealProblem: (line: number) => void;
+}) {
+  const [open, setOpen] = useState(status === "running");
+
+  useEffect(() => {
+    if (status === "running") setOpen(true);
+    if (status === "done" || status === "error" || status === "stopped") setOpen(false);
+  }, [status]);
+
+  if (status === "queued") return null;
+
+  const ordered = groupAgentActivities(activities, hiddenToolName).flatMap((entry) => entry.kind === "group" ? entry.activities : [entry.activity]);
+  if (status !== "running" && !ordered.length && !taskPlan?.length) return null;
+  const summary = summarizeAgentRun(ordered);
+  const elapsed = formatAgentElapsed(startedAt, finishedAt);
+  const title = status === "running" ? "正在处理" : status === "error" ? "任务未完成" : status === "stopped" ? "已停止" : "已完成";
+  const statusIcon = status === "running" ? <LoaderCircle className="spin" size={15}/> : status === "error" ? <AlertCircle size={15}/> : status === "stopped" ? <Square size={13}/> : <Check size={15}/>;
+
+  return <section className={`ai-agent-run-log ${status}`}>
+    <button type="button" className="ai-agent-run-log-header" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+      <span className="ai-agent-run-log-status">{statusIcon}</span>
+      <span className="ai-agent-run-log-title">{title}{elapsed ? `，用时 ${elapsed}` : ""}</span>
+      <ChevronRight className={`ai-agent-log-chevron ${open ? "open" : ""}`} size={14}/>
+    </button>
+    {open && <div className="ai-agent-run-log-body">
+      {taskPlan?.length ? <AgentTaskPlan steps={taskPlan} collapsed={status === "done"}/> : null}
+      {summary && <div className="ai-agent-run-log-summary">{summary}</div>}
+      {ordered.map((activity) => <AgentLogRow key={activity.id} activity={activity} runStatus={status} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>)}
+    </div>}
+  </section>;
+}
+
+export function AgentRunBody({ activities, status = "done", startedAt, finishedAt, hiddenToolName, taskPlan, onRevealCodeChange, onRevealProblem }: {
+  activities: AiAgentActivity[];
+  status?: AgentRun["status"];
+  startedAt?: number;
+  finishedAt?: number;
+  hiddenToolName?: AiAgentToolName;
+  taskPlan?: AiAgentPlanStep[];
+  onRevealCodeChange: (diff: string, line?: number, change?: AiCodeChangeSnapshot) => void;
+  onRevealProblem: (line: number) => void;
+}) {
+  return <AgentRunLog activities={activities} status={status} startedAt={startedAt} finishedAt={finishedAt} hiddenToolName={hiddenToolName} taskPlan={taskPlan} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>;
 }
 
 function AgentTaskPlan({ steps, collapsed = false }: { steps: AiAgentPlanStep[]; collapsed?: boolean }) {
@@ -1342,10 +1632,6 @@ function AgentTaskPlan({ steps, collapsed = false }: { steps: AiAgentPlanStep[];
     <header><span><ListChecks size={14}/><strong>执行计划</strong></span><small>{completed}/{steps.length}</small></header>
     {list}
   </div>;
-}
-
-function AgentRunProgress({ progress }: { progress?: AiAgentProgress }) {
-  return progress?.taskPlan?.length ? <AgentTaskPlan steps={progress.taskPlan}/> : null;
 }
 
 function AgentPermissionPrompt({ request, onRespond }: { request: AiAgentPermissionRequest; onRespond: (approved: boolean) => void }) {
@@ -1368,6 +1654,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const [prompt, setPrompt] = useState("");
   const [pendingAttachments, setPendingAttachments] = useState<AiImageAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<AiImagePreview | null>(null);
   const [dropDepth, setDropDepth] = useState(0);
   const [agentMode, setAgentMode] = useState<AiAgentMode>("agent");
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
@@ -1402,6 +1689,12 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const running = runs.some((run) => run.status === "running");
   const awaitingClarification = runs.at(-1)?.status === "done" && Boolean(runs.at(-1)?.result?.clarification);
   const modelName = getAiModelConfig().model;
+
+  const openImagePreview = (attachment: { name: string; sourceBytes: number; previewDataUrl?: string; dataUrl?: string }) => {
+    const src = attachment.dataUrl || attachment.previewDataUrl;
+    if (!src) return;
+    setImagePreview({ src, alt: attachment.name, title: `${attachment.name} · ${formatImageAttachmentSize(attachment.sourceBytes)}` });
+  };
 
   const addImageFiles = async (files: readonly File[]) => {
     if (!files.length) return;
@@ -1897,13 +2190,16 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         <div ref={threadContentRef} className="ai-thread-content">
         {!runs.length && <AiAssistantWelcome onSelect={selectSuggestion} contextName={contextName} lineCount={lineCount}/>}
         {runs.map((run) => <article className="ai-agent-run" key={run.id}>
-          <div className="ai-agent-user-message"><p className="ai-agent-prompt">{run.prompt}</p>{run.attachments?.length ? <div className="ai-agent-user-attachments" aria-label="消息图片">{run.attachments.map((attachment) => <span className="ai-agent-user-attachment" key={attachment.id} title={`${attachment.name} · ${formatImageAttachmentSize(attachment.sourceBytes)}${attachment.sendable ? "" : "（需要重新添加后才能发送）"}`}><img src={attachment.previewDataUrl || attachment.dataUrl} alt={attachment.name}/></span>)}</div> : null}</div>
+          <div className="ai-agent-user-message">
+            <div className="ai-agent-user-message-body">
+              <p className="ai-agent-prompt">{run.prompt}</p>
+              {run.attachments?.length ? <div className="ai-agent-user-attachments" aria-label="消息图片">{run.attachments.map((attachment) => <button type="button" className="ai-agent-user-attachment" key={attachment.id} title={`${attachment.name} · ${formatImageAttachmentSize(attachment.sourceBytes)}${attachment.sendable ? "" : "（需要重新添加后才能发送）"} · 点击放大`} aria-label={`放大查看图片：${attachment.name}`} onClick={() => openImagePreview(attachment)}><img src={attachment.previewDataUrl || attachment.dataUrl} alt={attachment.name}/></button>)}</div> : null}
+            </div>
+            <AiUserMessageMeta text={run.prompt} timestamp={run.startedAt}/>
+          </div>
           <div className="ai-agent-activity-list">
-          <AgentRunBody activities={run.activities} hiddenToolName={run.permission?.toolName} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>
-          {run.status === "done" && run.result?.taskPlan?.length ? <AgentTaskPlan steps={run.result.taskPlan} collapsed/> : null}
-          {(run.status === "error" || run.status === "stopped") && run.progress?.taskPlan?.length ? <AgentTaskPlan steps={run.progress.taskPlan}/> : null}
+          <AgentRunBody activities={run.activities} status={run.status} startedAt={run.startedAt} finishedAt={run.finishedAt} hiddenToolName={run.permission?.toolName} taskPlan={run.result?.taskPlan ?? run.progress?.taskPlan} onRevealCodeChange={onRevealCodeChange} onRevealProblem={onRevealProblem}/>
           {run.permission && <AgentPermissionPrompt request={run.permission} onRespond={(approved) => respondToPermission(run.id, approved)}/>}
-          {run.status === "running" && <AgentRunProgress progress={run.progress}/>}
           </div>
           {run.status === "done" && !run.result?.clarification && <div className="ai-agent-response">
             <MarkdownContent>{run.result?.summary || "完成"}</MarkdownContent>
@@ -1915,13 +2211,14 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
                   ? "回复"
                   : run.result?.intent === "inspect"
                     ? "已分析"
-                    : "完成"} meta={agentRunMeta(run)}>
+                    : "完成"} meta={run.activities.length ? "" : agentRunMeta(run)}>
               {run.result?.taskChange && <span className="ai-task-change-actions">
                 <button disabled={!run.taskUndone} title={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} aria-label={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} onClick={() => { if (run.result?.taskChange && onApplyTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: false }); }}><Check size={13}/></button>
                 <button disabled={run.taskUndone} title={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} aria-label={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} onClick={() => { if (run.result?.taskChange && onUndoTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: true }); }}><Undo2 size={13}/></button>
               </span>}
               {run.result?.mode === "plan" && run.result.planPrompt && !run.result.clarification && <button type="button" className="ai-plan-execute" disabled={running} onClick={() => executePlan(run)} title="由 Agent 按此计划执行"><Play size={13}/><span>执行计划</span></button>}
               <AiResponseActions markdown={run.result?.summary || "完成"} disabled={running || retryBlocked(run)} onRetry={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan, pendingAttachments.length ? pendingAttachments : undefined)}/>
+              <AgentResponseTime timestamp={run.finishedAt ?? run.startedAt}/>
             </AgentResponseFooter>
           </div>}
           {run.status === "queued" && <div className="ai-agent-run-state queued"><Clock3 size={14}/><span>等待当前任务完成</span><span className="ai-agent-queued-actions"><button disabled={running} title="立即执行" aria-label="立即执行排队任务" onClick={() => startQueuedRun(run)}><Play size={13}/></button><button title="移出队列" aria-label="移出任务队列" onClick={() => removeQueuedRun(run.id)}><X size={14}/></button></span></div>}
@@ -1940,7 +2237,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       <div className={`ai-composer-input${dropDepth > 0 ? " dragging" : ""}`}>
         {pendingAttachments.length > 0 && <div className="ai-composer-attachments" aria-label="待发送图片">
           {pendingAttachments.map((attachment) => <div className="ai-composer-attachment" key={attachment.id} title={`${attachment.name} · ${formatImageAttachmentSize(attachment.sourceBytes)}`}>
-            <img src={attachment.previewDataUrl || attachment.dataUrl} alt={attachment.name}/>
+            <img src={attachment.previewDataUrl || attachment.dataUrl} alt={attachment.name} role="button" tabIndex={0} title={`${attachment.name} · ${formatImageAttachmentSize(attachment.sourceBytes)} · 点击放大`} aria-label={`放大查看图片：${attachment.name}`} onClick={() => openImagePreview(attachment)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openImagePreview(attachment); } }}/>
             <button type="button" onClick={() => setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id))} title={`移除 ${attachment.name}`} aria-label={`移除 ${attachment.name}`}><X size={12}/></button>
           </div>)}
         </div>}
@@ -1979,6 +2276,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         </div>
       </div>
     </div>
+    {imagePreview && <AiImageLightbox image={imagePreview} onClose={() => setImagePreview(null)}/>}
     {dropDepth > 0 && <div className="ai-assistant-drop-overlay" aria-label="松开以添加图片"><span className="ai-assistant-drop-icon"><ImagePlus size={18}/></span><strong>松开以添加图片</strong><small>支持 PNG / JPEG / WebP，最多 {MAX_IMAGE_COUNT} 张</small></div>}
   </section>;
 }

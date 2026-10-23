@@ -26,6 +26,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 mod codex_agent;
 mod hardware;
+mod web_search;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -7175,6 +7176,7 @@ pub fn run() {
             ai_chat_completion,
             ai_chat_completion_stream,
             cancel_ai_chat_stream,
+            web_search::web_search,
             send_python_input,
             codex_agent_start,
             codex_agent_request,

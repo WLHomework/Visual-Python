@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 工作流界面预览</title>
+<style>
+  :root {
+    --page: #e7edf4;
+    --panel: #f7f8fa;
+    --surface: #ffffff;
+    --surface-soft: #f1f4f8;
+    --border: #d8e0ea;
+    --border-soft: #e7ebf1;
+    --text: #263245;
+    --muted: #687384;
+    --muted-2: #8a94a3;
+    --accent: #2f9e8f;
+    --accent-strong: #257c70;
+    --accent-soft: #e5f4f1;
+    --warn: #a66b12;
+    --warn-soft: #fff6e3;
+    --danger: #b95050;
+    --code-bg: #f4f7fa;
+    --shadow: 0 18px 55px rgba(35, 51, 72, .16);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body {
+    margin: 0;
+    color: var(--text);
+    background:
+      radial-gradient(circle at 20% 0%, rgba(255,255,255,.9), transparent 34%),
+      linear-gradient(135deg, #e9eff5, #dfe7f0);
+    font: 14px/1.55 "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+
+  .preview {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    padding: 30px 20px 46px;
+  }
+
+  .demo-bar {
+    width: min(1080px, 100%);
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+  }
+  .demo-bar h1 {
+    margin: 0;
+    font-size: 18px;
+    letter-spacing: -.02em;
+  }
+  .demo-bar p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .demo-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .segmented {
+    display: flex;
+    padding: 3px;
+    border: 1px solid #d2dbe7;
+    border-radius: 9px;
+    background: rgba(255,255,255,.58);
+  }
+  .segmented button {
+    height: 28px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 12px/1 inherit;
+    cursor: pointer;
+  }
+  .segmented button.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 4px rgba(35,51,72,.12);
+  }
+  .demo-button {
+    height: 34px;
+    padding: 0 13px;
+    border: 1px solid #cdd8e5;
+    border-radius: 8px;
+    background: rgba(255,255,255,.68);
+    color: #435065;
+    font: 600 12px/1 inherit;
+    cursor: pointer;
+  }
+  .demo-button:hover { background: #fff; }
+
+  .ai-panel {
+    width: 402px;
+    height: 900px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgba(208,219,232,.9);
+    border-radius: 18px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+  }
+
+  .panel-head {
+    flex: 0 0 auto;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--border-soft);
+    background: rgba(247,248,250,.94);
+  }
+  .panel-logo {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 7px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+  .panel-head strong { font-size: 13px; }
+  .panel-head small {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted-2);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .panel-head-actions { margin-left: auto; display: flex; gap: 4px; }
+  .icon-button {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .icon-button:hover { background: #e9edf3; color: var(--text); }
+
+  .chat {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 16px 14px 18px;
+  }
+  .chat::-webkit-scrollbar { width: 9px; }
+  .chat::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 10px;
+    background: #c8d1dc;
+    background-clip: padding-box;
+  }
+
+  .user-turn {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0 0 16px;
+  }
+  .user-bubble {
+    max-width: 84%;
+    padding: 9px 12px;
+    border: 1px solid #c7e3de;
+    border-radius: 13px 4px 13px 13px;
+    background: #e7f4f1;
+    color: #294b46;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .run-card {
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    background: var(--surface);
+    box-shadow: 0 2px 8px rgba(35,51,72,.04);
+  }
+
+  .run-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 12px 12px 9px;
+  }
+  .run-status {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #e8f5f1;
+    color: var(--accent-strong);
+  }
+  .run-status.running {
+    background: #e9f1ff;
+    color: #456fae;
+  }
+  .run-title {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0;
+  }
+  .run-title strong {
+    color: #2d3b4e;
+    font-size: 13px;
+    letter-spacing: -.01em;
+  }
+  .run-title span {
+    color: var(--muted-2);
+    font-size: 12px;
+  }
+  .run-toggle {
+    min-width: 0;
+    flex: 1 1 auto;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 11px/1 inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .run-toggle:hover .run-title strong { color: #16253a; }
+  .run-toggle:hover svg { color: #5f6d80; }
+  .run-toggle svg { margin-left: auto; flex: 0 0 auto; transform: rotate(90deg); transition: transform .16s ease; }
+  .run-card.process-collapsed .run-toggle svg { transform: rotate(0deg); }
+
+  .run-overview {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 12px;
+    padding: 0 0 11px 33px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .run-overview .overview-arrow { color: #b1bac6; }
+  .run-overview .overview-copy { display: inline-flex; align-items: center; gap: 7px; }
+
+  .run-process {
+    overflow: hidden;
+    border-top: 1px solid var(--border-soft);
+    padding: 10px 12px 12px;
+    background: linear-gradient(180deg, #fcfdfe, #fafbfd);
+  }
+  .run-card.process-collapsed .run-process { display: none; }
+
+  .timeline {
+    position: relative;
+    display: grid;
+    gap: 1px;
+  }
+  .timeline::before {
+    position: absolute;
+    top: 15px;
+    bottom: 15px;
+    left: 13px;
+    width: 1px;
+    background: #e0e6ee;
+    content: "";
+  }
+
+  .step {
+    position: relative;
+    margin: 0;
+    padding-left: 34px;
+  }
+  .step > summary {
+    position: relative;
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 5px 5px 0;
+    border-radius: 6px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .step > summary::-webkit-details-marker { display: none; }
+  .step > summary:hover { background: #f4f7fa; }
+  .step-icon {
+    position: absolute;
+    z-index: 1;
+    left: -31px;
+    top: 6px;
+    width: 21px;
+    height: 21px;
+    display: grid;
+    place-items: center;
+    border: 2px solid #fcfdfe;
+    border-radius: 50%;
+    background: #e7f5f1;
+    color: var(--accent-strong);
+  }
+  .step-icon.file { background: #eaf1fb; color: #5578ad; }
+  .step-icon.code { background: #f0ebfa; color: #7258a6; }
+  .step-icon.warn { background: var(--warn-soft); color: var(--warn); }
+  .step-icon.error { background: #fbecec; color: var(--danger); }
+  .step-icon.running { background: #e9f1ff; color: #456fae; }
+
+  .step-body { min-width: 0; flex: 1 1 auto; }
+  .step-title {
+    min-width: 0;
+    overflow: hidden;
+    color: #354357;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .step-sub {
+    display: block;
+    margin-top: 1px;
+    overflow: hidden;
+    color: var(--muted-2);
+    font-size: 10px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .step-meta {
+    flex: 0 0 auto;
+    color: #9aa4b2;
+    font-size: 10px;
+  }
+  .step-chip {
+    flex: 0 0 auto;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-size: 9px;
+    font-weight: 600;
+  }
+  .step-chip.ok { background: #e8f5f1; color: var(--accent-strong); }
+  .step-diff {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 5px;
+    border: 1px solid var(--border-soft);
+    border-radius: 5px;
+    background: #fff;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .step-diff .plus { color: #3c8c68; }
+  .step-diff .minus { color: #b46b6b; }
+  .step-diff:hover { border-color: #bfd8d2; color: var(--text); }
+
+  .step-detail {
+    margin: 2px 0 7px 0;
+    padding: 8px 9px;
+    border: 1px solid var(--border-soft);
+    border-radius: 7px;
+    background: #f8fafc;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  .step-detail p { margin: 0; }
+  .step-detail code {
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: #edf2f7;
+    color: #46556a;
+    font: 10.5px/1.5 "Cascadia Code", Consolas, monospace;
+  }
+  .step-detail .detail-warn { color: #8a611a; }
+  .step-detail .detail-label {
+    display: inline-block;
+    margin-bottom: 3px;
+    color: #46556a;
+    font-weight: 700;
+  }
+
+  .step[open] > summary { background: #f8fafc; }
+  .step[open] .step-title { color: #263245; }
+
+  .step-chevron {
+    flex: 0 0 auto;
+    color: #aab4c1;
+    transition: transform .16s ease;
+  }
+  .step[open] .step-chevron { transform: rotate(90deg); }
+  .run-log { min-width: 0; display: grid; gap: 1px; }
+  .log-group { display: flex; align-items: center; gap: 6px; padding: 4px 3px 7px; color: #7d8897; font-size: 10.5px; }
+  .log-group svg { color: #a0aab7; transform: rotate(90deg); }
+  .log-row { min-width: 0; }
+  .log-row > summary { width: 100%; min-width: 0; min-height: 30px; display: flex; align-items: center; gap: 7px; padding: 3px 3px; border-radius: 5px; list-style: none; cursor: pointer; }
+  .log-row > summary::-webkit-details-marker { display: none; }
+  .log-row > summary:hover { background: #f4f7fa; }
+  .log-icon { width: 16px; height: 16px; display: grid; place-items: center; flex: 0 0 auto; color: #8c98a7; }
+  .log-label { flex: 0 0 42px; color: #8a95a3; font-size: 10px; font-weight: 600; white-space: nowrap; }
+  .log-text { min-width: 0; flex: 1 1 auto; overflow: hidden; color: #566579; font-size: 11.5px; line-height: 1.45; white-space: nowrap; text-overflow: ellipsis; }
+  .log-meta { margin-left: auto; flex: 0 0 auto; color: #a0aab6; font-size: 10px; }
+  .log-meta.warn { color: var(--warn); }
+  .log-meta.ok { color: var(--accent-strong); }
+  .log-diff { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; padding: 2px 5px; border: 1px solid var(--border-soft); border-radius: 4px; background: #fff; color: var(--muted); font-size: 9px; font-weight: 600; cursor: pointer; }
+  .log-diff .plus { color: #3c8c68; }
+  .log-diff .minus { color: #b46b6b; }
+  .log-diff:hover { border-color: #bfd8d2; color: var(--text); }
+  .log-detail { margin: 0 3px 6px 23px; padding: 6px 8px; border-left: 2px solid #e2e8f0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+  .log-detail p { margin: 0; }
+  .log-detail code { padding: 1px 3px; border-radius: 3px; background: #edf2f7; color: #46556a; font: 10.5px/1.5 "Cascadia Code", Consolas, monospace; }
+  .log-detail .detail-warn { color: #8a611a; }
+  .log-detail .detail-label { display: inline-block; margin-right: 4px; color: #46556a; font-weight: 700; }
+  .log-chevron { flex: 0 0 auto; color: #b0bac6; transition: transform .16s ease; }
+  .log-row[open] .log-chevron { transform: rotate(90deg); }
+
+  .answer {
+    border-top: 1px solid var(--border-soft);
+    padding: 13px 13px 12px;
+  }
+  .answer-heading {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 7px;
+    color: #354357;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .answer-heading::before {
+    width: 4px;
+    height: 13px;
+    border-radius: 2px;
+    background: var(--accent);
+    content: "";
+  }
+  .answer p { margin: 0 0 9px; font-size: 12.5px; line-height: 1.65; }
+  .code-card {
+    overflow: hidden;
+    margin: 9px 0 10px;
+    border: 1px solid #d8e2ec;
+    border-radius: 8px;
+    background: var(--code-bg);
+  }
+  .code-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 9px;
+    border-bottom: 1px solid #e1e8f0;
+    color: var(--muted);
+    font: 600 10px/1 "Segoe UI", sans-serif;
+  }
+  .code-head .copy {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: 600 10px/1 inherit;
+    cursor: pointer;
+  }
+  .code-head .copy:hover { color: var(--text); }
+  pre {
+    margin: 0;
+    overflow-x: auto;
+    padding: 10px 11px;
+    color: #334155;
+    font: 11px/1.6 "Cascadia Code", Consolas, monospace;
+  }
+  .answer ul {
+    margin: 4px 0 0;
+    padding-left: 17px;
+    color: #5b6879;
+    font-size: 11.5px;
+    line-height: 1.65;
+  }
+  .answer li { margin: 3px 0; }
+  .answer li code {
+    padding: 1px 3px;
+    border-radius: 3px;
+    background: #edf2f7;
+    color: #46556a;
+    font: 10.5px/1.5 "Cascadia Code", Consolas, monospace;
+  }
+  .answer-foot {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 10px;
+    color: var(--muted-2);
+    font-size: 10px;
+  }
+  .answer-foot-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 2px;
+  }
+  .answer-foot-actions button {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--muted-2);
+    cursor: pointer;
+  }
+  .answer-foot-actions button:hover { background: var(--surface-soft); color: var(--text); }
+
+  .live-placeholder {
+    display: none;
+    margin-top: 2px;
+    padding: 11px 12px;
+    border-top: 1px solid var(--border-soft);
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .live-placeholder .pulse {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 0 rgba(47,158,143,.35);
+    animation: pulse 1.5s infinite;
+  }
+
+  .composer {
+    flex: 0 0 auto;
+    padding: 8px 12px 12px;
+  }
+  .composer-box {
+    padding: 9px 10px 7px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: 0 5px 18px rgba(15,23,42,.06);
+  }
+  .composer-placeholder {
+    min-height: 24px;
+    padding: 1px 2px;
+    color: #8d98a7;
+    font-size: 13px;
+  }
+  .composer-row {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-height: 32px;
+  }
+  .round-add {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 50%;
+    background: var(--surface-soft);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .round-add:hover { background: #e8edf3; color: var(--text); }
+  .composer-control {
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font: 500 11px/1 inherit;
+    cursor: pointer;
+  }
+  .composer-control:hover { background: var(--surface-soft); color: var(--text); }
+  .composer-control .model-name {
+    max-width: 120px;
+    overflow: hidden;
+    color: #58667a;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .composer-control small { color: #9aa4b2; font-size: 10px; }
+  .composer-spacer { flex: 1 1 auto; }
+  .send-button {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--accent), var(--surface) 84%);
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .send-button:hover { background: var(--accent); color: #fff; }
+
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border: 1.6px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(47,158,143,.35); }
+    70% { box-shadow: 0 0 0 5px rgba(47,158,143,0); }
+    100% { box-shadow: 0 0 0 0 rgba(47,158,143,0); }
+  }
+
+  .run-card[data-state="running"] .done-only { display: none; }
+  .run-card[data-state="running"] .running-only { display: inline-flex; }
+  .run-card[data-state="running"] .log-row.running-only { display: block; }
+  .run-card[data-state="running"] .run-status.running-only,
+  .run-card[data-state="running"] .step-icon.running-only { display: grid; }
+  .run-card[data-state="running"] .answer { display: none; }
+  .run-card[data-state="running"] .live-placeholder { display: block; }
+  .run-card .running-only { display: none; }
+
+  .run-card[data-state="done"] .step.running-step .step-icon {
+    background: #e7f5f1;
+    color: var(--accent-strong);
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    z-index: 20;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(21, 32, 48, .37);
+    backdrop-filter: blur(3px);
+  }
+  .modal-backdrop.open { display: flex; }
+  .diff-dialog {
+    width: min(640px, 100%);
+    max-height: min(560px, calc(100vh - 40px));
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #d4deea;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 24px 70px rgba(20,32,50,.26);
+  }
+  .diff-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border-bottom: 1px solid #e5ebf2;
+  }
+  .diff-head strong { font-size: 13px; }
+  .diff-stat {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #e8f5f1;
+    color: #337d6f;
+    font: 600 10px/1.4 "Cascadia Code", Consolas, monospace;
+  }
+  .diff-head .close {
+    margin-left: auto;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .diff-head .close:hover { background: #f1f4f8; color: var(--text); }
+  .diff-body { overflow: auto; padding: 7px 0; }
+  .diff-line {
+    display: flex;
+    gap: 12px;
+    padding: 1px 14px;
+    color: #46556a;
+    font: 11px/1.7 "Cascadia Code", Consolas, monospace;
+    white-space: pre;
+  }
+  .diff-line .ln { width: 22px; flex: 0 0 22px; color: #a5afbd; text-align: right; user-select: none; }
+  .diff-line.add { background: #eaf7ef; color: #2e6b4b; }
+  .diff-line.add .ln { color: #8dbb9f; }
+  .diff-line.del { background: #fdf0f0; color: #8d4242; }
+  .diff-line.del .ln { color: #d1a2a2; }
+
+  @media (max-height: 900px) {
+    .ai-panel { height: calc(100vh - 118px); min-height: 650px; }
+  }
+  @media (max-width: 520px) {
+    .preview { padding: 18px 10px 30px; }
+    .demo-bar { align-items: flex-start; flex-direction: column; gap: 12px; }
+    .ai-panel { width: 100%; border-radius: 14px; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" fill="currentColor"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 4.5A3 3 0 0 0 6 7.5a3.4 3.4 0 0 0-1.8 6.1A3.2 3.2 0 0 0 7.5 19a3 3 0 0 0 4.5-2.2V6.8a2.3 2.3 0 0 0-2.5-2.3Zm5 0A3 3 0 0 1 18 7.5a3.4 3.4 0 0 1 1.8 6.1A3.2 3.2 0 0 1 16.5 19a3 3 0 0 1-4.5-2.2V6.8a2.3 2.3 0 0 1 2.5-2.3Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3.5h7l5 5V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M13 3.5V9h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m5 7 4 5-4 5M12 17h7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m9 7-5 5 5 5M15 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 9v5M12 17.2v.1" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v5.5c0 4.6-3.2 8-8 9.5-4.8-1.5-8-4.9-8-9.5V6l8-3Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m8.5 12 2.2 2.2 4.8-4.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5m0 0-6 6m6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m19 13.5 1.3 1-.9 2.1-1.7-.2-1.2 1.2.2 1.7-2.1.9-1-1.3H11l-1 1.3-2.1-.9.2-1.7-1.2-1.2-1.7.2-.9-2.1 1.3-1V10l-1.3-1 .9-2.1 1.7.2L8 5.9l-.2-1.7 2.1-.9 1 1.3h2.2l1-1.3 2.1.9-.2 1.7 1.2 1.2 1.7-.2.9 2.1-1.3 1v2.5Z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></symbol>
+</svg>
+
+<main class="preview">
+  <header class="demo-bar">
+    <div>
+      <h1>AI 工作流界面预览</h1>
+      <p>一次运行 = 一张可折叠的工作流卡，过程默认收起，答案始终可见</p>
+    </div>
+    <div class="demo-controls">
+      <div class="segmented" role="group" aria-label="演示状态">
+        <button type="button" class="active" data-mode="done">已完成</button>
+        <button type="button" data-mode="running">运行中</button>
+      </div>
+      <button type="button" class="demo-button" id="openDiffTop">查看变更</button>
+    </div>
+  </header>
+
+  <section class="ai-panel" aria-label="AI 编程助手">
+    <header class="panel-head">
+      <span class="panel-logo"><svg class="icon" width="16" height="16"><use href="#i-spark"/></svg></span>
+      <div style="min-width:0">
+        <strong>AI 编程助手</strong>
+        <small> · 新对话</small>
+      </div>
+      <div class="panel-head-actions">
+        <button class="icon-button" type="button" aria-label="对话历史"><svg width="15" height="15"><use href="#i-file"/></svg></button>
+        <button class="icon-button" type="button" aria-label="设置"><svg width="15" height="15"><use href="#i-settings"/></svg></button>
+      </div>
+    </header>
+
+    <div class="chat" id="chat">
+      <div class="user-turn"><div class="user-bubble">写一段esp32-s3LED闪烁的代码。</div></div>
+
+      <article class="run-card process-collapsed" id="runCard" data-state="done">
+        <div class="run-head">
+          <span class="run-status done-only"><svg width="14" height="14"><use href="#i-check"/></svg></span>
+          <span class="run-status running running-only"><span class="spinner"></span></span>
+          <button type="button" class="run-toggle" id="runToggle" aria-expanded="false">
+            <span class="run-title">
+              <strong class="done-only">已完成</strong><span class="done-only">，用时 13 秒</span>
+              <strong class="running-only">正在处理</strong><span class="running-only">，用时 6 秒</span>
+            </span>
+            <svg width="13" height="13"><use href="#i-chevron"/></svg>
+          </button>
+        </div>
+
+        <div class="run-process" id="runProcess">
+          <div class="run-log">
+            <div class="log-group"><svg width="11" height="11"><use href="#i-chevron"/></svg><span class="done-only">读取了工程，修改了文件，检查通过</span><span class="running-only">读取了工程，正在检查代码</span></div>
+
+            <details class="log-row">
+              <summary>
+                <span class="log-icon"><svg width="12" height="12"><use href="#i-brain"/></svg></span>
+                <span class="log-label">思考</span>
+                <span class="log-text">分析需求与工程结构，确定使用 machine.Pin 和 while True</span>
+                <span class="log-meta">1.2 秒</span>
+                <svg class="log-chevron" width="11" height="11"><use href="#i-chevron"/></svg>
+              </summary>
+              <div class="log-detail"><p>目标是生成一段可直接运行的 ESP32-S3 LED 闪烁程序；当前项目是 MicroPython 工作台，需要复用 <code>machine.Pin</code>，并把循环写成 <code>while True</code>。</p></div>
+            </details>
+
+            <details class="log-row">
+              <summary>
+                <span class="log-icon"><svg width="12" height="12"><use href="#i-file"/></svg></span>
+                <span class="log-label">读取</span>
+                <span class="log-text">main.py · 12 行</span>
+                <span class="log-meta">0.4 秒</span>
+                <svg class="log-chevron" width="11" height="11"><use href="#i-chevron"/></svg>
+              </summary>
+              <div class="log-detail"><p>已读取当前文件，保留现有入口结构，没有修改其他工程文件。</p></div>
+            </details>
+
+            <details class="log-row">
+              <summary>
+                <span class="log-icon"><svg width="12" height="12"><use href="#i-alert"/></svg></span>
+                <span class="log-label">检查</span>
+                <span class="log-text">设备未连接，已跳过运行验证</span>
+                <span class="log-meta warn">1 个提示</span>
+                <svg class="log-chevron" width="11" height="11"><use href="#i-chevron"/></svg>
+              </summary>
+              <div class="log-detail"><p class="detail-warn"><span class="detail-label">提示</span> 请先连接 MicroPython 开发板，才能执行设备端验证。代码生成与静态检查不受影响。</p></div>
+            </details>
+
+            <details class="log-row">
+              <summary>
+                <span class="log-icon"><svg width="12" height="12"><use href="#i-code"/></svg></span>
+                <span class="log-label">编辑</span>
+                <span class="log-text">main.py · 1 KB</span>
+                <button type="button" class="log-diff" data-open-diff><span class="plus">+12</span><span class="minus">-0</span><span>查看变更</span></button>
+                <svg class="log-chevron" width="11" height="11"><use href="#i-chevron"/></svg>
+              </summary>
+              <div class="log-detail"><p>已把新代码写入当前文档；只改动了 <code>main.py</code>，没有新增依赖。</p></div>
+            </details>
+
+            <details class="log-row">
+              <summary>
+                <span class="log-icon"><svg width="12" height="12"><use href="#i-terminal"/></svg></span>
+                <span class="log-label">运行命令</span>
+                <span class="log-text">检查 Python 代码</span>
+                <span class="log-meta ok">通过</span>
+                <svg class="log-chevron" width="11" height="11"><use href="#i-chevron"/></svg>
+              </summary>
+              <div class="log-detail"><p>静态检查通过：12 行，无语法错误；因为设备未连接，未执行设备端运行验证。</p></div>
+            </details>
+
+            <details class="log-row running-only">
+              <summary>
+                <span class="log-icon"><span class="spinner"></span></span>
+                <span class="log-label">运行命令</span>
+                <span class="log-text">正在检查 Python 代码…</span>
+              </summary>
+              <div class="log-detail"><p>正在检查导入与循环结构。</p></div>
+            </details>
+          </div>
+        </div>
+
+        <div class="answer">
+          <div class="answer-heading">结果</div>
+          <p>已在当前 ESP32-S3 MicroPython 文档中写入闪烁程序，静态检查通过（12 行，无诊断）。</p>
+          <div class="code-card">
+            <div class="code-head">
+              <svg width="12" height="12"><use href="#i-code"/></svg>
+              <span>Python</span>
+              <button type="button" class="copy"><svg width="11" height="11"><use href="#i-copy"/></svg>复制</button>
+            </div>
+            <pre><code>from machine import Pin
+import time
+
+LED_PIN = 2  # 接实际板载 LED 所在 GPIO
+led = Pin(LED_PIN, Pin.OUT)
+
+while True:
+    led.value(1)
+    time.sleep(0.5)
+    led.value(0)
+    time.sleep(0.5)</code></pre>
+          </div>
+          <ul>
+            <li>按“外接 LED 接 GPIO2”的常见接法编写，亮灭各 0.5 秒；改 <code>LED_PIN</code> 即可换脚。</li>
+            <li>若使用开发板自带的 WS2812 RGB 灯（常见 GPIO38 或 GPIO48），需要 <code>neopixel</code> 驱动，不能直接当作普通 <code>Pin</code> 使用。</li>
+            <li>当前未连接开发板，因此未执行设备端运行验证。</li>
+          </ul>
+          <div class="answer-foot">
+            <span>13 秒 · 静态检查通过</span>
+            <span class="answer-foot-actions">
+              <button type="button" aria-label="复制"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+              <button type="button" aria-label="重试"><svg width="13" height="13"><use href="#i-chevron"/></svg></button>
+              <button type="button" aria-label="更多"><svg width="13" height="13"><use href="#i-settings"/></svg></button>
+            </span>
+          </div>
+        </div>
+
+        <div class="live-placeholder"><span class="pulse"></span>正在生成可执行结果，完成后会显示在这里…</div>
+      </article>
+    </div>
+
+    <footer class="composer">
+      <div class="composer-box">
+        <div class="composer-placeholder">输入任务...</div>
+        <div class="composer-row">
+          <button type="button" class="round-add" aria-label="添加图片"><svg width="16" height="16"><use href="#i-plus"/></svg></button>
+          <button type="button" class="composer-control"><svg width="13" height="13"><use href="#i-shield"/></svg><span>完全权限</span><svg width="11" height="11"><use href="#i-chevron"/></svg></button>
+          <span class="composer-spacer"></span>
+          <button type="button" class="composer-control"><svg width="13" height="13"><use href="#i-spark"/></svg><span class="model-name">deepseek-flash</span><small>中</small><svg width="11" height="11"><use href="#i-chevron"/></svg></button>
+          <button type="button" class="send-button" aria-label="发送"><svg width="17" height="17"><use href="#i-arrow-up"/></svg></button>
+        </div>
+      </div>
+    </footer>
+  </section>
+</main>
+
+<div class="modal-backdrop" id="diffModal" role="dialog" aria-modal="true" aria-label="代码变更">
+  <div class="diff-dialog">
+    <div class="diff-head">
+      <svg width="14" height="14"><use href="#i-code"/></svg>
+      <strong>main.py</strong>
+      <span class="diff-stat">+12 -0</span>
+      <button type="button" class="close" id="closeDiff" aria-label="关闭">×</button>
+    </div>
+    <div class="diff-body">
+      <div class="diff-line"><span class="ln">1</span><span>from machine import Pin</span></div>
+      <div class="diff-line"><span class="ln">2</span><span>import time</span></div>
+      <div class="diff-line"><span class="ln">3</span><span></span></div>
+      <div class="diff-line add"><span class="ln">4</span><span>LED_PIN = 2  # 接实际板载 LED 所在 GPIO</span></div>
+      <div class="diff-line add"><span class="ln">5</span><span>led = Pin(LED_PIN, Pin.OUT)</span></div>
+      <div class="diff-line"><span class="ln">6</span><span></span></div>
+      <div class="diff-line add"><span class="ln">7</span><span>while True:</span></div>
+      <div class="diff-line add"><span class="ln">8</span><span>    led.value(1)</span></div>
+      <div class="diff-line add"><span class="ln">9</span><span>    time.sleep(0.5)</span></div>
+      <div class="diff-line add"><span class="ln">10</span><span>    led.value(0)</span></div>
+      <div class="diff-line add"><span class="ln">11</span><span>    time.sleep(0.5)</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const runCard = document.getElementById('runCard');
+  const runToggle = document.getElementById('runToggle');
+  const chat = document.getElementById('chat');
+  const diffModal = document.getElementById('diffModal');
+
+  runToggle.addEventListener('click', () => {
+    const collapsed = runCard.classList.toggle('process-collapsed');
+    runToggle.setAttribute('aria-expanded', String(!collapsed));
+  });
+
+  document.querySelectorAll('[data-mode]').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('[data-mode]').forEach((item) => item.classList.toggle('active', item === button));
+      runCard.dataset.state = button.dataset.mode;
+      runCard.classList.remove('process-collapsed');
+      runToggle.setAttribute('aria-expanded', 'true');
+      chat.scrollTop = chat.scrollHeight;
+    });
+  });
+
+  function openDiff() {
+    diffModal.classList.add('open');
+    document.getElementById('closeDiff').focus();
+  }
+  function closeDiff() {
+    diffModal.classList.remove('open');
+  }
+  document.querySelectorAll('[data-open-diff], #openDiffTop').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openDiff();
+    });
+  });
+  document.getElementById('closeDiff').addEventListener('click', closeDiff);
+  diffModal.addEventListener('click', (event) => {
+    if (event.target === diffModal) closeDiff();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && diffModal.classList.contains('open')) closeDiff();
+  });
+</script>
+</body>
+</html>

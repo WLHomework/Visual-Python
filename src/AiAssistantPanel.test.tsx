@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentClockTime, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, summarizeAgentRun, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
 import { MAX_IMAGE_COUNT, type AiImageAttachment } from "./aiImageAttachments";
@@ -230,15 +230,70 @@ describe("AI assistant Markdown", () => {
     expect(body[1]).toMatchObject({ kind: "reply", activity: { markdown: "已经看过当前工程。\n\n接下来会检查冒泡排序。" } });
   });
 
-  it("renders assistant narration as Markdown outside the grouped activity timeline", () => {
-    const html = renderToStaticMarkup(<AgentRunBody activities={[
+  it("renders assistant narration inside the flat run log", () => {
+    const html = renderToStaticMarkup(<AgentRunBody status="running" activities={[
       { id: "tool-1", kind: "tool", status: "done", title: "读取当前工程", toolName: "get_context" },
       { id: "message-1", kind: "message", channel: "message", status: "done", title: "检查结果", markdown: "已读取。\n\n**冒泡排序**存在边界问题。" },
     ]} onRevealCodeChange={() => undefined} onRevealProblem={() => undefined}/>);
 
-    expect(html).toContain('class="ai-agent-worklog"');
+    expect(html).toContain('class="ai-agent-run-log running"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("说明");
     expect(html).toContain('<strong>冒泡排序</strong>存在边界问题。');
-    expect(html).not.toContain("其它 2 项");
+    expect(html).not.toContain("ai-agent-worklog");
+  });
+
+  it("collapses a completed run into one status header", () => {
+    const html = renderToStaticMarkup(<AgentRunBody status="done" startedAt={1000} finishedAt={14000} activities={[
+      { id: "tool-1", kind: "tool", status: "done", title: "读取当前工程", toolName: "get_context" },
+    ]} onRevealCodeChange={() => undefined} onRevealProblem={() => undefined}/>);
+
+    expect(html).toContain('class="ai-agent-run-log done"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("已完成");
+    expect(html).toContain("，用时 13 秒");
+    expect(html).not.toContain("ai-agent-run-log-body");
+    expect(html).not.toContain("读取当前工程");
+  });
+
+  it("renders flat log rows for thinking, reading, editing, and verification", () => {
+    const html = renderToStaticMarkup(<AgentRunBody status="running" activities={[
+      { id: "thinking-1", kind: "message", channel: "thinking", status: "done", title: "思考过程", markdown: "先确认 LED 引脚。" },
+      { id: "tool-read", kind: "tool", status: "done", title: "读取当前工程", toolName: "get_context" },
+      { id: "tool-edit", kind: "tool", status: "done", title: "修改代码", toolName: "edit_code", codeChange: { before: "old\n", after: "new\n", documentName: "main.py" } },
+      { id: "tool-check", kind: "tool", status: "done", title: "检查 Python 代码", toolName: "check_code" },
+    ]} onRevealCodeChange={() => undefined} onRevealProblem={() => undefined}/>);
+
+    expect(html).toContain('class="ai-agent-run-log-body"');
+    expect(html).toContain("思考");
+    expect(html).toContain("读取");
+    expect(html).toContain("编辑");
+    expect(html).toContain("查看变更");
+    expect(html).toContain("检查");
+    expect(html).toContain("通过");
+    expect(html).not.toContain("ai-agent-thinking");
+  });
+
+  it("summarizes a run in user-facing language", () => {
+    expect(summarizeAgentRun([
+      { id: "read", kind: "tool", status: "done", title: "读取", toolName: "get_context" },
+      { id: "edit", kind: "tool", status: "done", title: "修改", toolName: "edit_code" },
+      { id: "check", kind: "tool", status: "done", title: "检查", toolName: "check_code" },
+    ])).toBe("读取了工程，修改了文件，检查通过");
+    expect(summarizeAgentRun([
+      { id: "check", kind: "tool", status: "error", title: "检查", toolName: "check_code" },
+    ])).toBe("检查未通过");
+  });
+
+  it("shows a failed run with a failure header and collapsed details", () => {
+    const html = renderToStaticMarkup(<AgentRunBody status="error" startedAt={1000} finishedAt={5000} activities={[
+      { id: "check", kind: "tool", status: "error", title: "检查 Python 代码", toolName: "check_code", detail: "语法错误" },
+    ]} onRevealCodeChange={() => undefined} onRevealProblem={() => undefined}/>);
+
+    expect(html).toContain("任务未完成");
+    expect(html).toContain("，用时 4 秒");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("语法错误");
   });
 
   it("keeps an empty running reply mounted so tokens can stream in", () => {
@@ -268,6 +323,20 @@ describe("AI assistant Markdown", () => {
       inputCharacters: 0, toolSchemaCharacters: 0, toolResultCharacters: 0,
       cached: 0, uncachedPrompt: 0, cacheCreation: 0, cacheReportedRequests: 0,
     })).toContain("供应商未提供缓存统计");
+  });
+
+  it("lists web search results with titles, URLs, and snippets", () => {
+    const result = formatAgentToolResult({
+      id: "search-1",
+      kind: "tool",
+      status: "done",
+      title: "搜索网页",
+      toolName: "web_search",
+      result: JSON.stringify({ query: "ESP32-S3", results: [{ title: "ESP32-S3 Docs", url: "https://example.com/esp32", snippet: "Official documentation." }] }),
+    });
+    expect(result).toContain("ESP32-S3 Docs");
+    expect(result).toContain("https://example.com/esp32");
+    expect(result).toContain("Official documentation.");
   });
 
   it("hides successful tool JSON and keeps only a code diff", () => {
@@ -934,9 +1003,9 @@ describe("AI assistant scroll position", () => {
     attachAiThreadWheelHandler(thread, vi.fn());
     listener?.(event);
 
-    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(thinkingContent.scrollTop).toBe(380);
-    expect(thread.scrollTop).toBe(100);
+    expect(thread.scrollTop).toBe(150);
   });
 });
 
@@ -1090,6 +1159,8 @@ describe("AI assistant task duration", () => {
     expect(formatAgentElapsed(10_000, 22_000)).toBe("12 秒");
     expect(formatAgentElapsed(10_000, 80_000)).toBe("1 分 10 秒");
     expect(formatAgentElapsed(10_000, 130_000)).toBe("2 分");
+    expect(formatAgentClockTime(new Date(2026, 9, 23, 9, 5).getTime())).toBe("09:05");
+    expect(formatAgentClockTime()).toBe("");
   });
 
   it("ignores missing or invalid timestamps", () => {

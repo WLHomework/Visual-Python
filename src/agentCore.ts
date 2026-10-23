@@ -1,6 +1,6 @@
 import { type AiChatMessage, type AiChatToolCall } from "./aiConfig";
 import { chatCompletionsTransport, type AgentModelTransport } from "./agentTransport";
-import { coreAgentTools } from "./agentV2/toolRegistry";
+import { coreAgentTools, isCacheableTool } from "./agentV2/toolRegistry";
 import { createAgentMemory, rememberAgentDecision, rememberAgentEvidence, serializeAgentMemory } from "./agentV2/memory";
 import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext, graphicalCatalogInstructions } from "./agentV2/context";
 import { createAgentTokenUsage, mergeProviderTokenUsage, recordAgentRequest, recordAgentToolResult } from "./agentV2/tokenLedger";
@@ -48,6 +48,7 @@ const systemRules = `你是 Visual Python 的通用软件智能体。你通过�
 9. 需要用户决定时调用 ask_user，提供 2 到 4 个简洁编号选项；只用于会显著改变结果的真实歧义，颜色、布局、动画节奏等普通实现细节由你专业判断，避免不必要的往返。工具声明需要确认时由宿主统一确认，不要在调用前重复询问；用户拒绝后视为已取消，不要重复请求相同操作。
 10. 不要输出 XML、DSML、伪工具标签或原始 JSON 作为用户可见回复。
 11. 每次任务完成后，在最终 Markdown 末尾附加一行隐藏元数据，格式为 <!-- visual-python-followups: [{"label":"按钮文字","prompt":"可执行的下一步指令"}] -->，最多三个建议；正文不要解释这行元数据。建议必须结合当前工程结果，不能使用空泛的固定选项。
+12. 需要项目外的最新信息（版本变化、官方文档、API 现状、新闻或事实核查）时使用 web_search；项目内代码、稳定知识和普通实现细节不要搜索。搜索结果只是证据，引用时保留 URL，不要让搜索偏离当前任务。
 
 平台工作方式：
 - Visual Python 工程可以包含普通 Python 文档、插件文档、图形化工作区、资源和当前工作台信息；不要把整个工程默认当成某个插件工程。纯代码文档是独立文件，除非当前插件明确要求，不要自动添加 import、基类、construct 或其它专用模板。
@@ -400,7 +401,7 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
       const toolId = `tool-${round}-${toolCallCount}`;
       const fingerprint = toolCallFingerprint(call.function.name, args);
       const currentTool = toolByName(taskAgentTools, call.function.name);
-      const cachedRead = currentTool?.readOnly ? readOnlyToolCache.get(fingerprint) : undefined;
+      const cachedRead = currentTool?.readOnly && isCacheableTool(call.function.name) ? readOnlyToolCache.get(fingerprint) : undefined;
       if (cachedRead?.stateVersion === stateVersion) {
         cachedRead.repeatedHits += 1;
         let cachedResponse: string;
@@ -520,7 +521,7 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
           }
         }
         pushToolResponse(turnMessages, call.id, combinedToolResponse);
-        if (!resultFailed && currentTool?.readOnly) {
+        if (!resultFailed && currentTool?.readOnly && isCacheableTool(call.function.name)) {
           readOnlyToolCache.set(fingerprint, { stateVersion, repeatedHits: 0, response: compactCachedReadResponse(combinedToolResponse, call.function.name) });
         }
       } catch (error) {

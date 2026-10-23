@@ -46,6 +46,16 @@ describe("Visual Python tool applicability", () => {
     });
   });
 
+  it("searches the web through the native bridge with a bounded result count", async () => {
+    const services = createServices("print('hello')");
+    services.invoke = vi.fn().mockResolvedValue({ query: "ESP32-S3", results: [] });
+    const executeTool = createVisualPythonToolExecutor(services);
+
+    await expect(executeTool("web_search", { query: "ESP32-S3", maxResults: 50 }, new AbortController().signal)).resolves.toEqual({ query: "ESP32-S3", results: [] });
+    expect(services.invoke).toHaveBeenCalledWith("web_search", { query: "ESP32-S3", maxResults: 10 });
+    await expect(executeTool("web_search", { query: " " }, new AbortController().signal)).rejects.toThrow("query");
+  });
+
   it("switches between regular Python documents without Manim scene handling", async () => {
     const services = createServices("print('main')");
     services.documentsRef.current.push({ id: "helper", name: "helper", code: "VALUE = 1" });

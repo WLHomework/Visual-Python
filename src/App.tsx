@@ -67,7 +67,7 @@ import { buildManimOutputFilename } from "./plugins/builtin/manim/outputNaming";
 import { formatRenderElapsed, initialManimRenderProgress, parseManimRenderProgress, type ManimRenderProgress } from "./plugins/builtin/manim/renderProgress";
 import { prepareManimStillImage } from "./plugins/builtin/manim/stillImagePreprocessor";
 import { extractManimSceneNames } from "./plugins/builtin/manim/sceneNames";
-import { createCodeDocument, createCodeDocumentFromSource, type CodeDocument } from "./sceneDocuments";
+import { createCodeDocument, createCodeDocumentFromSource, renameCodeDocument, type CodeDocument } from "./sceneDocuments";
 import { isBlockWorkspaceMode, normalizeWorkspaceMode, type WorkspaceMode } from "./workspaceMode";
 import { getWorkbenchShortcutAction } from "./workbenchShortcuts";
 import { isWindowDragInteractiveTarget } from "./windowDragTargets";
@@ -895,6 +895,13 @@ export default function App() {
   const [sourceCode, setSourceCode] = useState("");
   const [sceneDocuments, setSceneDocuments] = useState<CodeDocument[]>([]);
   const [activeSceneId, setActiveSceneId] = useState("");
+  const [renamingSceneId, setRenamingSceneId] = useState<string | null>(null);
+  const [renameSceneDraft, setRenameSceneDraft] = useState("");
+  const [renameSceneError, setRenameSceneError] = useState("");
+  const [draggingSceneId, setDraggingSceneId] = useState<string | null>(null);
+  const sceneTabDragRef = useRef<{ id: string; startX: number; startY: number; started: boolean; container: HTMLElement } | null>(null);
+  const suppressSceneTabClickRef = useRef(false);
+  const renameSceneInputRef = useRef<HTMLInputElement>(null);
   const [aiAgentBusy, setAiAgentBusy] = useState(false);
   const [aiCodeReview, setAiCodeReview] = useState<AiCodeChangeSnapshot | null>(null);
   const [sceneAiStatuses, setSceneAiStatuses] = useState<Record<string, SceneAiStatus>>({});
@@ -4719,8 +4726,109 @@ export default function App() {
     updateManimRenderConfig({ selectedScene: extractManimSceneNames(document.code)[0] || document.name });
     requestAnimationFrame(() => codeEditor.current?.focus());
   };
-  const addManimSceneTab = () => {
-    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法新建代码文档", message: "AI 正在修改当前文档。请先停止或等待任务完成，再新建文档。" });
+  const beginRenameSceneTab = (scene: CodeDocument) => {
+    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法重命名代码文档", message: "AI 正在修改当前文档。请先停止或等待任务完成，再重命名文档。" });
+    setRenamingSceneId(scene.id);
+    setRenameSceneDraft(scene.name);
+    setRenameSceneError("");
+    requestAnimationFrame(() => {
+      renameSceneInputRef.current?.focus();
+      renameSceneInputRef.current?.select();
+    });
+  };
+  const cancelRenameSceneTab = () => {
+    setRenamingSceneId(null);
+    setRenameSceneError("");
+  };
+  const commitRenameSceneTab = () => {
+    const scene = sceneDocumentsRef.current.find((document) => document.id === renamingSceneId);
+    if (!scene) return cancelRenameSceneTab();
+    if (renameSceneDraft.trim() === scene.name) return cancelRenameSceneTab();
+    try {
+      const renamed = renameCodeDocument(scene, renameSceneDraft);
+      if (sceneDocumentsRef.current.some((document) => document.id !== scene.id && document.name.toLocaleLowerCase() === renamed.name.toLocaleLowerCase())) {
+        throw new Error("文件名已存在");
+      }
+      const documents = sceneDocumentsRef.current.map((document) => document.id === scene.id ? renamed : document);
+      sceneDocumentsRef.current = documents;
+      setSceneDocuments(documents);
+      setDirty(true);
+      setRenamingSceneId(null);
+      setRenameSceneError("");
+      requestAnimationFrame(() => codeEditor.current?.focus());
+    } catch (error) {
+      setRenameSceneError(error instanceof Error ? error.message : String(error));
+      requestAnimationFrame(() => {
+        renameSceneInputRef.current?.focus();
+        renameSceneInputRef.current?.select();
+      });
+    }
+  };
+  const moveSceneDocument = (draggedId: string, targetId: string, after: boolean) => {
+    if (draggedId === targetId) return;
+    const documents = persistActiveSceneDocument();
+    const from = documents.findIndex((document) => document.id === draggedId);
+    if (from < 0 || !documents.some((document) => document.id === targetId)) return;
+    const next = [...documents];
+    const [moved] = next.splice(from, 1);
+    const targetIndex = next.findIndex((document) => document.id === targetId);
+    if (targetIndex < 0) return;
+    next.splice(targetIndex + (after ? 1 : 0), 0, moved);
+    if (next.every((document, index) => document.id === documents[index]?.id)) return;
+    sceneDocumentsRef.current = next;
+    setSceneDocuments(next);
+    setDirty(true);
+  };
+  const beginSceneTabDrag = (event: React.PointerEvent<HTMLDivElement>, scene: CodeDocument) => {
+    if (event.button !== 0 || event.pointerType === "touch" || renamingSceneId === scene.id) return;
+    if ((event.target as HTMLElement).closest(".scene-tab-close, .scene-tab-rename")) return;
+    const container = (event.currentTarget as HTMLElement).closest<HTMLElement>(".code-scene-tabs");
+    if (!container) return;
+    const drag = { id: scene.id, startX: event.clientX, startY: event.clientY, started: false, container };
+    sceneTabDragRef.current = drag;
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const current = sceneTabDragRef.current;
+      if (!current) return;
+      if (!current.started) {
+        if (Math.hypot(moveEvent.clientX - current.startX, moveEvent.clientY - current.startY) < 5) return;
+        current.started = true;
+        setDraggingSceneId(current.id);
+        document.body.classList.add("scene-tab-dragging");
+      }
+      moveEvent.preventDefault();
+      const tabs = [...current.container.querySelectorAll<HTMLElement>(".scene-tab")];
+      const next = tabs.find((tab) => {
+        if (tab.dataset.sceneId === current.id) return false;
+        const rect = tab.getBoundingClientRect();
+        return moveEvent.clientX < rect.left + rect.width / 2;
+      });
+      if (next?.dataset.sceneId) {
+        moveSceneDocument(current.id, next.dataset.sceneId, false);
+      } else {
+        const last = tabs.filter((tab) => tab.dataset.sceneId !== current.id).at(-1);
+        if (last?.dataset.sceneId) moveSceneDocument(current.id, last.dataset.sceneId, true);
+      }
+    };
+    const finish = () => {
+      const current = sceneTabDragRef.current;
+      if (current?.started) {
+        suppressSceneTabClickRef.current = true;
+        window.setTimeout(() => { suppressSceneTabClickRef.current = false; }, 0);
+      }
+      sceneTabDragRef.current = null;
+      setDraggingSceneId(null);
+      document.body.classList.remove("scene-tab-dragging");
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("blur", finish);
+    };
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    window.addEventListener("blur", finish);
+  };
+  const addManimSceneTab = () => {    if (aiAgentSceneIdRef.current) return showBlockingAlert({ title: "暂时无法新建代码文档", message: "AI 正在修改当前文档。请先停止或等待任务完成，再新建文档。" });
     const documents = persistActiveSceneDocument();
     const document = createCodeDocument(documents.map((item) => item.name));
     const nextDocuments = [...documents, document];
@@ -6279,20 +6387,20 @@ export default function App() {
 
   return <main className="app-shell">
     <header className="topbar" data-tauri-drag-region onContextMenu={(event) => { if (!(event.target as HTMLElement).closest("input")) event.preventDefault(); }} onPointerDownCapture={prepareNativeWindowDrag} onDoubleClick={(event) => { if (!isWindowDragInteractiveTarget(event.target)) void appWindow.toggleMaximize(); }}>
-      <div className="brand" data-tauri-drag-region><span className="brand-mark" data-tauri-drag-region><Braces size={17} data-tauri-drag-region/></span><strong data-tauri-drag-region>Visual Python</strong><div className="top-menu-group" data-tauri-drag-region ref={topMenuRef}><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => { setProjectMenuOpen((open) => !open); setExampleMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); }}>工程 <ChevronDown size={13}/></button>{projectMenuOpen && <div className="project-menu project-main-menu">
+      <div className="brand" data-tauri-drag-region><span className="brand-mark" data-tauri-drag-region><Braces size={17} data-tauri-drag-region/></span><strong data-tauri-drag-region>Visual Python</strong><div className="top-menu-group" data-tauri-drag-region ref={topMenuRef}><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => { setProjectMenuOpen((open) => !open); setExampleMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); setHardwareMenuOpen(false); }}>工程 <ChevronDown size={13}/></button>{projectMenuOpen && <div className="project-menu project-main-menu">
         <button onClick={openNewProjectDialog}><FilePlus2 size={15}/><span>新建工程</span><kbd>Ctrl+N</kbd></button>
         <button onClick={() => { setProjectMenuOpen(false); void openProject(); }}><FolderOpen size={15}/><span>打开工程</span><kbd>Ctrl+O</kbd></button>
         <button onClick={() => { setProjectMenuOpen(false); void saveProject(); }}><Save size={15}/><span>保存</span><kbd>Ctrl+S</kbd></button>
         <button onClick={() => { setProjectMenuOpen(false); void saveProjectAs(); }}><SaveAll size={15}/><span>另存为</span><kbd>Ctrl+Shift+S</kbd></button>
         <button onClick={() => { setProjectMenuOpen(false); void exportPython(); }}><Download size={15}/><span>导出 Python</span></button>
         <div className="project-menu-category recent-projects-category"><button aria-haspopup="menu"><FileCode2 size={15}/><span>最近工程</span><ChevronRight size={14}/></button><div className="project-menu project-submenu recent-projects-menu" role="menu" aria-label="最近工程">{recentProjects.length > 0 ? recentProjects.map((item) => <button className="recent-project" role="menuitem" key={item.path} title={item.path} onClick={() => { setProjectMenuOpen(false); void loadProject(item.path); }}><FileCode2 size={15}/><span><strong>{item.name}</strong><small>{item.path}</small></span></button>) : <button className="recent-project-empty" role="menuitem" disabled><FileCode2 size={15}/><span>暂无最近工程</span></button>}</div></div>
-      </div>}</div><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={exampleMenuOpen} onClick={() => { setExampleMenuOpen((open) => !open); setProjectMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); }}>示例 <ChevronDown size={13}/></button>{exampleMenuOpen && <div className="project-menu example-menu">
+      </div>}</div><div className="project-menu-wrap"><button className="project-menu-trigger" aria-expanded={exampleMenuOpen} onClick={() => { setExampleMenuOpen((open) => !open); setProjectMenuOpen(false); setShortcutMenuOpen(false); setHelpMenuOpen(false); setHardwareMenuOpen(false); }}>示例 <ChevronDown size={13}/></button>{exampleMenuOpen && <div className="project-menu example-menu">
         {!isHardwareWorkbench(profile) && <div className="example-category"><button className="example-category-trigger"><BookOpen size={15}/><span>Python 基础</span><ChevronRight size={14}/></button><div className="project-menu example-submenu grouped-example-submenu">{pythonDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{pythonDifficultyLabels[difficulty]}</div>{pythonExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><BookOpen size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>}
         {isHardwareWorkbench(profile) && hardwareExampleGroups(profile.boardId).map((group) => <div className="example-category" key={group.category}><button className="example-category-trigger"><Cpu size={15}/><span>{group.category}</span><ChevronRight size={14}/></button><div className="project-menu example-submenu grouped-example-submenu">{group.examples.map((example) => <button key={example.id} title={example.description} onClick={() => void loadHardwareExample(example)}><Cpu size={15}/><span>{example.title}</span></button>)}</div></div>)}
          {manimPluginActive && profile.features.manim && <div className="example-category"><button className="example-category-trigger"><Film size={15}/><span>Manim</span><ChevronRight size={14}/></button><div className="project-menu example-submenu manim-example-submenu">{manimDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{manimDifficultyLabels[difficulty]}</div>{manimExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><Film size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>}
          {manimPluginActive && profile.features.manim && <div className="example-category"><button className="example-category-trigger"><Sigma size={15}/><span>数学教学</span><ChevronRight size={14}/></button><div className="project-menu example-submenu grouped-example-submenu">{mathDifficultyOrder.map((difficulty) => <div className="example-difficulty-group" key={difficulty}><div className="example-difficulty-label">{mathDifficultyLabels[difficulty]}</div>{mathExampleCatalog.filter((item) => item.difficulty === difficulty).map((item) => <button key={item.id} disabled={!item.example} onClick={() => item.example && void loadExample(item.example)}><Sigma size={15}/><span>{item.title}</span></button>)}</div>)}</div></div>}
       </div>}</div>{workspaceMode === "code" && <div className="project-menu-wrap">
-        <button className="project-menu-trigger" aria-expanded={shortcutMenuOpen} disabled={workspaceMode !== "code"} onClick={() => { setShortcutMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setHelpMenuOpen(false); }}>编辑 <ChevronDown size={13}/></button>
+        <button className="project-menu-trigger" aria-expanded={shortcutMenuOpen} disabled={workspaceMode !== "code"} onClick={() => { setShortcutMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setHelpMenuOpen(false); setHardwareMenuOpen(false); }}>编辑 <ChevronDown size={13}/></button>
         {shortcutMenuOpen && <div className="project-menu shortcut-menu" role="menu" aria-label="编辑">
           <button role="menuitem" disabled={workspaceMode !== "code" || formattingCode} onClick={() => { setShortcutMenuOpen(false); void formatCurrentPythonCode(); }}><AlignLeft size={15}/><span>{formattingCode ? "正在格式化" : "格式化 Python 代码"}</span><kbd>Shift+Alt+F</kbd></button>
           <button role="menuitem" disabled={workspaceMode !== "code"} onClick={() => runCodeEditorAction("actions.find")}><Search size={15}/><span>查找</span><kbd>Ctrl+F</kbd></button>
@@ -6311,7 +6419,7 @@ export default function App() {
           ))}
         </div>}
       </div>}<div className="project-menu-wrap">
-        <button className="project-menu-trigger" aria-expanded={helpMenuOpen} onClick={() => { setHelpMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setShortcutMenuOpen(false); }}>帮助 <ChevronDown size={13}/></button>
+        <button className="project-menu-trigger" aria-expanded={helpMenuOpen} onClick={() => { setHelpMenuOpen((open) => !open); setProjectMenuOpen(false); setExampleMenuOpen(false); setShortcutMenuOpen(false); setHardwareMenuOpen(false); }}>帮助 <ChevronDown size={13}/></button>
         {helpMenuOpen && <div className="project-menu help-menu" role="menu" aria-label="帮助">
           {profile.features.manim && <button role="menuitem" onClick={() => void openManimGuide()}><BookOpen size={15}/><span>Manim 使用说明</span><ExternalLink size={13}/></button>}
           <button role="menuitem" onClick={() => void openPluginDevelopmentGuide()}><Plug size={15}/><span>插件开发文档</span><ExternalLink size={13}/></button>
@@ -6385,7 +6493,16 @@ export default function App() {
       </section>
       <div className="panel-resizer" onPointerDown={startRightPanelResize} role="separator" aria-label="调整辅助面板宽度" aria-orientation="vertical"/>
       <aside className="right-panel">
-        <div className="panel-head"><div className="code-scene-tabs" role="tablist" aria-label="Python 代码文档">{workspaceMode === "code" ? sceneDocuments.map((scene) => { const aiStatus = sceneAiStatuses[scene.id]; const aiStatusLabel = aiStatus ? ({ working: "AI 正在处理", changed: "AI 已修改", error: "AI 处理出错", validated: "AI 已校验" } as const)[aiStatus] : ""; return <div key={scene.id} className={`scene-tab ${scene.id === activeSceneId ? "active" : ""}`} role="tab" aria-selected={scene.id === activeSceneId}><button className="scene-tab-label" onClick={() => focusManimSceneTab(scene.id)} title={`打开文档 ${scene.name}`}><Code2 size={13}/><span>{scene.name}</span>{aiStatus && <i className={`scene-ai-status ${aiStatus}`} title={aiStatusLabel} aria-label={aiStatusLabel}/>}</button>{profile.features.multipleDocuments && <button className="scene-tab-close" onClick={() => closeManimSceneTab(scene.id)} title={`删除文档 ${scene.name}`} aria-label={`删除文档 ${scene.name}`}><X size={12}/></button>}</div>; }) : <div className="panel-tab active"><Braces size={14}/> Python</div>}{workspaceMode === "code" && profile.features.multipleDocuments && <button className="scene-tab-add" onClick={addManimSceneTab} title="新建代码文档" aria-label="新建代码文档"><Plus size={14}/></button>}</div><div className="panel-head-actions"><span className="read-only">{workspaceMode === "code" ? "代码文档" : "实时生成"}</span>{workspaceMode === "code" && <div className="code-outline-wrap" ref={codeOutlineRef}><button ref={codeOutlineTriggerRef} className="code-outline-trigger" disabled={!codeOutline.length} aria-label="代码结构大纲" title="代码结构大纲" aria-haspopup="menu" aria-expanded={codeOutlineOpen} onClick={() => setCodeOutlineOpen((open) => !open)}><ListTree size={15}/></button>{codeOutlineOpen && <div className="code-outline-menu" role="menu" aria-label="代码结构">{codeOutline.map((item) => <button key={`${item.kind}-${item.lineNumber}-${item.label}`} role="menuitem" onClick={() => focusCodeOutlineItem(item)} title={`第 ${item.lineNumber} 行`}><span className={`code-outline-icon outline-${item.kind}`}>{item.kind === "function" ? <Braces size={14}/> : <Box size={14}/>}</span><span className="code-outline-label"><strong>{item.label}</strong><small>{item.kind === "function" ? item.signature : `class ${item.label}`}</small></span><span className="code-outline-line">{item.lineNumber}</span></button>)}</div>}</div>}</div></div>
+        <div className="panel-head"><div className="code-scene-tabs" role="tablist" aria-label="Python 代码文档">{workspaceMode === "code" ? sceneDocuments.map((scene) => {
+          const aiStatus = sceneAiStatuses[scene.id];
+          const aiStatusLabel = aiStatus ? ({ working: "AI 正在处理", changed: "AI 已修改", error: "AI 处理出错", validated: "AI 已校验" } as const)[aiStatus] : "";
+          return <div key={scene.id} data-scene-id={scene.id} className={`scene-tab ${scene.id === activeSceneId ? "active" : ""} ${draggingSceneId === scene.id ? "dragging" : ""}`} role="tab" aria-selected={scene.id === activeSceneId} onContextMenu={(event) => { event.preventDefault(); beginRenameSceneTab(scene); }} onPointerDown={(event) => beginSceneTabDrag(event, scene)}>
+            {renamingSceneId === scene.id
+              ? <input ref={renameSceneInputRef} className={`scene-tab-rename ${renameSceneError ? "invalid" : ""}`} value={renameSceneDraft} onChange={(event) => { setRenameSceneDraft(event.currentTarget.value); setRenameSceneError(""); }} onBlur={commitRenameSceneTab} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitRenameSceneTab(); } else if (event.key === "Escape") { event.preventDefault(); cancelRenameSceneTab(); } }} onClick={(event) => event.stopPropagation()} onContextMenu={(event) => event.stopPropagation()} title={renameSceneError || "输入文件名后按 Enter"} aria-label="重命名代码文档" aria-invalid={Boolean(renameSceneError)} spellCheck={false} autoComplete="off"/>
+              : <button className="scene-tab-label" onClick={() => { if (!suppressSceneTabClickRef.current) focusManimSceneTab(scene.id); }} onDoubleClick={(event) => { if (suppressSceneTabClickRef.current) return; event.preventDefault(); event.stopPropagation(); beginRenameSceneTab(scene); }} title={`打开文档 ${scene.name}（拖动排序，双击或右键重命名）`}><Code2 size={13}/><span>{scene.name}</span>{aiStatus && <i className={`scene-ai-status ${aiStatus}`} title={aiStatusLabel} aria-label={aiStatusLabel}/>}</button>}
+            {profile.features.multipleDocuments && <button className="scene-tab-close" onClick={() => closeManimSceneTab(scene.id)} onContextMenu={(event) => event.stopPropagation()} onDragStart={(event) => event.stopPropagation()} title={`删除文档 ${scene.name}`} aria-label={`删除文档 ${scene.name}`}><X size={12}/></button>}
+          </div>;
+        }) : <div className="panel-tab active"><Braces size={14}/> Python</div>}{workspaceMode === "code" && profile.features.multipleDocuments && <button className="scene-tab-add" onClick={addManimSceneTab} title="新建代码文档" aria-label="新建代码文档"><Plus size={14}/></button>}</div><div className="panel-head-actions"><span className="read-only">{workspaceMode === "code" ? "代码文档" : "实时生成"}</span>{workspaceMode === "code" && <div className="code-outline-wrap" ref={codeOutlineRef}><button ref={codeOutlineTriggerRef} className="code-outline-trigger" disabled={!codeOutline.length} aria-label="代码结构大纲" title="代码结构大纲" aria-haspopup="menu" aria-expanded={codeOutlineOpen} onClick={() => setCodeOutlineOpen((open) => !open)}><ListTree size={15}/></button>{codeOutlineOpen && <div className="code-outline-menu" role="menu" aria-label="代码结构">{codeOutline.map((item) => <button key={`${item.kind}-${item.lineNumber}-${item.label}`} role="menuitem" onClick={() => focusCodeOutlineItem(item)} title={`第 ${item.lineNumber} 行`}><span className={`code-outline-icon outline-${item.kind}`}>{item.kind === "function" ? <Braces size={14}/> : <Box size={14}/>}</span><span className="code-outline-label"><strong>{item.label}</strong><small>{item.kind === "function" ? item.signature : `class ${item.label}`}</small></span><span className="code-outline-line">{item.lineNumber}</span></button>)}</div>}</div>}</div></div>
         <div className="editor-wrap" onContextMenu={openCodeEditorContextMenu}>
           <Suspense fallback={<div className="editor-loading"/>}><Editor key={workspaceMode === "code" ? activeSceneId || "source" : "generated"} path={workspaceMode === "code" ? `document-${activeSceneId || "source"}.py` : "generated.py"} keepCurrentModel={workspaceMode === "code"} language="python" value={activeCode} onChange={updateSourceCode} onMount={mountCodeEditor} theme={monacoThemes[visualThemeId]} options={{ readOnly: workspaceMode !== "code", contextmenu: workspaceMode !== "code", minimap: { enabled: false }, fontFamily: editorFontFamily, fontSize: editorFontSize, lineHeight: editorFontSize + 9, tabSize: editorIndentSize, insertSpaces: true, detectIndentation: false, padding: { top: 14 }, scrollBeyondLastLine: false, automaticLayout: true, fixedOverflowWidgets: true, renderLineHighlight: workspaceMode === "code" ? "line" : "none", wordWrap: "off", quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true, acceptSuggestionOnEnter: "on", tabCompletion: "on", snippetSuggestions: "top", parameterHints: { enabled: true, cycle: false }, scrollbar: { horizontal: "auto", alwaysConsumeMouseWheel: false }, overviewRulerBorder: false }}/></Suspense>
           {aiCodeReview && aiCodeReviewTop !== null && <div className="ai-code-review-actions" style={{ top: aiCodeReviewTop }} role="toolbar" aria-label="AI 代码修改操作">

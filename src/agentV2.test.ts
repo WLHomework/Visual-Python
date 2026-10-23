@@ -7,7 +7,7 @@ vi.mock("./aiConfig", () => ({ streamAiChat: mocks.streamAiChat }));
 import { normalizeAiToolCalls, runAgentCore as runVisualPythonAgent } from "./agentCore";
 import type { AgentActivityEvent, AgentHost, AgentTool } from "./agentV2/types";
 import type { AiChatMessage } from "./aiConfig";
-import { coreAgentTools, requiresPermission, toolsForAgentMode } from "./agentV2/toolRegistry";
+import { coreAgentTools, isCacheableTool, requiresPermission, toolsForAgentMode } from "./agentV2/toolRegistry";
 import { blocklyAgentTools } from "./agentV2/blocklyHost";
 import { manimAgentTools } from "./plugins/builtin/manim/agentTools";
 
@@ -61,6 +61,15 @@ describe("Visual Python Agent Core", () => {
     expect(diagnostics).toMatchObject({ readOnly: true });
     expect(diagnostics?.workspaceModes).toBeUndefined();
     expect(toolsForAgentMode("plan").some((tool) => tool.function.name === "get_diagnostics")).toBe(true);
+  });
+
+  it("lets the model decide whether to search the public web", () => {
+    const search = coreAgentTools.find((tool) => tool.definition.function.name === "web_search");
+    expect(search).toMatchObject({ readOnly: true, changesState: false });
+    expect(search?.definition.function.description).toContain("是否需要联网由你根据任务判断");
+    expect(toolsForAgentMode("agent").some((tool) => tool.function.name === "web_search")).toBe(true);
+    expect(toolsForAgentMode("plan").some((tool) => tool.function.name === "web_search")).toBe(true);
+    expect(isCacheableTool("web_search")).toBe(false);
   });
 
   it("injects the task block directory and batch-template instructions only for visual workspace requests", async () => {

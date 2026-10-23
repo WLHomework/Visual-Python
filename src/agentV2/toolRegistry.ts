@@ -18,6 +18,7 @@ function tool(name: string, description: string, parameters: Record<string, unkn
 
 export const visualPythonTools: AiChatToolDefinition[] = [
   tool("ask_user", "当任务存在会显著影响结果的歧义时向用户提问。普通视觉细节和实现细节由 Agent 自行判断。", objectSchema({ question: { type: "string", minLength: 1, maxLength: 500 }, options: { type: "array", minItems: 2, maxItems: 4, items: text } }, ["question", "options"])),
+  tool("web_search", "搜索公开互联网，查找当前工程之外的最新信息、官方文档、版本说明、API 变化、新闻或事实依据。是否需要联网由你根据任务判断：项目内已有代码、普通编程问题和稳定知识不要搜索；涉及最新版本、实时信息或不确定的外部事实时先搜索。返回标题、摘要和 URL，引用时保留 URL。", objectSchema({ query: { type: "string", minLength: 1, maxLength: 300, description: "简洁、具体的搜索查询。" }, maxResults: { type: "integer", minimum: 1, maximum: 10, description: "最多返回几条结果，默认 5。" } }, ["query"])),
   tool("get_context", "读取当前工程、文档、工作区、运行状态和环境摘要。修改前或状态不确定时使用。", objectSchema({ includeResources: { type: "boolean" } })),
   tool("get_diagnostics", "按需读取当前输出和问题面板中的最新诊断。插件安装、加载、运行或渲染失败后，在再次修改前使用。", objectSchema({ includeOutput: { type: "boolean" }, includeProblems: { type: "boolean" }, limit: { type: "integer", minimum: 1, maximum: 200 } })),
   tool("list_documents", "列出工程中的代码文档及当前文档。普通 Python 和插件文档都使用此工具。", objectSchema()),
@@ -48,6 +49,7 @@ export const visualPythonTools: AiChatToolDefinition[] = [
 
 const labels: Record<string, string> = {
   ask_user: "询问用户",
+  web_search: "搜索网页",
   get_context: "读取当前工程",
   list_device_files: "列出设备文件",
   read_device_file: "读取设备文件",
@@ -77,7 +79,7 @@ const labels: Record<string, string> = {
 };
 
 const readOnlyTools = new Set([
-  "get_context", "get_diagnostics", "list_documents", "get_document", "list_resources", "get_resource", "check_resources",
+  "web_search", "get_context", "get_diagnostics", "list_documents", "get_document", "list_resources", "get_resource", "check_resources",
   "check_dependencies", "inspect_python_structure", "check_code", "inspect_plugin_api", "list_installed_plugins", "read_plugin_draft_file", "validate_plugin_draft", "list_device_files", "read_device_file",
 ]);
 
@@ -127,7 +129,7 @@ export function toolsForAgentMode(mode: "agent" | "plan"): AiChatToolDefinition[
 }
 
 export function isCacheableTool(name: string): boolean {
-  return readOnlyTools.has(name);
+  return name !== "web_search";
 }
 
 export function changesAgentState(name: string): boolean {
