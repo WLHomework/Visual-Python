@@ -44,4 +44,8 @@ export default defineConfig({
     },
   },
   clearScreen: false,
+  // 单元测试跑 src 下的常规用例；src/benchmarks 需要专用环境与真实 API，由 vitest.bench.config.ts 单独承载。
+  test: {
+    exclude: ["**/node_modules/**", "**/dist/**", "src/benchmarks/**"],
+  },
 });

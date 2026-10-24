@@ -83,6 +83,32 @@ np.write()
     expect(() => micropythonToWorkspace("np.write()\n", "esp32-wroom")).toThrow(MicroPythonConversionError);
   });
 
+  it("recognizes NeoPixel init when the Pin carries a mode argument", () => {
+    const workspace = load(`import neopixel
+from machine import Pin
+np = neopixel.NeoPixel(Pin(4, Pin.OUT), 8)
+np[0] = (255, 0, 0)
+np.write()
+`);
+    const root = workspace.getTopBlocks(false)[0];
+    expect(root?.type).toBe("hardware_neopixel_init");
+    expect(root?.getFieldValue("PIN")).toBe("4");
+    expect(root?.getNextBlock()?.type).toBe("hardware_neopixel_set_pixel");
+    workspace.dispose();
+  });
+
+  it("accepts a numeric step in for-range loops", () => {
+    const workspace = load(`from machine import Pin
+led = Pin(2, Pin.OUT)
+for i in range(0, 10, 2):
+  led.value(1)
+`);
+    const root = workspace.getTopBlocks(false)[0];
+    expect(root?.type).toBe("controls_repeat_ext");
+    expect(root?.getInput("TIMES")?.connection?.targetBlock()?.getFieldValue("NUM")).toBe(5);
+    workspace.dispose();
+  });
+
   it("maps DHT reads into a value block and print statement", () => {
     const workspace = load(`import dht
 from machine import Pin

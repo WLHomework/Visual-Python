@@ -203,6 +203,16 @@ function compileShape(kind: string, callArgs: string) {
       inputs: { SIDE_LENGTH: number(parseNumber(kwargs.side_length || positional[0] || "2") ?? 2) },
     };
   }
+  if (kind === "Rectangle") {
+    return {
+      type: "visual_python_manim_rectangle_object",
+      fields: { COLOR: color },
+      inputs: {
+        WIDTH: number(parseNumber(kwargs.width || positional[0] || "3") ?? 3),
+        HEIGHT: number(parseNumber(kwargs.height || positional[1] || "2") ?? 2),
+      },
+    };
+  }
   return null;
 }
 
@@ -211,7 +221,7 @@ function compileAssignment(statement: string) {
   if (!match) return null;
   const name = match[1];
   const { head, shiftArgs } = splitShift(match[2].trim());
-  const call = head.match(/^(Text|Tex|MathTex|Circle|Square)\s*\(([\s\S]*)\)$/);
+  const call = head.match(/^(Text|Tex|MathTex|Circle|Square|Rectangle)\s*\(([\s\S]*)\)$/);
   if (!call) return null;
   let object: object | null = null;
   if (call[1] === "Text" || call[1] === "Tex" || call[1] === "MathTex") {
@@ -240,6 +250,31 @@ function compileWait(statement: string) {
 
 function compileAnimation(source: string) {
   const trimmed = source.trim();
+  const animate = trimmed.match(/^([A-Za-z_]\w*)\.animate(?:\s*\(\s*run_time\s*=\s*([\d.]+)\s*\))?\.(scale|shift)\s*\(\s*([^)]*)\s*\)$/);
+  if (animate) {
+    const name = animate[1]!;
+    const runTime = animate[2] ? Number(animate[2]) : 1;
+    if (animate[3] === "scale") {
+      const factor = parseNumber(animate[4] || "2");
+      if (factor === null) return null;
+      return {
+        type: "visual_python_manim_animate_scale",
+        inputs: { MOBJECT: ref(name), FACTOR: number(factor), RUN_TIME: number(runTime) },
+      };
+    }
+    const vector = parseShift(animate[4] || "");
+    if (!vector) return null;
+    return {
+      type: "visual_python_manim_animate_shift",
+      inputs: {
+        MOBJECT: ref(name),
+        VECTOR: input(vector.scale === 1
+          ? { type: "visual_python_manim_direction_constant", fields: { VALUE: vector.direction } }
+          : scaledDirection(vector.direction, vector.scale)),
+        RUN_TIME: number(runTime),
+      },
+    };
+  }
   for (const [kind, build] of [
     ["Write", (name: string, runTime: number) => writeAnimation(name, runTime)],
     ["Create", (name: string, runTime: number) => createAnimation(name, runTime)],

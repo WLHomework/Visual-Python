@@ -61,11 +61,11 @@ export function graphicalCatalogInstructions(blockCatalog?: string): string {
   const contracts = Boolean(catalog && catalogHasContracts(catalog));
   const contractText = contracts ? " with exact fields, input slots and requiredInputs" : "";
   const discoveryRules = !catalog
-    ? "No task block catalog is attached. Call get_task_block_directory once for task discovery; its candidates include the field, input and required-input contract, so build the plan from that result. Do not search for blocks one by one."
+    ? "No task block catalog is attached. Call get_task_block_directory once for task discovery; its candidates include the field, input and required-input contract, so build the graphical program from that result. Do not search for blocks one by one."
     : hasTruncatedBlockCatalog(catalog)
       ? `The attached task block catalog is a ranked candidate selection and reports omittedCandidateCount, so other blocks were omitted. Its candidates${contractText} let you build apply_block_program directly; do not repeat discovery. Only if a required block type is absent, make at most one search_blocks call or one get_task_block_directory call with a different task phrase, and read get_block_templates only for types whose contract is still missing or empty.`
       : `The prompt contains a complete catalog${contractText}. do not call get_task_block_directory or search_blocks. Use the catalog directly to build apply_block_program, and call get_block_templates at most once in a batch only for types whose contract is missing or empty.`;
-  return `Catalog strategy for this graphical task: ${discoveryRules}`;
+  return `Catalog strategy for this graphical task: code-first writing via apply_python_as_blocks does not need the catalog at all; consult it only when you fall back to apply_block_program. ${discoveryRules}`;
 }
 
 const planningCandidateKeys = new Set([

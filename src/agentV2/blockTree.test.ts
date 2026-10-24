@@ -48,4 +48,20 @@ describe("Block tree", () => {
     for (let index = 0; index < 121; index += 1) tree = { type: "chain", next: tree };
     expect(() => parseBlockTree({ tree })).toThrow("120");
   });
+
+  it("decodes a JSON-stringified tree (models may double-encode nested arguments)", () => {
+    const tree = parseBlockTree({ version: "1", mode: "replace", tree: JSON.stringify({ type: "scene", statements: { BODY: [{ type: "say", values: { TEXT: "hello" } }] } }) });
+    expect(tree.mode).toBe("replace");
+    expect(tree.roots[0]?.type).toBe("scene");
+  });
+
+  it("decodes a fully JSON-stringified argument object", () => {
+    const tree = parseBlockTree(JSON.stringify({ mode: "append", tree: [{ type: "first" }, { type: "second" }] }));
+    expect(tree.mode).toBe("append");
+    expect(tree.roots).toHaveLength(2);
+  });
+
+  it("still rejects plain-string trees that are not JSON objects", () => {
+    expect(() => parseBlockTree({ tree: "just text" })).toThrow(BlockTreeValidationError);
+  });
 });

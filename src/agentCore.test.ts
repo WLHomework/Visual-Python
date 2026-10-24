@@ -19,12 +19,13 @@ const systemPromptFor = async (snapshot: Record<string, unknown>): Promise<strin
 };
 
 describe("MicroPython 工作台提示词", () => {
-  it("uses one graphical program tool and the current toolbox", async () => {
+  it("uses code-first graphical writing with the tree as fallback", async () => {
     const prompt = await systemPromptFor({ workspaceMode: "visual", workbench: { kind: "micropython", label: "ESP32-S3" } });
 
     expect(prompt).toContain("当前工具箱");
+    expect(prompt).toContain("图形化写入默认代码优先");
+    expect(prompt).toContain("apply_python_as_blocks");
     expect(prompt).toContain("apply_block_program");
-    expect(prompt).not.toContain("apply_python_as_blocks");
     expect(prompt).not.toContain("apply_block_plan");
   });
 

@@ -47,6 +47,18 @@ function fail(message: string, path: string): never {
   throw new BlockTreeValidationError(message, path);
 }
 
+// qwen 等模型偶尔会把深层嵌套参数整体字符串化（双重 JSON 编码），这里透明解码一层。
+function decodeMaybeJsonString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
 function parseFields(value: unknown, path: string): Record<string, BlockTreePrimitive> | undefined {
   if (value === undefined) return undefined;
   if (!record(value)) fail("fields 必须是对象", path);
@@ -90,18 +102,20 @@ function parseNode(value: unknown, path: string, count: { value: number }): Bloc
 }
 
 export function parseBlockTree(value: unknown): ParsedBlockTree {
-  if (!record(value)) fail("BlockTree 必须是对象", "$");
-  if (value.version !== undefined && value.version !== 1 && value.version !== "1") fail("version 必须为 1", "$");
-  const rawMode = value.mode === undefined ? "append" : value.mode;
+  const decoded = decodeMaybeJsonString(value);
+  if (!record(decoded)) fail("BlockTree 必须是对象", "$");
+  if (decoded.version !== undefined && decoded.version !== 1 && decoded.version !== "1") fail("version 必须为 1", "$");
+  const rawMode = decoded.mode === undefined ? "append" : decoded.mode;
   if (rawMode !== "append" && rawMode !== "replace" && rawMode !== "patch") fail("mode 必须是 append、replace 或 patch", "$");
-  if (value.summary !== undefined && typeof value.summary !== "string") fail("summary 必须是字符串", "$");
-  if (value.tree === undefined) fail("tree 不能为空", "$");
+  if (decoded.summary !== undefined && typeof decoded.summary !== "string") fail("summary 必须是字符串", "$");
+  if (decoded.tree === undefined) fail("tree 不能为空", "$");
+  const tree = decodeMaybeJsonString(decoded.tree);
   const count = { value: 0 };
-  const roots = Array.isArray(value.tree)
-    ? value.tree.map((node, index) => parseNode(node, `tree[${index}]`, count))
-    : [parseNode(value.tree, "tree", count)];
+  const roots = Array.isArray(tree)
+    ? tree.map((node, index) => parseNode(node, `tree[${index}]`, count))
+    : [parseNode(tree, "tree", count)];
   if (!roots.length) fail("tree 至少包含一个根积木", "tree");
-  return { version: 1, mode: rawMode, roots, ...(typeof value.summary === "string" ? { summary: value.summary } : {}) };
+  return { version: 1, mode: rawMode, roots, ...(typeof decoded.summary === "string" ? { summary: decoded.summary } : {}) };
 }
 
 /** 把嵌套树展开成宿主已经理解的 BlockPlan；连接由这里生成，模型不需要写 ref/connect。 */

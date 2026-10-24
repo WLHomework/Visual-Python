@@ -91,7 +91,9 @@ describe("Visual Python Agent Core", () => {
     expect(visualSystem).not.toContain("visual_python_manim_*");
     expect(visualSystem).not.toContain("Manim 动画结构");
     const graphicalRules = visualSystem.slice(visualSystem.indexOf("图形化工作区规则"));
-    expect(graphicalRules).toContain("唯一允许的图形化写入工具是 apply_block_program");
+    expect(graphicalRules).toContain("图形化写入默认代码优先");
+    expect(graphicalRules).toContain("apply_python_as_blocks");
+    expect(graphicalRules).toContain("apply_block_program");
     expect(graphicalRules).toContain("插件积木");
     expect(graphicalRules).not.toMatch(/compose_workspace|append_workspace_blocks|add_workspace_block|apply_workspace|replace_workspace/);
     // The graphical protocol lives in the mode-specific section only; keep the general rules free of duplicates.
@@ -137,8 +139,9 @@ describe("Visual Python Agent Core", () => {
     const hardwareSystem = ((mocks.streamAiChat.mock.calls[0][0] as AiChatMessage[]).find((message) => message.role === "system")?.content || "");
     expect(hardwareSystem).toContain("MicroPython");
     expect(hardwareSystem).toContain("当前工具箱和积木目录里的积木");
+    expect(hardwareSystem).toContain("图形化写入默认代码优先");
+    expect(hardwareSystem).toContain("apply_python_as_blocks");
     expect(hardwareSystem).toContain("apply_block_program");
-    expect(hardwareSystem).not.toContain("apply_python_as_blocks");
     expect(hardwareSystem).toContain("引脚");
 
     mocks.streamAiChat.mockReset();
@@ -214,11 +217,11 @@ describe("Visual Python Agent Core", () => {
     const tools = mocks.streamAiChat.mock.calls[0][2]?.tools as Array<{ function: { name: string } }>;
     const names = tools.map((tool) => tool.function.name);
     expect(names).toContain("apply_block_program");
+    expect(names).toContain("apply_python_as_blocks");
     expect(names).not.toContain("apply_block_tree");
     expect(names).not.toContain("apply_block_plan");
-    expect(names).not.toContain("apply_python_as_blocks");
     expect(names).not.toEqual(expect.arrayContaining(["compose_workspace", "add_workspace_block", "replace_workspace", "append_workspace_blocks", "apply_workspace"]));
-    expect(blocklyAgentTools.filter((tool) => tool.changesState).map((tool) => tool.definition.function.name)).toEqual(["apply_block_program"]);
+    expect(blocklyAgentTools.filter((tool) => tool.changesState).map((tool) => tool.definition.function.name)).toEqual(["apply_block_program", "apply_python_as_blocks"]);
   });
 
   it("refreshes plugin tools between Agent rounds", async () => {

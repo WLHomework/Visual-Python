@@ -46,15 +46,16 @@ function services(workspace: Blockly.Workspace): BlocklyAgentServices {
 const signal = () => new AbortController().signal;
 
 describe("Blockly Agent host", () => {
-  it("exposes tree creation plus plan patching write operations", () => {
+  it("exposes code-first conversion, tree creation and plan patching write operations", () => {
     expect(blocklyAgentTools.map((tool) => tool.definition.function.name)).toEqual([
       "get_workspace",
       "get_task_block_directory",
       "search_blocks",
       "get_block_templates",
       "apply_block_program",
+      "apply_python_as_blocks",
     ]);
-    expect(blocklyAgentTools.filter((tool) => tool.changesState).map((tool) => tool.definition.function.name)).toEqual(["apply_block_program"]);
+    expect(blocklyAgentTools.filter((tool) => tool.changesState).map((tool) => tool.definition.function.name)).toEqual(["apply_block_program", "apply_python_as_blocks"]);
   });
 
   it("describes actual Blockly fields and connection contracts", () => {
@@ -174,6 +175,27 @@ describe("Blockly Agent host", () => {
     expect(host.convertPythonToWorkspace).toHaveBeenCalledWith("class Converted(Scene):\n    pass");
     expect(host.commit).toHaveBeenCalledOnce();
     expect(workspace.getTopBlocks(false)[0]?.getFieldValue("NAME")).toBe("Converted");
+
+    // 与 blockTree/blockPlan 一致：模型把 version 传成字符串 "1" 时也应接受。
+    const workspace2 = new Blockly.Workspace();
+    const host2 = services(workspace2);
+    host2.convertPythonToWorkspace = vi.fn(() => ({
+      blocks: {
+        languageVersion: 0,
+        blocks: [{
+          type: "agent_host_scene",
+          fields: { NAME: "Converted" },
+          inputs: { BODY: { block: { type: "agent_host_statement" } } },
+        }],
+      },
+    }));
+    const result2 = await createBlocklyToolExecutor(host2)("apply_python_as_blocks", {
+      version: "1",
+      mode: "replace",
+      code: "class Converted(Scene):\n    pass",
+    }, signal());
+    expect(result2).toMatchObject({ ok: true, changed: true });
+    workspace2.dispose();
     workspace.dispose();
   });
 

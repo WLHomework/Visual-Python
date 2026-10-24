@@ -51,20 +51,12 @@ const tool = (name: string, description: string, parameters: Record<string, unkn
   function: { name, description, parameters: objectSchema(parameters) },
 });
 
-const allBlocklyTools: AgentTool[] = [
-  { definition: tool("get_workspace", "Read a compact summary of the current graphical workspace. Set includeState=true only when the serialized state is explicitly required.", { includeState: { type: "boolean" } }), label: "读取图形化工作区", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: tool("get_task_block_directory", "Return task-relevant toolbox categories and candidate blocks in one batch, each with its field, input and required-input contract. Use this before searching individual blocks.", { task: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 80 } }), label: "读取任务积木目录", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: tool("search_blocks", "Search the registered block catalog only when the task directory cannot identify a required block. Returns type, label, category and field/connection contracts. Use one broad query instead of repeated single-block searches.", { query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } }), label: "搜索积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: tool("get_block_templates", "Read the real fields, input slots, required inputs and connection contracts for a batch of required block types. Reports notFound for types outside the toolbox. Do not request full Blockly serialization state.", { types: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 } }), label: "读取积木模板", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: { type: "function", function: { name: "apply_block_program", description: "The only graphical workspace write operation. Submit a complete nested BlockProgram using type, fields, values, statements and optional next. The host creates real block templates, fills defaults, connects statement chains, applies mutations/shadow values and validates in an isolated workspace before committing once. Do not submit id, shadow, coordinates, refs, connect operations or raw Blockly state. Use this for new programs, whole scenes, plugin blocks and patches that add or replace blocks.", parameters: blockTreeToolSchema() } }, label: "应用积木程序", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
-];
-
 export const pythonToBlocksAgentTool: AgentTool = {
   definition: {
     type: "function",
     function: {
       name: "apply_python_as_blocks",
-      description: "Generate real Blockly blocks from a complete Python/MicroPython program. This is a block-generation tool, not the pure-code editor: use it even when the user asks for blocks only. For common hardware tasks, call this before any block directory/search tools; only fall back after conversion fails or returns fallbackCount > 0. The host converts deterministically, keeps unsupported statements as raw-statement fallbacks where possible, and validates the resulting Blockly workspace and generated code. Do not also call apply_block_tree for the same program.",
+      description: "Preferred graphical write path (code-first). Submit one complete Python (Manim workbench) or MicroPython (hardware workbench) program; the host deterministically converts it to real Blockly blocks, validates the workspace and generated code in isolation, and commits once. Call this before any block directory/search tools; only fall back to apply_block_program after conversion fails or returns fallbackCount > 0. This is a block-generation tool, not the pure-code editor: use it even when the user asks for blocks only. Do not also call apply_block_program for the same program.",
       parameters: {
         type: "object",
         properties: {
@@ -83,6 +75,15 @@ export const pythonToBlocksAgentTool: AgentTool = {
   changesState: true,
   mutation: true,
 };
+
+const allBlocklyTools: AgentTool[] = [
+  { definition: tool("get_workspace", "Read a compact summary of the current graphical workspace. Set includeState=true only when the serialized state is explicitly required.", { includeState: { type: "boolean" } }), label: "读取图形化工作区", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
+  { definition: tool("get_task_block_directory", "Return task-relevant toolbox categories and candidate blocks in one batch, each with its field, input and required-input contract. Use this before searching individual blocks.", { task: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 80 } }), label: "读取任务积木目录", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
+  { definition: tool("search_blocks", "Search the registered block catalog only when the task directory cannot identify a required block. Returns type, label, category and field/connection contracts. Use one broad query instead of repeated single-block searches.", { query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } }), label: "搜索积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
+  { definition: tool("get_block_templates", "Read the real fields, input slots, required inputs and connection contracts for a batch of required block types. Reports notFound for types outside the toolbox. Do not request full Blockly serialization state.", { types: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 } }), label: "读取积木模板", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
+  { definition: { type: "function", function: { name: "apply_block_program", description: "Graphical workspace write operation using a nested program tree (fallback when code conversion via apply_python_as_blocks fails or returns fallbackCount > 0, or for structures only expressible as blocks). Submit a complete nested BlockProgram using type, fields, values, statements and optional next. The host creates real block templates, fills defaults, connects statement chains, applies mutations/shadow values and validates in an isolated workspace before committing once. Do not submit id, shadow, coordinates, refs, connect operations or raw Blockly state. Use this for new programs, whole scenes, plugin blocks and patches that add or replace blocks.", parameters: blockTreeToolSchema() } }, label: "应用积木程序", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
+  pythonToBlocksAgentTool,
+];
 export const blocklyAgentTools: AgentTool[] = allBlocklyTools;
 export const allBlocklyToolNames = blocklyAgentTools.map((candidate) => candidate.definition.function.name);
 
@@ -291,7 +292,7 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
 
     if (name === "apply_python_as_blocks") {
       if (!services.convertPythonToWorkspace) return { ok: false, changed: false, issues: [{ code: "INVALID_OPERATION", message: "当前工程没有可用的 Python→积木转换器" }] };
-      if (args.version !== undefined && args.version !== 1) return { ok: false, changed: false, issues: [{ code: "INVALID_PLAN", message: "version 必须为 1" }] };
+      if (args.version !== undefined && args.version !== 1 && args.version !== "1") return { ok: false, changed: false, issues: [{ code: "INVALID_PLAN", message: "version 必须为 1" }] };
       if (args.mode !== undefined && args.mode !== "replace") return { ok: false, changed: false, issues: [{ code: "INVALID_OPERATION", message: "代码转积木当前只支持 mode=replace" }] };
       if (typeof args.code !== "string" || !args.code.trim()) return { ok: false, changed: false, issues: [{ code: "INVALID_INPUT", message: "code 不能为空" }] };
       if (args.code.length > 50_000) return { ok: false, changed: false, issues: [{ code: "INVALID_INPUT", message: "code 不能超过 50000 个字符" }] };

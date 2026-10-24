@@ -374,7 +374,7 @@ function compileSimple(line: SourceLine, pins: Map<string, string>, pwms: Map<st
   const printCall = text.match(/^print\((.*)\)$/);
   if (printCall) return printBlock(printCall[1]!, context);
 
-  const neopixelAssignment = text.match(/^([A-Za-z_]\w*)\s*=\s*(?:neopixel\.)?NeoPixel\(\s*(?:machine\.)?Pin\(\s*([^,)]+)\s*\)(?:\s*,\s*([^,)]+))?/);
+  const neopixelAssignment = text.match(/^([A-Za-z_]\w*)\s*=\s*(?:neopixel\.)?NeoPixel\(\s*(?:machine\.)?Pin\(\s*([^,)]+)(?:\s*,[^)]*)?\)(?:\s*,\s*([^,)]+))?/);
   if (neopixelAssignment) {
     const pin = pinValue(neopixelAssignment[2]!);
     const count = neopixelAssignment[3] ? numberValue(neopixelAssignment[3]) : 1;
@@ -556,12 +556,14 @@ function compileRepeat(lines: SourceLine[], start: number, pins: Map<string, str
   const match = header.text.match(/^for\s+[A-Za-z_]\w*\s+in\s+range\(\s*([^)]*)\s*\)\s*:$/);
   if (!match) throw new MicroPythonConversionError("只支持 for 变量 in range(...):", header.lineNumber);
   const args = splitArguments(match[1]!).map((value) => numberValue(value));
-  if (args.length === 0 || args.length > 2 || args.some((value) => value === null)) {
-    throw new MicroPythonConversionError("for range() 只支持 1-2 个数字参数", header.lineNumber);
+  if (args.length === 0 || args.length > 3 || args.some((value) => value === null)) {
+    throw new MicroPythonConversionError("for range() 只支持 1-3 个数字参数", header.lineNumber);
   }
-  const startValue = args.length === 2 ? args[0]! : 0;
-  const endValue = args.length === 2 ? args[1]! : args[0]!;
-  const count = Math.max(0, endValue - startValue);
+  const startValue = args.length >= 2 ? args[0]! : 0;
+  const endValue = args.length >= 2 ? args[1]! : args[0]!;
+  const step = args.length === 3 ? args[2]! : 1;
+  if (step === 0) throw new MicroPythonConversionError("for range() 步长不能为 0", header.lineNumber);
+  const count = Math.max(0, Math.ceil((endValue - startValue) / step));
   const body = compileBody(lines, start + 1, bodyIndent(lines, start + 1, header.indent), pins, pwms, neopixels, context);
   return {
     block: { type: "controls_repeat_ext", inputs: { TIMES: literalNumber(count), DO: { block: chain(body.blocks)! } } },

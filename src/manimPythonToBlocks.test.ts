@@ -66,4 +66,25 @@ class Demo(Scene):
     expect(serialized).toContain("self.custom_helper(title)");
     expect(serialized).toContain("visual_python_manim_wait");
   });
+
+  it("converts Rectangle assignments and animate scale plays", () => {
+    const workspace = manimPythonToWorkspace(`from manim import *
+
+class Rect(Scene):
+  def construct(self):
+    rect = Rectangle(width=3, height=2, color=ORANGE)
+    self.play(Create(rect))
+    self.play(rect.animate(run_time=1).scale(0.5))
+    self.play(rect.animate.shift(RIGHT * 2))
+    self.wait(1)
+`);
+    const serialized = JSON.stringify(workspace);
+    expect(serialized).toContain("visual_python_manim_rectangle_object");
+    expect(serialized).toContain("\"ORANGE\"");
+    expect(serialized).toContain("visual_python_manim_create_object_animation");
+    expect(serialized).toContain("visual_python_manim_animate_scale");
+    expect(serialized).toContain("0.5");
+    expect(serialized).toContain("visual_python_manim_animate_shift");
+    expect(serialized).not.toContain("python_raw_statement");
+  });
 });

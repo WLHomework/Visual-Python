@@ -93,6 +93,18 @@ const primitive = (value: unknown): value is BlockPlanPrimitive =>
 const record = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
 
+// 与 blockTree 相同：qwen 等模型偶尔会把深层嵌套参数整体字符串化（双重 JSON 编码），这里透明解码一层。
+const decodeMaybeJsonString = (value: unknown): unknown => {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+};
+
 const rawBlocklyKeys = new Set(["id", "next", "shadow", "x", "y", "collapsed", "disabled", "comment"]);
 
 function issue(
@@ -181,6 +193,7 @@ function parseOperation(value: unknown, operationIndex: number): BlockPlanOperat
 }
 
 export function parseBlockPlan(value: unknown): BlockPlan {
+  value = decodeMaybeJsonString(value);
   rejectRawState(value);
   if (!record(value)) issue("INVALID_PLAN", "BlockPlan 必须是对象");
   if (value.version !== undefined && value.version !== 1 && value.version !== "1") {
