@@ -1,4 +1,4 @@
-import type { PluginManifest } from "../plugins/api/types";
+import type { PluginManifest, PluginTarget } from "../plugins/api/types";
 import type { AiChatToolDefinition } from "../aiConfig";
 import type { AgentTool } from "./types";
 import { compilePluginIr } from "./pluginIrCompiler";
@@ -50,6 +50,7 @@ export type PluginPlan = {
   pluginId: string;
   name: string;
   goal: string;
+  targets: PluginTarget[];
   kind: "standalone" | "extension";
   provider?: string;
   runtimeNames?: string[];
@@ -63,6 +64,7 @@ export type CreatePluginPlanInput = {
   id: string;
   name: string;
   description: string;
+  targets?: PluginTarget[];
   kind?: "standalone" | "extension";
   provider?: string;
   runtimeNames?: string[];
@@ -274,6 +276,7 @@ const normalizePlan = (input: CreatePluginPlanInput, id = planId()): PluginPlan 
   pluginId: input.id,
   name: input.name,
   goal: input.description,
+  targets: [...new Set<PluginTarget>(input.targets?.length ? input.targets : ["python"])],
   kind: input.kind || "standalone",
   ...(input.provider ? { provider: input.provider } : {}),
   ...(input.runtimeNames?.length ? { runtimeNames: [...new Set(input.runtimeNames)] } : {}),
@@ -294,6 +297,7 @@ const buildPluginIrFromPlan = (input: { id: string; name: string; description: s
     name: input.plan.name,
     description: input.description || input.plan.goal,
     version: input.version,
+    targets: input.plan.targets,
     kind: input.plan.kind,
     provider: input.plan.provider,
     runtimeNames: input.plan.runtimeNames,
@@ -826,10 +830,23 @@ export const pluginAuthoringTools: AgentTool[] = [
     readOnly: true,
   },
   {
+    definition: tool("create_simple_plugin", "One-shot fast path for a new self-contained plugin: accepts the block IR directly, creates the plan, compiles the draft, and returns a draftId. Use this first for simple new plugins instead of inspect_plugin_api/read_plugin_guide/create_plugin_plan/create_plugin_draft. Block messages use text or {field}/{input} placeholders; generator templates use {INPUT:name}/{STMTS:name}/{FIELD:name}/{IMPORTS}/{INIT}.", objectSchema({
+      id: { type: "string", description: "小写插件 ID，例如 com.example.breath" },
+      name: text,
+      description: text,
+      targets: { type: "array", minItems: 1, items: { type: "string", enum: ["python", "esp32-s3", "esp32-wroom", "esp8266-esp12e"] }, description: "插件目标工作台；用户未指定时必须先询问，不能默认为 python" },
+      blocks: { type: "array", items: planBlockSchema, minItems: 1 },
+      dependencies: { type: "array", items: text },
+    }, ["id", "name", "description", "targets", "blocks"])),
+    label: "快速创建插件",
+    changesState: true,
+  },
+  {
     definition: tool("create_plugin_plan", "为插件建立结构化开发计划：blocks 使用插件 IR 规格（类型、输入、字段、生成器模板），计划不会安装插件；create_plugin_draft 会把它编译成插件文件。生成器模板无法表达入口注册逻辑时，改用 apply_plugin_plan 的 hooks。", objectSchema({
       id: { type: "string", description: "小写插件 ID，例如 com.example.shapes" },
       name: text,
       description: text,
+      targets: { type: "array", minItems: 1, items: { type: "string", enum: ["python", "esp32-s3", "esp32-wroom", "esp8266-esp12e"] }, description: "插件目标工作台；用户未指定时必须先询问，不能默认为 python" },
       kind: { type: "string", enum: ["standalone", "extension"] },
       provider: { type: "string", description: "extension 模式必须：提供方插件 ID" },
       runtimeNames: { type: "array", items: text, description: "extension 模式必须：提供方声明的 Python 运行对象" },

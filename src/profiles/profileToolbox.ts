@@ -13,8 +13,8 @@ export function activateWorkbenchProfile(profile: WorkbenchProfile): void {
 /**
  * 按 Profile 组装工具箱。
  *
- * Python Profile 保持工具箱原样（含插件分类）；硬件 Profile 只用板卡的专属声明，
- * 传入的工具箱（可能已被插件扩展）被完全忽略。
+ * Python Profile 保持工具箱原样（含插件分类）；硬件 Profile 使用板卡的专属声明，
+ * 同时保留插件贡献的分类，否则刚安装的插件积木在硬件工作台不可见。
  */
 export function buildProfileToolbox(toolbox: Blockly.utils.toolbox.ToolboxDefinition, profile: WorkbenchProfile): Blockly.utils.toolbox.ToolboxDefinition {
   if (!isHardwareWorkbench(profile)) return toolbox;
@@ -23,5 +23,20 @@ export function buildProfileToolbox(toolbox: Blockly.utils.toolbox.ToolboxDefini
     // 缺声明时静默回退会把已移除的 Python 积木重新塞回硬件界面，所以这里直接报错。
     throw new Error(`板卡 ${profile.boardId} 缺少专属工具箱声明（见 src/hardware/toolboxes/）。`);
   }
-  return resolveBoardToolbox(spec, { baseToolbox, hardwareEntries: hardwareBlockEntries(profile.boardId) });
+  const resolved = resolveBoardToolbox(spec, { baseToolbox, hardwareEntries: hardwareBlockEntries(profile.boardId) });
+  const baseCategories = Array.isArray((baseToolbox as { contents?: unknown }).contents)
+    ? (baseToolbox as { contents: Array<{ kind?: string; id?: string; name?: string }> }).contents
+    : [];
+  const baseIds = new Set(baseCategories.map((item) => item.id).filter((id): id is string => typeof id === "string"));
+  const baseNames = new Set(baseCategories.map((item) => item.name).filter((name): name is string => typeof name === "string"));
+  const pluginCategories = (Array.isArray((toolbox as { contents?: unknown }).contents)
+    ? (toolbox as { contents: Array<{ kind?: string; id?: string; name?: string }> }).contents
+    : []).filter((item) => item.kind === "category"
+      && typeof item.id === "string"
+      && item.id.length > 0
+      && !baseIds.has(item.id)
+      && !baseNames.has(item.name ?? ""));
+  if (!pluginCategories.length) return resolved;
+  const resolvedObject = resolved as { contents?: unknown[] };
+  return { ...resolvedObject, contents: [...(resolvedObject.contents ?? []), ...pluginCategories] } as Blockly.utils.toolbox.ToolboxDefinition;
 }

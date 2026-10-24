@@ -2,6 +2,8 @@
 // 本模块只负责类型、解析与校验（issue 带 ref/字段定位）；IR→文件 的编译在 pluginIrCompiler.ts。
 // 导入的既有插件草稿保留 files 模式；IR 草稿通过 apply_plugin_plan 操作修改。
 
+import type { PluginTarget } from "../plugins/api/types";
+
 export type PluginIrPrimitive = string | number | boolean;
 
 export type PluginIrShadow = {
@@ -66,6 +68,7 @@ export type PluginIrManifest = {
   name: string;
   version?: string;
   description: string;
+  targets?: PluginTarget[];
   kind?: "standalone" | "extension";
   provider?: string;
   runtimeNames?: string[];
@@ -143,6 +146,7 @@ export type PluginPlanSpec = {
   name: string;
   description: string;
   version?: string;
+  targets?: PluginTarget[];
   kind?: "standalone" | "extension";
   provider?: string;
   runtimeNames?: string[];
@@ -482,13 +486,23 @@ export function parsePluginIr(value: unknown): PluginIr {
   if (kind !== "standalone" && kind !== "extension") issue("INVALID_MANIFEST", "manifest.kind 必须是 standalone 或 extension");
   const provider = readOptionalString(rawManifest.provider, "manifest.provider");
   const runtimeNames = readStringList(rawManifest.runtimeNames, "manifest.runtimeNames");
+  const targetValues = new Set<PluginTarget>(["python", "esp32-s3", "esp32-wroom", "esp8266-esp12e"]);
+  let targets: PluginTarget[] | undefined;
+  if (rawManifest.targets !== undefined) {
+    if (!Array.isArray(rawManifest.targets) || rawManifest.targets.length === 0) issue("INVALID_MANIFEST", "manifest.targets 必须是非空数组");
+    const parsedTargets = rawManifest.targets.map((target) => {
+      if (typeof target !== "string" || !targetValues.has(target as PluginTarget)) issue("INVALID_MANIFEST", `manifest.targets 含无效目标：${String(target)}`);
+      return target as PluginTarget;
+    });
+    targets = [...new Set(parsedTargets)];
+  }
   if (kind === "extension") {
     if (!provider || !pluginIdPattern.test(provider)) issue("INVALID_MANIFEST", "extension 插件必须声明有效的 manifest.provider");
     if (!runtimeNames?.length) issue("INVALID_MANIFEST", "extension 插件必须声明 manifest.runtimeNames");
   } else if (provider || runtimeNames?.length) {
     issue("INVALID_MANIFEST", "standalone 插件不能声明 provider 或 runtimeNames");
   }
-  const manifest: PluginIrManifest = { id, name, description, version, kind, ...(provider ? { provider } : {}), ...(runtimeNames ? { runtimeNames } : {}) };
+  const manifest: PluginIrManifest = { id, name, description, version, kind, ...(targets ? { targets } : {}), ...(provider ? { provider } : {}), ...(runtimeNames ? { runtimeNames } : {}) };
 
   const blockSpecs = value.blocks === undefined ? [] : value.blocks;
   if (!Array.isArray(blockSpecs)) issue("INVALID_IR", "blocks 必须是数组");
@@ -717,6 +731,7 @@ export function pluginIrFromPlan(input: PluginPlanSpec): PluginIr {
       name,
       description,
       ...(input.version?.trim() ? { version: input.version.trim() } : {}),
+      ...(input.targets?.length ? { targets: input.targets } : {}),
       ...(input.kind ? { kind: input.kind } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.runtimeNames?.length ? { runtimeNames: input.runtimeNames } : {}),

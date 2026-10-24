@@ -3,7 +3,9 @@
 export const pluginAuthoringRules = `
 
 插件开发规则：
-- 新插件：先调用 inspect_plugin_api 读取契约和 IR 规格，再用 create_plugin_plan 规划（blocks 用 IR 规格给出类型、输入、字段和 generator 模板），把返回的 planId 传给 create_plugin_draft 编译出 plugin.json、codegen.json、index.js。扩展已启用插件前先调用该能力的只读检查工具，取得真实入口积木、输入名、运行对象和代码生成约定；没有可验证的能力契约时必须创建自包含插件。积木类型、输入名、激活方式和生成的 Python 一律以工具返回的插件契约为准，不要猜测宿主输入名或入口。不要把插件代码写入当前普通 Python 文档。
+- 创建任何插件前先确认目标工作台：python（Python + Manim）、esp32-s3、esp32-wroom、esp8266-esp12e。用户没有明确指定时必须调用 ask_user，不能默认 python，也不能把硬件插件装到 Python 模式。
+- 新简单独立插件：优先直接调用 create_simple_plugin（一次提交 targets + blocks IR），不要先调用 inspect_plugin_api、read_plugin_guide 或 create_plugin_plan。只有扩展已有插件、复杂 hooks，或 create_simple_plugin 验证失败时才走完整流程。生成器模板占位符：{INPUT:名} 取值输入，{STMTS:名} 取语句体，{FIELD:名} 取字段；imports 用 ["import machine", "import time"] 这种完整 Python 行。
+- 新复杂插件：调用 inspect_plugin_api 读取契约后，用 create_plugin_plan 规划（blocks 用 IR 规格给出类型、输入、字段和 generator 模板），把返回的 planId 传给 create_plugin_draft 编译出 plugin.json、codegen.json、index.js。扩展已启用插件前先调用该能力的只读检查工具，取得真实入口积木、输入名、运行对象和代码生成约定；没有可验证的能力契约时必须创建自包含插件。积木类型、输入名、激活方式和生成的 Python 一律以工具返回的插件契约为准，不要猜测宿主输入名或入口。不要把插件代码写入当前普通 Python 文档。
 - IR 草稿（create_plugin_draft 生成的）只能用 apply_plugin_plan 修改：先 read_plugin_draft 查看积木 ref、模板和工具箱，再用 add_block/update_block/delete_block/set_manifest/set_toolbox 等操作提交最小改动；失败时按 issues 中的 operationIndex、ref、字段定位修改对应操作后重新提交，不要整包重做，也不要用文件工具修改生成文件。
 - 草稿和计划只以工具返回的 ID 为准：不要复用历史消息中的 draftId/planId，不要猜测或拼接 ID。工具报“插件草稿不存在”或“插件计划不存在”时，不要连续重试其它 ID：用 create_plugin_draft（必要时先重新 create_plugin_plan）重建，或对已安装插件调用 import_installed_plugin_draft 恢复为草稿。
 - 需要宿主 API 细节时用 read_plugin_guide 阅读官方《插件开发指南》：先按契约 guide.sections 选小节（省略 section 返回目录），长小节用 nextOffset 继续；不要凭记忆编造宿主 API。

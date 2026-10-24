@@ -46,15 +46,15 @@ function services(workspace: Blockly.Workspace): BlocklyAgentServices {
 const signal = () => new AbortController().signal;
 
 describe("Blockly Agent host", () => {
-  it("exposes one semantic graphical write operation", () => {
+  it("exposes tree creation plus plan patching write operations", () => {
     expect(blocklyAgentTools.map((tool) => tool.definition.function.name)).toEqual([
       "get_workspace",
       "get_task_block_directory",
       "search_blocks",
       "get_block_templates",
-      "apply_block_plan",
+      "apply_block_program",
     ]);
-    expect(blocklyAgentTools.filter((tool) => tool.changesState).map((tool) => tool.definition.function.name)).toEqual(["apply_block_plan"]);
+    expect(blocklyAgentTools.filter((tool) => tool.changesState).map((tool) => tool.definition.function.name)).toEqual(["apply_block_program"]);
   });
 
   it("describes actual Blockly fields and connection contracts", () => {
@@ -66,6 +66,7 @@ describe("Blockly Agent host", () => {
       hasNextConnection: true,
       hasOutputConnection: false,
     });
+    expect(contract.optionalValueInputs).toContain("VALUE");
   });
 
   it("reads workspace summary and full state only on request", async () => {
@@ -146,6 +147,107 @@ describe("Blockly Agent host", () => {
     expect(host.commit).toHaveBeenCalledOnce();
     expect(workspace.getAllBlocks(false)).toHaveLength(3);
     expect(workspace.getBlockById((result as { refIds: Record<string, string> }).refIds.amount!)).toBeTruthy();
+    workspace.dispose();
+  });
+
+  it("converts a complete Python program into blocks through the optional converter", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    host.convertPythonToWorkspace = vi.fn(() => ({
+      blocks: {
+        languageVersion: 0,
+        blocks: [{
+          type: "agent_host_scene",
+          fields: { NAME: "Converted" },
+          inputs: { BODY: { block: { type: "agent_host_statement" } } },
+        }],
+      },
+    }));
+    const execute = createBlocklyToolExecutor(host);
+    const result = await execute("apply_python_as_blocks", {
+      version: 1,
+      mode: "replace",
+      code: "class Converted(Scene):\n    pass",
+    }, signal());
+
+    expect(result).toMatchObject({ ok: true, changed: true, blockCount: 2, fallbackCount: 0 });
+    expect(host.convertPythonToWorkspace).toHaveBeenCalledWith("class Converted(Scene):\n    pass");
+    expect(host.commit).toHaveBeenCalledOnce();
+    expect(workspace.getTopBlocks(false)[0]?.getFieldValue("NAME")).toBe("Converted");
+    workspace.dispose();
+  });
+
+  it("reports code-to-block conversion as unavailable without a converter", async () => {
+    const workspace = new Blockly.Workspace();
+    const execute = createBlocklyToolExecutor(services(workspace));
+    const result = await execute("apply_python_as_blocks", {
+      version: 1,
+      mode: "replace",
+      code: "print('x')",
+    }, signal()) as { ok: boolean; issues?: Array<{ message: string }> };
+
+    expect(result.ok).toBe(false);
+    expect(result.issues?.[0]?.message).toContain("没有可用的 Python→积木转换器");
+    workspace.dispose();
+  });
+
+  it("compiles a nested block tree with host-managed connections", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    const execute = createBlocklyToolExecutor(host);
+    const result = await execute("apply_block_tree", {
+      version: 1,
+      mode: "replace",
+      tree: {
+        type: "agent_host_scene",
+        statements: {
+          BODY: [{
+            type: "agent_host_statement",
+            values: { VALUE: { type: "agent_host_value", fields: { TEXT: "7" } } },
+          }],
+        },
+      },
+    }, signal());
+
+    expect(result).toMatchObject({ ok: true, changed: true, blockCount: 3 });
+    expect(result).not.toHaveProperty("state");
+    expect(host.commit).toHaveBeenCalledOnce();
+    const scene = workspace.getTopBlocks(false)[0];
+    expect(scene?.type).toBe("agent_host_scene");
+    expect(scene?.getFieldValue("NAME")).toBe("MainScene");
+    const statement = scene?.getInput("BODY")?.connection?.targetBlock();
+    expect(statement?.type).toBe("agent_host_statement");
+    expect(statement?.getInput("VALUE")?.connection?.targetBlock()?.getFieldValue("TEXT")).toBe("7");
+    workspace.dispose();
+  });
+
+  it("replaces a non-empty workspace through apply_block_program", async () => {
+    const workspace = new Blockly.Workspace();
+    workspace.newBlock("agent_host_value").setFieldValue("old", "TEXT");
+    const host = services(workspace);
+    const execute = createBlocklyToolExecutor(host);
+    const result = await execute("apply_block_program", {
+      mode: "replace",
+      tree: { type: "agent_host_scene", fields: { NAME: "Only" } },
+    }, signal());
+
+    expect(result).toMatchObject({ ok: true, blockCount: 1 });
+    expect(workspace.getTopBlocks(false).map((block) => block.type)).toEqual(["agent_host_scene"]);
+    workspace.dispose();
+  });
+
+  it("reports a path for invalid block tree nodes", async () => {
+    const workspace = new Blockly.Workspace();
+    const host = services(workspace);
+    const execute = createBlocklyToolExecutor(host);
+    const result = await execute("apply_block_tree", {
+      mode: "replace",
+      tree: { type: "agent_host_scene", fields: { NAME: "Demo" }, statements: { BODY: [{ type: "agent_host_statement", id: "raw" }] } },
+    }, signal()) as { ok: boolean; issues?: Array<{ message: string }> };
+
+    expect(result.ok).toBe(false);
+    expect(result.issues?.[0]?.message).toContain("statements.BODY[0]");
+    expect(host.commit).not.toHaveBeenCalled();
     workspace.dispose();
   });
 

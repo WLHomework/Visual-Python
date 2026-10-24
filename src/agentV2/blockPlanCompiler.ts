@@ -12,6 +12,7 @@ export type BlockPlanCompilerServices = {
   validateCode(code: string): Promise<void>;
   commit(state: object, code: string): void;
   entryBlockTypes?: string[];
+  allowReplace?: boolean;
 };
 
 export type BlockPlanCompilation = {
@@ -407,7 +408,7 @@ export async function compileBlockPlan(plan: BlockPlan, services: BlockPlanCompi
   if (signal.aborted) return { ok: false, changed: false, issues: [{ code: "ABORTED", message: "Agent task stopped" }] };
   const entryTypes = new Set(services.entryBlockTypes ?? []);
   const existingBlocks = services.workspace.getAllBlocks(false).filter((block) => !block.isShadow?.());
-  if (plan.mode === "replace" && existingBlocks.length > 0) {
+  if (plan.mode === "replace" && existingBlocks.length > 0 && !services.allowReplace) {
     return {
       ok: false,
       changed: false,

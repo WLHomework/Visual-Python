@@ -52,6 +52,18 @@ describe("profile toolbox", () => {
     expect(getActiveHardwareBoard()).toBeUndefined();
   });
 
+  it("keeps plugin-contributed categories on a hardware profile", () => {
+    const toolbox = buildProfileToolbox({
+      kind: "categoryToolbox",
+      contents: [
+        ...((fakeToolbox as unknown as { contents: unknown[] }).contents),
+        { kind: "category", id: "com.example.plugin.toolbox", name: "插件测试", contents: [{ kind: "block", type: "com_example_plugin_hello" }] },
+      ],
+    } as unknown as Blockly.utils.toolbox.ToolboxDefinition, getWorkbenchProfile("esp32-wroom"));
+
+    expect(categoryNames(toolbox)).toContain("插件测试");
+  });
+
   it("only offers the board declaration, not Python-only blocks from the passed toolbox", () => {
     const toolbox = buildProfileToolbox(
       {

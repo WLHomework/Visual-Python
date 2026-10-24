@@ -84,15 +84,15 @@ describe("Visual Python Agent Core", () => {
     const visualMessages = mocks.streamAiChat.mock.calls[0][0] as Array<{ content: string; role?: string }>;
     expect(visualMessages.at(-1)?.content).toContain('"fixture_block"');
     expect(getBlockCatalog).toHaveBeenCalledWith("创建一个圆");
-    expect(visualMessages.find((message) => message.role === "system")?.content).toContain("apply_block_plan");
+    expect(visualMessages.find((message) => message.role === "system")?.content).toContain("apply_block_program");
     const visualSystem = visualMessages.find((message) => message.role === "system")?.content || "";
     expect(visualSystem).not.toContain("先根据任务从目录选出所有需要的积木类型");
     expect(visualSystem).not.toContain("需要超过 50 种时按合理功能组分批读取");
     expect(visualSystem).not.toContain("visual_python_manim_*");
     expect(visualSystem).not.toContain("Manim 动画结构");
     const graphicalRules = visualSystem.slice(visualSystem.indexOf("图形化工作区规则"));
-    expect(graphicalRules.match(/get_block_templates/g)).toHaveLength(1);
-    expect(graphicalRules).toContain("唯一的图形化写入工具是 apply_block_plan");
+    expect(graphicalRules).toContain("唯一允许的图形化写入工具是 apply_block_program");
+    expect(graphicalRules).toContain("插件积木");
     expect(graphicalRules).not.toMatch(/compose_workspace|append_workspace_blocks|add_workspace_block|apply_workspace|replace_workspace/);
     // The graphical protocol lives in the mode-specific section only; keep the general rules free of duplicates.
     const generalRules = visualSystem.slice(0, visualSystem.indexOf("图形化工作区规则"));
@@ -136,8 +136,9 @@ describe("Visual Python Agent Core", () => {
     });
     const hardwareSystem = ((mocks.streamAiChat.mock.calls[0][0] as AiChatMessage[]).find((message) => message.role === "system")?.content || "");
     expect(hardwareSystem).toContain("MicroPython");
-    expect(hardwareSystem).toContain("当前工具箱里的积木");
-    expect(hardwareSystem).toContain("get_task_block_directory");
+    expect(hardwareSystem).toContain("当前工具箱和积木目录里的积木");
+    expect(hardwareSystem).toContain("apply_block_program");
+    expect(hardwareSystem).not.toContain("apply_python_as_blocks");
     expect(hardwareSystem).toContain("引脚");
 
     mocks.streamAiChat.mockReset();
@@ -201,7 +202,7 @@ describe("Visual Python Agent Core", () => {
     expect((mocks.streamAiChat.mock.calls[0][0] as AiChatMessage[]).some((message) => message.content.includes("hardware_pin_write"))).toBe(true);
   });
 
-  it("exposes only apply_block_plan as a graphical workspace mutation tool", async () => {
+  it("exposes tree creation plus plan patching as graphical mutation tools", async () => {
     mocks.streamAiChat.mockResolvedValueOnce(completion("完成"));
     await runVisualPythonAgent({
       prompt: "创建一个积木程序",
@@ -212,9 +213,12 @@ describe("Visual Python Agent Core", () => {
 
     const tools = mocks.streamAiChat.mock.calls[0][2]?.tools as Array<{ function: { name: string } }>;
     const names = tools.map((tool) => tool.function.name);
-    expect(names).toContain("apply_block_plan");
+    expect(names).toContain("apply_block_program");
+    expect(names).not.toContain("apply_block_tree");
+    expect(names).not.toContain("apply_block_plan");
+    expect(names).not.toContain("apply_python_as_blocks");
     expect(names).not.toEqual(expect.arrayContaining(["compose_workspace", "add_workspace_block", "replace_workspace", "append_workspace_blocks", "apply_workspace"]));
-    expect(blocklyAgentTools.filter((tool) => tool.changesState).map((tool) => tool.definition.function.name)).toEqual(["apply_block_plan"]);
+    expect(blocklyAgentTools.filter((tool) => tool.changesState).map((tool) => tool.definition.function.name)).toEqual(["apply_block_program"]);
   });
 
   it("refreshes plugin tools between Agent rounds", async () => {

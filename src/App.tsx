@@ -52,7 +52,7 @@ import type { ExampleProject } from "./examples/types";
 import { ensureProjectPlugins, getActiveAgentCapabilities, getPluginEnabledPreference, isCorePlugin, pluginRegistry, setPluginEnabled } from "./plugins";
 import type { ExternalPluginDiscovery, ExternalPluginDiscoveryResponse, ExternalPluginEntry, PluginRecord, VisualPythonPlugin } from "./plugins/api/types";
 import { validatePluginGeneratedPython } from "./plugins/core/pluginGeneratedCodeValidation";
-import { PluginRegistry } from "./plugins/core/pluginRegistry";
+import { PluginRegistry, pluginSupportsProfile } from "./plugins/core/pluginRegistry";
 import { validatePluginToolboxReferences } from "./plugins/core/pluginToolboxValidation";
 import { getManimRenderConfig, setManimRenderConfig, subscribeManimRenderConfig, type ManimRenderConfig } from "./plugins/builtin/manim/renderConfig";
 import { createManimCapabilityExecutor } from "./plugins/builtin/manim/agentRuntime";
@@ -71,7 +71,7 @@ import { createCodeDocument, createCodeDocumentFromSource, renameCodeDocument, t
 import { isBlockWorkspaceMode, normalizeWorkspaceMode, type WorkspaceMode } from "./workspaceMode";
 import { getWorkbenchShortcutAction } from "./workbenchShortcuts";
 import { isWindowDragInteractiveTarget } from "./windowDragTargets";
-import { blockSearchFlyout, createBlockSearchIndex, createTaskBlockDirectory, searchBlockIndex } from "./blockSearch";
+import { blockSearchFlyout, createBlockCatalog, createBlockSearchIndex, createTaskBlockDirectory, searchBlockIndex } from "./blockSearch";
 import { getPythonBlockAgentMetadata, mergeBlockAgentMetadata } from "./pythonBlockKnowledge";
 import { buildBlockOutline, compactBlockOutline, filterBlockOutline, type BlockOutlineNode } from "./blockOutline";
 import { installFunctionCallLinks } from "./functionCallLinks";
@@ -82,6 +82,8 @@ import { projectResourceReference, resolveProjectResourceReference, type Project
 import { createProjectId, parseDraftProject, parseProjectFile, type DraftProject, type ProjectFile } from "./projectFile";
 import { inferProfileFromCode, readLastCodeSession, writeLastCodeSession } from "./lastCodeSession";
 import { clearLastProject, conversationStoreKey, persistWorkspaceDraft, pruneConversationStores, readLastProject, resolveStartupProjectPath, setRestoreLastProjectEnabled, shouldRestoreLastProject, writeLastProject, WORKSPACE_DRAFT_STORAGE_KEY } from "./sessionPersistence";
+import { manimPythonToWorkspace } from "./manimPythonToBlocks";
+import { micropythonToWorkspace } from "./hardware/micropythonToBlocks";
 import { ManimRenderAttempt, ManimRenderCancelledError } from "./manimRenderCancellation";
 import { diagnoseManimError, diagnoseManimStartupError, localAudioErrorSuggestion } from "./manimDiagnostics";
 import { findManagedAudioMetadataRanges } from "./managedAudioMetadata";
@@ -1790,7 +1792,7 @@ export default function App() {
     if (!ws) return;
     // 切回 Python 界面时保留积木里的引脚取值，避免在 Python 界面下刷新下拉而丢数据。
     if (isHardwareWorkbench(next)) refreshHardwareBlocks(ws);
-    const nextToolbox = buildProfileToolbox(pluginRegistry.extendToolbox(toolbox), next);
+    const nextToolbox = buildProfileToolbox(pluginRegistry.extendToolbox(toolbox, next.id), next);
     blockSearchDefinition.current = nextToolbox;
     blockSearchLabelCache.current.clear();
     ws.updateToolbox(nextToolbox);
@@ -1807,7 +1809,7 @@ export default function App() {
     if (!host.current) return;
     const startupProfile = profileRef.current;
     activateWorkbenchProfile(startupProfile);
-    const initialToolbox = buildProfileToolbox(pluginRegistry.extendToolbox(toolbox), startupProfile);
+    const initialToolbox = buildProfileToolbox(pluginRegistry.extendToolbox(toolbox, startupProfile.id), startupProfile);
     blockSearchDefinition.current = initialToolbox;
     const ws = Blockly.inject(host.current, {
       toolbox: initialToolbox, renderer: "zelos", theme: visualPythonThemes[visualThemeId], trashcan: true, sounds: true, media: "blockly-media/",
@@ -1972,7 +1974,7 @@ export default function App() {
     };
     ws.addChangeListener(update);
     const unsubscribePlugins = pluginRegistry.subscribe(() => {
-      const nextToolbox = buildProfileToolbox(pluginRegistry.extendToolbox(toolbox), profileRef.current);
+      const nextToolbox = buildProfileToolbox(pluginRegistry.extendToolbox(toolbox, profileRef.current.id), profileRef.current);
       blockSearchDefinition.current = nextToolbox;
       blockSearchLabelCache.current.clear();
       ws.updateToolbox(nextToolbox);
@@ -5812,18 +5814,21 @@ export default function App() {
             if (workspaceModeRef.current !== agentWorkspaceMode) throw new Error("工作区模式已改变，请重新提交任务");
           },
           getCapabilities: getActiveAgentCapabilities,
-          getBlockCatalog: (task) => {
+          getBlockCatalog: (_task) => {
             const index = createBlockSearchIndex(
               blockSearchDefinition.current,
               blockSearchLabelForType,
               (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null,
               { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) },
             );
-            return JSON.stringify(createTaskBlockDirectory(index, task || "", { describe: describeBlocklyBlockContract }));
+            return JSON.stringify(createBlockCatalog(index, describeBlocklyBlockContract));
           },
           getTools: () => [
             ...blocklyAgentTools,
-            ...pluginRegistry.getAgentTools().map(({ tool }) => ({
+            ...pluginRegistry.getAgentTools().filter(({ pluginId }) => {
+              const record = pluginRegistry.getRecord(pluginId);
+              return Boolean(record && pluginSupportsProfile(record.plugin.manifest, profileRef.current.id));
+            }).map(({ tool }) => ({
               definition: tool.definition,
               label: tool.label,
               workspaceModes: tool.workspaceModes,
@@ -5836,7 +5841,7 @@ export default function App() {
               verificationTool: tool.verificationTool,
               executionLabels: tool.executionLabels,
               execution: tool.execution,
-            })),
+            })).filter((tool) => !tool.workbenchKinds?.length || tool.workbenchKinds.includes(profileRef.current.kind)),
           ],
           blocklyTools: createBlocklyToolExecutor({
             workspace: workspace.current!,
@@ -5862,6 +5867,11 @@ export default function App() {
             generateCode: generateWorkspacePython,
             validateContexts: (candidate) => validateWorkspaceIssues(candidate, profileRef.current),
             validateCode: async (candidate) => { await invoke("validate_python_code", { code: candidate, pythonPath: pythonEnvironment?.path || null }); },
+            convertPythonToWorkspace: (candidate) => {
+              if (profileRef.current.features.manim) return manimPythonToWorkspace(candidate);
+              if (profileRef.current.kind === "micropython") return micropythonToWorkspace(candidate, profileRef.current.boardId);
+              throw new Error("当前工作台没有 Python→积木转换器");
+            },
             commit: (state, generatedCode) => {
               const ws = workspace.current;
               if (!ws) throw new Error("图形化工作区尚未就绪");

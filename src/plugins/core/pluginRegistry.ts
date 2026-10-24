@@ -16,12 +16,23 @@ import {
   type PluginProjectSerializer,
   type PluginRecord,
   type PluginSettingContribution,
+  type PluginTarget,
   type PluginToolboxCategory,
   type PluginWorkspaceIssue,
   type PluginWorkspaceValidator,
   type PythonBlockGenerator,
   type VisualPythonPlugin,
 } from "../api/types";
+
+export const defaultPluginTargets: PluginTarget[] = ["python"];
+
+export function pluginTargets(manifest: PluginManifest): PluginTarget[] {
+  return manifest.targets?.length ? [...new Set(manifest.targets)] : defaultPluginTargets;
+}
+
+export function pluginSupportsProfile(manifest: PluginManifest, profileId: string): boolean {
+  return pluginTargets(manifest).includes(profileId as PluginTarget);
+}
 
 type Contributions = {
   blockTypes: Set<string>;
@@ -239,15 +250,18 @@ export class PluginRegistry {
     }
   }
 
-  extendToolbox(base: Blockly.utils.toolbox.ToolboxDefinition): Blockly.utils.toolbox.ToolboxDefinition {
+  extendToolbox(base: Blockly.utils.toolbox.ToolboxDefinition, profileId?: string): Blockly.utils.toolbox.ToolboxDefinition {
     if (typeof base !== "object" || base === null || !("contents" in base) || !Array.isArray(base.contents)) return base;
-    const categories = this.activeContributions().flatMap((entry) => entry.categories).map((category) => ({
-      kind: "category",
-      id: category.id,
-      name: category.name,
-      colour: category.colour,
-      contents: category.contents,
-    }));
+    const categories = this.activeEntries()
+      .filter(([, record]) => !profileId || pluginSupportsProfile(record.plugin.manifest, profileId))
+      .flatMap(([, , contribution]) => contribution.categories)
+      .map((category) => ({
+        kind: "category",
+        id: category.id,
+        name: category.name,
+        colour: category.colour,
+        contents: category.contents,
+      }));
     return { ...base, contents: [...base.contents, ...categories] } as Blockly.utils.toolbox.ToolboxDefinition;
   }
 

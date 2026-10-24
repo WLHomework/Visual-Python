@@ -72,6 +72,28 @@ describe("Visual Python tool applicability", () => {
     expect(services.sourceCodeRef.current).toBe("VALUE = 1");
   });
 
+  it("creates a simple plugin draft in one fast-path call", async () => {
+    const services = createServices("print('hello')");
+    services.pluginDraftStore = createPluginDraftStore();
+    const executeTool = createVisualPythonToolExecutor(services);
+    const created = await executeTool("create_simple_plugin", {
+      id: "com.example.fast",
+      name: "Fast",
+      description: "Fast plugin",
+      targets: ["esp32-s3"],
+      blocks: [{
+        ref: "hello",
+        type: "com_example_fast_hello",
+        purpose: "say hello",
+        message: ["hello"],
+        generator: { template: "print('hello')\n" },
+      }],
+    }, new AbortController().signal);
+
+    expect(created).toMatchObject({ created: true, mode: "ir", validation: { valid: true, issues: [] } });
+    expect(created.draftId).toEqual(expect.any(String));
+  });
+
   it("creates, updates, and validates plugin drafts without installing them", async () => {
     const services = createServices("print('hello')");
     services.pluginDraftStore = createPluginDraftStore();

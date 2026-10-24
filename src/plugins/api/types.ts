@@ -6,6 +6,8 @@ import type { WorkbenchKind } from "../../profiles/workbenchProfile";
 
 export const PLUGIN_API_VERSION = "1";
 
+export type PluginTarget = "python" | "esp32-s3" | "esp32-wroom" | "esp8266-esp12e";
+
 export type PluginState = "discovered" | "disabled" | "loading" | "active" | "error";
 
 export interface PluginManifest {
@@ -16,6 +18,7 @@ export interface PluginManifest {
   description?: string;
   builtin?: boolean;
   entry?: string;
+  targets?: PluginTarget[];
   python?: { packages?: string[]; minimumVersion?: string };
   agent?: {
     description: string;

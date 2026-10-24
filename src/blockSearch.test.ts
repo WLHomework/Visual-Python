@@ -46,6 +46,11 @@ describe("block search", () => {
     expect(searchBlockIndex(index, "数学 数字")[0]?.type).toBe("math_number");
   });
 
+  it("returns partial matches for multi-concept queries instead of nothing", () => {
+    expect(searchBlockIndex(index, "数学 完全不存在的词").map((entry) => entry.type)).toContain("math_number");
+    expect(searchBlockIndex(index, "圆形 完全不存在的词").map((entry) => entry.type)).toContain("visual_python_manim_circle_object");
+  });
+
   it("matches agent aliases and keywords without changing the visible label", () => {
     const entries = createBlockSearchIndex({
       kind: "categoryToolbox",
@@ -57,6 +62,15 @@ describe("block search", () => {
     expect(searchBlockIndex(entries, "画图")[0]?.type).toBe("third_party_draw");
     expect(searchBlockIndex(entries, "可视化")[0]?.type).toBe("third_party_draw");
     expect(entries[0].label).toBe("绘制对象");
+  });
+
+  it("matches hardware capability synonyms used by natural-language tasks", () => {
+    const entries = createBlockSearchIndex({
+      kind: "categoryToolbox",
+      contents: [{ kind: "category", name: "灯光", contents: [{ kind: "block", type: "hardware_onboard_rgb" }] }],
+    } as any, () => "板载 RGB 灯显示");
+    expect(searchBlockIndex(entries, "LED")[0]?.type).toBe("hardware_onboard_rgb");
+    expect(createTaskBlockDirectory(entries, "让板载 LED 闪烁").candidates.map((candidate) => candidate.type)).toContain("hardware_onboard_rgb");
   });
 
   it("returns only task candidates and a compact category summary", () => {

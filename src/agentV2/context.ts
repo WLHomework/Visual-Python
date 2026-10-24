@@ -16,7 +16,7 @@ export type AgentRequestContext = AgentRequestContextInput;
 const truncate = (value: string, max: number) => value.length > max ? `${value.slice(0, max)}\n[内容已截断]` : value;
 const maxAgentToolHistoryCharacters = 32_000;
 const maxCompactedToolHistoryCharacters = 12_000;
-const maxBlockCatalogCharacters = 44_000;
+const maxBlockCatalogCharacters = 90_000;
 const maxInitialRequestCharacters = 150_000;
 const maxContextHistoryTurns = 24;
 const maxContextHistoryCharacters = 24_000;
@@ -63,8 +63,8 @@ export function graphicalCatalogInstructions(blockCatalog?: string): string {
   const discoveryRules = !catalog
     ? "No task block catalog is attached. Call get_task_block_directory once for task discovery; its candidates include the field, input and required-input contract, so build the plan from that result. Do not search for blocks one by one."
     : hasTruncatedBlockCatalog(catalog)
-      ? `The attached task block catalog is a ranked candidate selection and reports omittedCandidateCount, so other blocks were omitted. Its candidates${contractText} let you build apply_block_plan directly; do not repeat discovery. Only if a required block type is absent, make at most one search_blocks call or one get_task_block_directory call with a different task phrase, and read get_block_templates only for types whose contract is still missing or empty.`
-      : `The prompt contains a complete catalog${contractText}. do not call get_task_block_directory or search_blocks. Use the catalog directly to build apply_block_plan, and call get_block_templates at most once in a batch only for types whose contract is missing or empty.`;
+      ? `The attached task block catalog is a ranked candidate selection and reports omittedCandidateCount, so other blocks were omitted. Its candidates${contractText} let you build apply_block_program directly; do not repeat discovery. Only if a required block type is absent, make at most one search_blocks call or one get_task_block_directory call with a different task phrase, and read get_block_templates only for types whose contract is still missing or empty.`
+      : `The prompt contains a complete catalog${contractText}. do not call get_task_block_directory or search_blocks. Use the catalog directly to build apply_block_program, and call get_block_templates at most once in a batch only for types whose contract is missing or empty.`;
   return `Catalog strategy for this graphical task: ${discoveryRules}`;
 }
 
@@ -223,8 +223,8 @@ export function buildAgentRequestMessages(context: AgentRequestContext): AiChatM
     const catalog = compactTaskBlockDirectory(context.blockCatalog.trim(), catalogBudget) ?? compactBlockCatalog(context.blockCatalog.trim(), catalogBudget);
     if (!catalog?.text) return messages;
     const notice = catalog.omittedBlocks
-      ? `积木目录受本轮请求长度限制，仅附带部分积木候选；还有 ${catalog.omittedBlocks} 个积木未展开。候选已带字段与输入契约，可直接构建 apply_block_plan；缺少的类型再用 search_blocks 补齐，并用 get_block_templates 读取缺失契约。`
-      : "以下积木目录已带字段与输入契约，可直接据此构建 apply_block_plan；只有契约缺失或为空的类型才调用 get_block_templates。";
+      ? `积木目录受本轮请求长度限制，仅附带部分积木候选；还有 ${catalog.omittedBlocks} 个积木未展开。候选已带字段与输入契约，可直接构建 apply_block_program；缺少的类型再用 search_blocks 补齐，并用 get_block_templates 读取缺失契约。`
+      : "以下积木目录已带字段与输入契约，可直接据此构建 apply_block_program；只有契约缺失或为空的类型才调用 get_block_templates。";
     messages.push({ role: "user", content: `[Block catalog]\n${catalog.text}\n\n${notice}` });
   }
   return messages;
@@ -345,7 +345,7 @@ export function compactAgentToolResult(_toolName: string, result: Record<string,
       }) : [];
       return JSON.stringify({ templates });
     }
-    if (_toolName === "apply_block_plan") {
+    if (_toolName === "apply_block_plan" || _toolName === "apply_block_program") {
       const compact = Object.fromEntries([
         ["ok", result.ok],
         ["changed", result.changed],

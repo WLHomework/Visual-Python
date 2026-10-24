@@ -42,6 +42,7 @@ export type BlockCatalogContract = {
   nextCheck: string[] | null;
   fields: BlockCatalogField[];
   requiredInputs?: string[];
+  optionalValueInputs?: string[];
 };
 export type BlockCatalogBlock = BlockCatalogContract & {
   type: string;
@@ -146,6 +147,15 @@ function inferredAgentMetadata(type: string, label: string, category: string): B
   addSemantic(/index|slice|索引|切片/u, "index", "索引");
   addSemantic(/sort|排序/u, "sort", "排序");
   addSemantic(/set|update|insert|delete|修改|设置|插入|删除/u, "modify", "修改");
+  addSemantic(/led|rgb|neopixel|ws2812|灯带|彩灯|板载.*灯/u, "led", "LED", "灯", "rgb", "neopixel", "彩灯", "ws2812");
+  addSemantic(/pwm|占空比|频率/u, "pwm", "PWM", "占空比", "频率", "调光", "调速");
+  addSemantic(/adc|analog|模拟|电位器|光敏/u, "adc", "ADC", "模拟", "analog", "电位器", "光敏");
+  addSemantic(/dht|温湿度|温度|湿度/u, "dht", "DHT", "温湿度", "温度", "湿度");
+  addSemantic(/oled|ssd1306|屏幕|显示/u, "oled", "OLED", "屏幕", "显示", "ssd1306");
+  addSemantic(/servo|舵机/u, "servo", "舵机", "角度");
+  addSemantic(/button|按键|按钮|touch|触摸/u, "button", "按键", "按钮", "touch", "触摸");
+  addSemantic(/sleep|delay|延时|等待|毫秒/u, "sleep", "delay", "延时", "等待", "毫秒");
+  addSemantic(/forever|repeat|loop|永远|重复|循环|闪烁|blink/u, "loop", "循环", "重复", "闪烁", "blink");
   return {
     description: `A ${label} block in ${category}. It generates the corresponding Python expression or statement.`,
     keywords: [...new Set([label, ...categoryTerms, ...typeTerms, ...semanticTerms])],
@@ -462,11 +472,13 @@ export function searchBlockIndex(entries: BlockSearchEntry[], query: string, lim
   const tokens = normalized.split(/\s+/).filter(Boolean);
   return entries
     .flatMap((entry, order) => {
-      if (!tokens.every((token) => entry.searchText.includes(token))) return [];
+      const matched = tokens.filter((token) => entry.searchText.includes(token));
+      if (!matched.length) return [];
       const label = entry.label.toLocaleLowerCase();
       const type = entry.type.toLocaleLowerCase();
       const category = entry.category.toLocaleLowerCase();
-      let score = 0;
+      let score = (matched.length / tokens.length) * 320;
+      if (matched.length === tokens.length) score += 120;
       if (label === normalized) score += 1000;
       else if (label.startsWith(normalized)) score += 700;
       else if (label.includes(normalized)) score += 500;

@@ -213,7 +213,7 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
 
   return async (name, args, signal) => {
     if (signal.aborted) throw new Error("已停止生成");
-    if (["inspect_plugin_api", "read_plugin_guide", "create_plugin_plan", "list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft", "read_plugin_draft_file", "apply_plugin_plan", "create_plugin_draft", "update_plugin_draft", "edit_plugin_draft_file", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"].includes(name)) {
+    if (["inspect_plugin_api", "read_plugin_guide", "create_simple_plugin", "create_plugin_plan", "list_installed_plugins", "import_installed_plugin_draft", "read_plugin_draft", "read_plugin_draft_file", "apply_plugin_plan", "create_plugin_draft", "update_plugin_draft", "edit_plugin_draft_file", "validate_plugin_draft", "run_plugin_draft_checks", "install_plugin_draft"].includes(name)) {
       if (name === "inspect_plugin_api") return { contract: pluginAuthoringContract };
       if (name === "read_plugin_guide") {
         return readPluginGuide({
@@ -224,11 +224,33 @@ export function createVisualPythonToolExecutor(services: VisualPythonHostService
       }
       const store = services.pluginDraftStore;
       if (!store) throw new Error("插件草稿服务尚未就绪");
+      if (name === "create_simple_plugin") {
+        const targets = Array.isArray(args.targets)
+          ? args.targets.filter((item): item is "python" | "esp32-s3" | "esp32-wroom" | "esp8266-esp12e" => typeof item === "string" && ["python", "esp32-s3", "esp32-wroom", "esp8266-esp12e"].includes(item))
+          : [];
+        if (!targets.length) throw new Error("创建插件前必须先确认目标工作台（python / esp32-s3 / esp32-wroom / esp8266-esp12e），不能默认使用 python");
+        const plan = store.createPlan({
+          id: checkedString(args, "id"),
+          name: checkedString(args, "name"),
+          description: checkedString(args, "description"),
+          targets,
+          ...(Array.isArray(args.blocks) ? { blocks: args.blocks as PluginPlanBlock[] } : {}),
+          ...(Array.isArray(args.dependencies) ? { dependencies: args.dependencies.filter((item): item is string => typeof item === "string") } : {}),
+        });
+        const draft = store.create({
+          id: checkedString(args, "id"),
+          name: checkedString(args, "name"),
+          description: checkedString(args, "description"),
+          planId: plan.id,
+        });
+        return { created: true, planId: plan.id, ...pluginDraftSummary(draft, pluginValidationContext()), files: draft.files };
+      }
       if (name === "create_plugin_plan") {
         const plan = store.createPlan({
           id: checkedString(args, "id"),
           name: checkedString(args, "name"),
           description: checkedString(args, "description"),
+          ...(Array.isArray(args.targets) ? { targets: args.targets.filter((item): item is "python" | "esp32-s3" | "esp32-wroom" | "esp8266-esp12e" => typeof item === "string" && ["python", "esp32-s3", "esp32-wroom", "esp8266-esp12e"].includes(item)) } : {}),
           ...(args.kind === "extension" ? { kind: "extension" as const } : {}),
           ...(typeof args.provider === "string" && args.provider.trim() ? { provider: args.provider.trim() } : {}),
           ...(Array.isArray(args.runtimeNames) ? { runtimeNames: args.runtimeNames.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),

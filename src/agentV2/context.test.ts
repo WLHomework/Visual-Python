@@ -57,7 +57,7 @@ describe("Agent context compression", () => {
       memory: "memory",
       blockCatalog: catalog,
     }));
-    expect(messages.every((message) => message.content.length <= 50_000)).toBe(true);
+    expect(messages.every((message) => message.content.length <= 100_000)).toBe(true);
     const catalogMessage = messages.find((message) => message.content.startsWith("[Block catalog]"));
     expect(catalogMessage).toBeDefined();
     expect(catalogMessage?.content).not.toContain(catalog);

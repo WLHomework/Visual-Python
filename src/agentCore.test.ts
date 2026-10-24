@@ -19,12 +19,13 @@ const systemPromptFor = async (snapshot: Record<string, unknown>): Promise<strin
 };
 
 describe("MicroPython 工作台提示词", () => {
-  it("要求先查找、只使用当前工具箱里的积木", async () => {
-    const prompt = await systemPromptFor({ workspaceMode: "code", workbench: { kind: "micropython", label: "ESP32-S3" } });
+  it("uses one graphical program tool and the current toolbox", async () => {
+    const prompt = await systemPromptFor({ workspaceMode: "visual", workbench: { kind: "micropython", label: "ESP32-S3" } });
 
     expect(prompt).toContain("当前工具箱");
-    expect(prompt).toContain("get_task_block_directory");
-    expect(prompt).toContain("search_blocks");
+    expect(prompt).toContain("apply_block_program");
+    expect(prompt).not.toContain("apply_python_as_blocks");
+    expect(prompt).not.toContain("apply_block_plan");
   });
 
   it("纯 Python 工作台不附加硬件提示词", async () => {

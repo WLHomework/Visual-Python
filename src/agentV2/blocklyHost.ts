@@ -5,7 +5,8 @@ import type { WorkspaceMode } from "../workspaceMode";
 import { hydrateAllDeferredInputs, saveWorkspaceState } from "../pythonBlocks";
 import { getRequiredInputNames } from "../pythonSyntaxBlocks";
 import type { BlockCatalogContract, BlockCatalogField, BlockTaskDirectory } from "../blockSearch";
-import { BlockPlanValidationError, blockPlanToolSchema, parseBlockPlan } from "./blockPlan";
+import { BlockPlanValidationError, parseBlockPlan, type BlockPlan } from "./blockPlan";
+import { blockTreeToPlan, blockTreeToolSchema, parseBlockTree } from "./blockTree";
 import { compileBlockPlan } from "./blockPlanCompiler";
 
 export type BlockInputSlot = { name: string; kind: "statement" | "value"; check?: string[] };
@@ -21,6 +22,7 @@ export type BlockTemplate = {
   nextCheck?: string[] | null;
   fields?: BlockFieldDescription[];
   requiredInputs?: string[];
+  optionalValueInputs?: string[];
 };
 
 type ContextIssue = { blockId?: string; message: string };
@@ -33,6 +35,7 @@ export type BlocklyAgentServices = {
   generateCode(workspace: Blockly.Workspace): string;
   validateContexts(workspace: Blockly.Workspace): ContextIssue[];
   validateCode(code: string): Promise<void>;
+  convertPythonToWorkspace?: (code: string) => object;
   commit(state: object, code: string): void;
   entryBlockTypes?: string[];
 };
@@ -53,9 +56,33 @@ const allBlocklyTools: AgentTool[] = [
   { definition: tool("get_task_block_directory", "Return task-relevant toolbox categories and candidate blocks in one batch, each with its field, input and required-input contract. Use this before searching individual blocks.", { task: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 80 } }), label: "读取任务积木目录", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
   { definition: tool("search_blocks", "Search the registered block catalog only when the task directory cannot identify a required block. Returns type, label, category and field/connection contracts. Use one broad query instead of repeated single-block searches.", { query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } }), label: "搜索积木", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
   { definition: tool("get_block_templates", "Read the real fields, input slots, required inputs and connection contracts for a batch of required block types. Reports notFound for types outside the toolbox. Do not request full Blockly serialization state.", { types: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 } }), label: "读取积木模板", workspaceModes: ["visual", "split"] as WorkspaceMode[], readOnly: true },
-  { definition: { type: "function", function: { name: "apply_block_plan", description: "The only graphical workspace write operation. Submit a BlockPlan with semantic create, update, delete and connect operations. The host builds and validates it in an isolated workspace, then commits once; a failed plan never changes the workspace, so repair only the operations reported in issues (each carries ref, operationIndex, fieldName or inputName). mode replace is rejected unless the workspace is empty: to rebuild, delete the root block (e.g. the scene) in the same plan and recreate it. Created statement blocks are placed automatically after the existing same-level chain or inside the single scene/entry block. The success result includes refIds mapping your plan refs to real block ids; use those blockIds for later update/connect/delete instead of rebuilding. Do not submit id, next, shadow, coordinates, or native Blockly state.", parameters: blockPlanToolSchema() } }, label: "应用积木方案", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
+  { definition: { type: "function", function: { name: "apply_block_program", description: "The only graphical workspace write operation. Submit a complete nested BlockProgram using type, fields, values, statements and optional next. The host creates real block templates, fills defaults, connects statement chains, applies mutations/shadow values and validates in an isolated workspace before committing once. Do not submit id, shadow, coordinates, refs, connect operations or raw Blockly state. Use this for new programs, whole scenes, plugin blocks and patches that add or replace blocks.", parameters: blockTreeToolSchema() } }, label: "应用积木程序", workspaceModes: ["visual", "split"] as WorkspaceMode[], changesState: true, mutation: true },
 ];
 
+export const pythonToBlocksAgentTool: AgentTool = {
+  definition: {
+    type: "function",
+    function: {
+      name: "apply_python_as_blocks",
+      description: "Generate real Blockly blocks from a complete Python/MicroPython program. This is a block-generation tool, not the pure-code editor: use it even when the user asks for blocks only. For common hardware tasks, call this before any block directory/search tools; only fall back after conversion fails or returns fallbackCount > 0. The host converts deterministically, keeps unsupported statements as raw-statement fallbacks where possible, and validates the resulting Blockly workspace and generated code. Do not also call apply_block_tree for the same program.",
+      parameters: {
+        type: "object",
+        properties: {
+          version: { const: 1 },
+          mode: { const: "replace" },
+          summary: { type: "string", maxLength: 240 },
+          code: { type: "string", minLength: 1, maxLength: 50000 },
+        },
+        required: ["version", "mode", "code"],
+        additionalProperties: false,
+      },
+    },
+  },
+  label: "代码转积木",
+  workspaceModes: ["visual", "split"] as WorkspaceMode[],
+  changesState: true,
+  mutation: true,
+};
 export const blocklyAgentTools: AgentTool[] = allBlocklyTools;
 export const allBlocklyToolNames = blocklyAgentTools.map((candidate) => candidate.definition.function.name);
 
@@ -140,12 +167,14 @@ export function describeBlocklyBlockContract(type: string, state?: Record<string
         }
         return description;
       });
+    const inputSlots: BlockInputSlot[] = block.inputList.filter((input) => Boolean(input.connection)).map((input) => ({
+      name: input.name,
+      kind: input.type === Blockly.inputs.inputTypes.STATEMENT ? "statement" as const : "value" as const,
+      ...(input.connection?.getCheck() ? { check: input.connection.getCheck()! } : {}),
+    }));
+    const requiredInputs = getRequiredInputNames(block);
     return {
-      inputSlots: block.inputList.filter((input) => Boolean(input.connection)).map((input) => ({
-        name: input.name,
-        kind: input.type === Blockly.inputs.inputTypes.STATEMENT ? "statement" as const : "value" as const,
-        ...(input.connection?.getCheck() ? { check: input.connection.getCheck()! } : {}),
-      })),
+      inputSlots,
       hasOutputConnection: Boolean(block.outputConnection),
       outputCheck: normalizedCheck(block.outputConnection),
       hasPreviousConnection: Boolean(block.previousConnection),
@@ -153,7 +182,8 @@ export function describeBlocklyBlockContract(type: string, state?: Record<string
       hasNextConnection: Boolean(block.nextConnection),
       nextCheck: normalizedCheck(block.nextConnection),
       fields,
-      requiredInputs: getRequiredInputNames(block),
+      requiredInputs,
+      optionalValueInputs: inputSlots.filter((input) => input.kind === "value" && !requiredInputs.includes(input.name)).map((input) => input.name),
     };
   } catch {
     return { inputSlots: [], hasOutputConnection: false, outputCheck: null, hasPreviousConnection: false, previousCheck: null, hasNextConnection: false, nextCheck: null, fields: [] };
@@ -170,11 +200,12 @@ export function describeBlocklyBlockInputs(type: string): BlockInputSlot[] {
 function templateContract({ state: _state, ...template }: BlockTemplate): Omit<BlockTemplate, "state"> {
   const needsInputSlots = !template.inputSlots?.length;
   const needsRequiredInputs = !template.requiredInputs?.length;
-  if (!needsInputSlots && !needsRequiredInputs) return { ...template };
+  const needsOptionalInputs = template.optionalValueInputs === undefined;
+  if (!needsInputSlots && !needsRequiredInputs && !needsOptionalInputs) return { ...template };
   const contract = describeBlocklyBlockContract(template.type);
   const inputSlots = needsInputSlots ? contract.inputSlots : template.inputSlots!;
   const requiredInputs = needsRequiredInputs ? contract.requiredInputs ?? [] : template.requiredInputs!;
-  return { ...template, inputSlots, ...(requiredInputs.length ? { requiredInputs } : {}) };
+  return { ...template, inputSlots, ...(requiredInputs.length ? { requiredInputs } : {}), optionalValueInputs: template.optionalValueInputs ?? contract.optionalValueInputs ?? [] };
 }
 
 function invalidPlanResult(error: unknown): Record<string, unknown> {
@@ -182,9 +213,41 @@ function invalidPlanResult(error: unknown): Record<string, unknown> {
   return { ok: false, changed: false, issues: [{ code: "INVALID_PLAN", message: error instanceof Error ? error.message : String(error) }] };
 }
 
+function rawStatementCount(state: unknown): number {
+  if (Array.isArray(state)) return state.reduce<number>((total, item) => total + rawStatementCount(item), 0);
+  if (!state || typeof state !== "object") return 0;
+  const record = state as Record<string, unknown>;
+  const own = record.type === "python_raw_statement" ? 1 : 0;
+  return own + Object.values(record).reduce<number>((total, value) => total + rawStatementCount(value), 0);
+}
+
 export function createBlocklyToolExecutor(services: BlocklyAgentServices): AgentHost["executeTool"] {
   return async (name, args, signal) => {
     if (signal.aborted) throw new Error("Agent task stopped");
+
+    const compilePlan = async (plan: BlockPlan, options: { allowReplace?: boolean } = {}) => {
+      hydrateAllDeferredInputs(services.workspace);
+      const result = await compileBlockPlan(plan, {
+        workspace: services.workspace,
+        getBlockTemplates: services.getBlockTemplates,
+        generateCode: services.generateCode,
+        validateContexts: services.validateContexts,
+        validateCode: services.validateCode,
+        commit: services.commit,
+        entryBlockTypes: services.entryBlockTypes,
+        allowReplace: options.allowReplace,
+      }, signal);
+      const { state: _state, code: _code, ...compact } = result;
+      if (compact.ok === false && Array.isArray(compact.issues)) {
+        const types = [...new Set(compact.issues.flatMap((issue) => {
+          if (!issue || typeof issue !== "object") return [];
+          const blockType = (issue as Record<string, unknown>).blockType;
+          return typeof blockType === "string" && blockType ? [blockType] : [];
+        }))].slice(0, 12);
+        if (types.length) return { ...compact, contracts: services.getBlockTemplates(types).map(templateContract) };
+      }
+      return compact as Record<string, unknown>;
+    };
 
     if (name === "get_workspace") {
       hydrateAllDeferredInputs(services.workspace);
@@ -226,33 +289,60 @@ export function createBlocklyToolExecutor(services: BlocklyAgentServices): Agent
       return { templates, ...(notFound.length ? { notFound } : {}) };
     }
 
+    if (name === "apply_python_as_blocks") {
+      if (!services.convertPythonToWorkspace) return { ok: false, changed: false, issues: [{ code: "INVALID_OPERATION", message: "当前工程没有可用的 Python→积木转换器" }] };
+      if (args.version !== undefined && args.version !== 1) return { ok: false, changed: false, issues: [{ code: "INVALID_PLAN", message: "version 必须为 1" }] };
+      if (args.mode !== undefined && args.mode !== "replace") return { ok: false, changed: false, issues: [{ code: "INVALID_OPERATION", message: "代码转积木当前只支持 mode=replace" }] };
+      if (typeof args.code !== "string" || !args.code.trim()) return { ok: false, changed: false, issues: [{ code: "INVALID_INPUT", message: "code 不能为空" }] };
+      if (args.code.length > 50_000) return { ok: false, changed: false, issues: [{ code: "INVALID_INPUT", message: "code 不能超过 50000 个字符" }] };
+      try {
+        await services.validateCode(args.code);
+        const converted = services.convertPythonToWorkspace(args.code);
+        const candidate = new Blockly.Workspace();
+        try {
+          Blockly.serialization.workspaces.load(converted as Parameters<typeof Blockly.serialization.workspaces.load>[0], candidate);
+          const contextIssues = services.validateContexts(candidate);
+          if (contextIssues.length) {
+            return { ok: false, changed: false, issues: contextIssues.map((issue) => ({ code: "CONTEXT_VALIDATION_FAILED", message: issue.message, ...(issue.blockId ? { blockId: issue.blockId } : {}) })) };
+          }
+          const generatedCode = services.generateCode(candidate);
+          await services.validateCode(generatedCode);
+          const before = Blockly.serialization.workspaces.save(services.workspace);
+          const after = Blockly.serialization.workspaces.save(candidate);
+          const changed = JSON.stringify(before) !== JSON.stringify(after);
+          if (changed) services.commit(after, generatedCode);
+          return {
+            ok: true,
+            changed,
+            blockCount: candidate.getAllBlocks(false).length,
+            sourceLines: args.code.split("\n").length,
+            fallbackCount: rawStatementCount(after),
+            ...(rawStatementCount(after) ? { warnings: [`${rawStatementCount(after)} 条语句使用了原始语句积木，请检查是否仍有对应积木`] } : {}),
+          };
+        } finally {
+          candidate.dispose();
+        }
+      } catch (error) {
+        return invalidPlanResult(error);
+      }
+    }
+
+    if (name === "apply_block_program" || name === "apply_block_tree") {
+      try {
+        return await compilePlan(blockTreeToPlan(parseBlockTree(args)), { allowReplace: true });
+      } catch (error) {
+        return invalidPlanResult(error);
+      }
+    }
+
     if (name === "apply_block_plan") {
-      hydrateAllDeferredInputs(services.workspace);
-      let plan;
+      let plan: BlockPlan;
       try {
         plan = parseBlockPlan(args);
       } catch (error) {
         return invalidPlanResult(error);
       }
-      const result = await compileBlockPlan(plan, {
-        workspace: services.workspace,
-        getBlockTemplates: services.getBlockTemplates,
-        generateCode: services.generateCode,
-        validateContexts: services.validateContexts,
-        validateCode: services.validateCode,
-        commit: services.commit,
-        entryBlockTypes: services.entryBlockTypes,
-      }, signal);
-      const { state: _state, code: _code, ...compact } = result;
-      if (compact.ok === false && Array.isArray(compact.issues)) {
-        const types = [...new Set(compact.issues.flatMap((issue) => {
-          if (!issue || typeof issue !== "object") return [];
-          const blockType = (issue as Record<string, unknown>).blockType;
-          return typeof blockType === "string" && blockType ? [blockType] : [];
-        }))].slice(0, 12);
-        if (types.length) return { ...compact, contracts: services.getBlockTemplates(types).map(templateContract) };
-      }
-      return compact as Record<string, unknown>;
+      return compilePlan(plan);
     }
 
     throw new Error(`Unsupported graphical workspace tool: ${name}`);

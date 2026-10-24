@@ -33,6 +33,22 @@ describe("PluginRegistry", () => {
     await registry.unregister("test.samples");
   });
 
+  it("filters plugin contributions by target workbench", async () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      manifest: { id: "test.targeted", name: "Targeted", version: "1.0.0", apiVersion: "1", targets: ["esp32-s3"] },
+      activate(context) {
+        context.registerBlock({ type: "test_targeted_led", message0: "led", previousStatement: null, nextStatement: null }, () => "print(1)\n");
+        context.registerToolboxCategory({ id: "test.targeted.toolbox", name: "Targeted", colour: "#397ca5", contents: [{ kind: "block", type: "test_targeted_led" }] });
+      },
+    });
+    await registry.activate("test.targeted");
+
+    expect((registry.extendToolbox(baseToolbox, "python") as any).contents).toHaveLength(0);
+    expect((registry.extendToolbox(baseToolbox, "esp32-s3") as any).contents.at(-1).name).toBe("Targeted");
+    await registry.unregister("test.targeted");
+  });
+
   it("activates namespaced block and toolbox contributions", async () => {
     const registry = new PluginRegistry();
     let loadedState: unknown;

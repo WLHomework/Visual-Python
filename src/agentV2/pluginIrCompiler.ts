@@ -312,6 +312,7 @@ export function compilePluginIr(input: PluginIr): PluginIrCompiledFiles {
       apiVersion: "1",
       description: ir.manifest.description,
       entry: "index.js",
+      ...(ir.manifest.targets?.length ? { targets: ir.manifest.targets } : {}),
       agent: { description: ir.manifest.description, detect: "project" },
     }, null, 2)}\n`,
     "codegen.json": `${JSON.stringify({

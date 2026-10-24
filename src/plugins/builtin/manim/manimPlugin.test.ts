@@ -12,7 +12,10 @@ import { parseLocalAudioMarker } from "./localAudioMarkers";
 import { customColorExpression, customColorHex, FieldManimColor, hexToHsv, hsvToHex, parseRecentColours } from "./colorField";
 import { manimAgentTools } from "./agentTools";
 import { parseBlockPlan } from "../../../agentV2/blockPlan";
+import { blockTreeToPlan, parseBlockTree } from "../../../agentV2/blockTree";
 import { compileBlockPlan, type BlockPlanCompilerServices } from "../../../agentV2/blockPlanCompiler";
+import { createBlocklyToolExecutor } from "../../../agentV2/blocklyHost";
+import { manimPythonToWorkspace } from "../../../manimPythonToBlocks";
 import type { BlockTemplate } from "../../../agentV2/blocklyHost";
 
 const number = (value: number) => ({ block: { type: "math_number", fields: { NUM: value } } });
@@ -504,6 +507,71 @@ describe("Manim plugin generators", () => {
     expect(last?.id).toBe(refIds.wait);
     expect(checkWorkspace.getTopBlocks(false)).toHaveLength(1);
     expect(validatePythonBlockContexts(checkWorkspace)).toEqual([]);
+    checkWorkspace.dispose();
+    workspace.dispose();
+  });
+
+  it("creates a Manim scene tree with host-managed body connections", async () => {
+    await activateManimPlugin();
+    const workspace = new Blockly.Workspace();
+    let committed: Record<string, unknown> | null = null;
+    const services = buildManimPlanServices(workspace, (state) => { committed = state as Record<string, unknown>; });
+    const result = await compileBlockPlan(blockTreeToPlan(parseBlockTree({
+      version: 1,
+      mode: "replace",
+      tree: {
+        type: "visual_python_manim_scene",
+        fields: { NAME: "TreeScene" },
+        statements: { BODY: [{ type: "visual_python_manim_wait" }] },
+      },
+    })), services, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: true, blockCount: expect.any(Number) });
+    const checkWorkspace = new Blockly.Workspace();
+    Blockly.serialization.workspaces.load(committed!, checkWorkspace);
+    const scene = checkWorkspace.getTopBlocks(false)[0];
+    expect(scene?.type).toBe("visual_python_manim_scene");
+    expect(scene?.getFieldValue("NAME")).toBe("TreeScene");
+    expect(scene?.getInput("BODY")?.connection?.targetBlock()?.type).toBe("visual_python_manim_wait");
+    expect(validatePythonBlockContexts(checkWorkspace)).toEqual([]);
+    checkWorkspace.dispose();
+    workspace.dispose();
+  });
+
+  it("converts complete Manim code into blocks through the code-first tool", async () => {
+    await activateManimPlugin();
+    const workspace = new Blockly.Workspace();
+    let committed: Record<string, unknown> | null = null;
+    const planServices = buildManimPlanServices(workspace, (state) => { committed = state as Record<string, unknown>; });
+    const execute = createBlocklyToolExecutor({
+      workspace,
+      selectedBlockId: () => null,
+      getTaskBlockDirectory: () => ({ apiVersion: 1 as const, schema: "visual-python.block-api" as const, categories: [], candidates: [] }),
+      searchBlocks: () => [],
+      getBlockTemplates: planServices.getBlockTemplates,
+      generateCode: planServices.generateCode,
+      validateContexts: planServices.validateContexts,
+      validateCode: planServices.validateCode,
+      convertPythonToWorkspace: manimPythonToWorkspace,
+      commit: planServices.commit,
+      entryBlockTypes: planServices.entryBlockTypes,
+    });
+    const result = await execute("apply_python_as_blocks", {
+      version: 1,
+      mode: "replace",
+      code: `from manim import *
+
+class Demo(Scene):
+    def construct(self):
+        self.wait(1)
+`,
+    }, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: true, changed: true, fallbackCount: 0 });
+    const checkWorkspace = new Blockly.Workspace();
+    Blockly.serialization.workspaces.load(committed!, checkWorkspace);
+    expect(checkWorkspace.getTopBlocks(false)[0]?.type).toBe("visual_python_manim_scene");
+    expect(checkWorkspace.getTopBlocks(false)[0]?.getInput("BODY")?.connection?.targetBlock()?.type).toBe("visual_python_manim_wait");
     checkWorkspace.dispose();
     workspace.dispose();
   });
