@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.7-flash",
+  "total": 32,
+  "pass": 6,
+  "keywordFail": 2,
+  "structuralFail": 6,
+  "errorOrTimeout": 18,
+  "byWorkbench": {
+    "python": {
+      "total": 8,
+      "pass": 4,
+      "codeFirst": 6,
+      "tree": 0
+    },
+    "esp32-s3": {
+      "total": 8,
+      "pass": 2,
+      "codeFirst": 4,
+      "tree": 0
+    },
+    "esp32-wroom": {
+      "total": 8,
+      "pass": 0,
+      "codeFirst": 0,
+      "tree": 0
+    },
+    "esp8266-esp12e": {
+      "total": 8,
+      "pass": 0,
+      "codeFirst": 0,
+      "tree": 0
+    }
+  },
+  "byTool": {
+    "codeFirst": 10,
+    "tree": 0,
+    "none": 22
+  }
+}

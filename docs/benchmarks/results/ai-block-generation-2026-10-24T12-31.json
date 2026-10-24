@@ -1,7 +1,7 @@
 {
   "model": "qwen3.8-flash",
   "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  "date": "2026-10-24T13:38:14.635Z",
+  "date": "2026-10-24T15:16:05.907Z",
   "strategy": "Phase B 代码优先（apply_python_as_blocks）+ apply_block_program 兜底",
   "tasks": [
     {
@@ -2060,6 +2060,3495 @@
         }
       ],
       "writeTool": "apply_python_as_blocks"
+    },
+    {
+      "id": "W3",
+      "workbench": "esp32-wroom",
+      "prompt": "用 GPIO2 输出 PWM，频率 1000Hz，占空比从 0 到 1023 循环变化。",
+      "expectation": "PWM、循环",
+      "status": "timeout",
+      "durationMs": 420009,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"第 9 行：PWM.duty() 只支持数字占空比\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "W4",
+      "workbench": "esp32-wroom",
+      "prompt": "读取 GPIO34 的模拟值，并每 1 秒打印一次。",
+      "expectation": "ADC、print、sleep",
+      "status": "structural-fail",
+      "durationMs": 411131,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        }
+      ],
+      "summary": "GPIO34 在当前 ESP32 WROOM 工具箱的模拟输入积木里不可选（只有 A0 → GPIO32）。你希望我怎么处理？",
+      "rounds": 19,
+      "promptTokens": 559558,
+      "completionTokens": 21365,
+      "finalCode": "",
+      "blockCount": 0,
+      "contextIssues": 0,
+      "syntaxOk": false,
+      "syntaxError": "语法错误",
+      "keywordPass": false,
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_FIELD\",\"message\":\"字段 PIN 拒绝值“34”（积木 hardware_analog_read）；当前可选值：A0（模拟输入）(A0)。请让该值来自工作区当前可用的选项，或先创建它依赖的积木再设置。\",\"operationIndex\":1,\"blockType\":\"hardware_analog_read\",\"fieldName\":\"PIN\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CONTEXT_VALIDATION_FAILED\",\"message\":\"「读取模拟输入」积木：ESP32 WROOM 上没有引脚 A0\",\"ref\":\"tree-4\",\"blockType\":\"hardware_analog_read\"}]"
+        },
+        {
+          "name": "get_context",
+          "status": "running"
+        },
+        {
+          "name": "get_context",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "search_blocks",
+          "status": "running"
+        },
+        {
+          "name": "search_blocks",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "search_blocks",
+          "status": "running"
+        },
+        {
+          "name": "search_blocks",
+          "status": "done"
+        },
+        {
+          "name": "get_task_block_directory",
+          "status": "running"
+        },
+        {
+          "name": "get_task_block_directory",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "search_blocks",
+          "status": "running"
+        },
+        {
+          "name": "search_blocks",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_FIELD\",\"message\":\"字段 PIN 拒绝值“34”（积木 hardware_analog_read）；当前可选值：A0（模拟输入）(A0)。请让该值来自工作区当前可用的选项，或先创建它依赖的积木再设置。\",\"operationIndex\":1,\"blockType\":\"hardware_analog_read\",\"fieldName\":\"PIN\"}]"
+        },
+        {
+          "name": "search_blocks",
+          "status": "running"
+        },
+        {
+          "name": "search_blocks",
+          "status": "done"
+        },
+        {
+          "name": "search_blocks",
+          "status": "running"
+        },
+        {
+          "name": "search_blocks",
+          "status": "done"
+        },
+        {
+          "name": "ask_user",
+          "status": "running"
+        },
+        {
+          "name": "ask_user",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "W5",
+      "workbench": "esp32-wroom",
+      "prompt": "用 GPIO4 控制 8 颗 NeoPixel，循环显示红、绿、蓝。",
+      "expectation": "NeoPixel init/set/fill/write",
+      "status": "timeout",
+      "durationMs": 420007,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "read_plugin_draft_file",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "相同工具调用已失败：工具返回失败。请先调整参数或方案后再继续。"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "相同工具调用已失败：工具返回失败。请先调整参数或方案后再继续。"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "相同工具调用已失败：工具返回失败。请先调整参数或方案后再继续。"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "read_plugin_draft_file",
+          "status": "running"
+        },
+        {
+          "name": "read_plugin_draft_file",
+          "status": "error"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
+    },
+    {
+      "id": "W6",
+      "workbench": "esp32-wroom",
+      "prompt": "读取 GPIO4 的 DHT22 温湿度，显示到 OLED 上，每 2 秒刷新。",
+      "expectation": "DHT、OLED init/text/show",
+      "status": "timeout",
+      "durationMs": 420014,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
+    },
+    {
+      "id": "W7",
+      "workbench": "esp32-wroom",
+      "prompt": "用 GPIO2 控制舵机，在 0 度和 180 度之间来回转动。",
+      "expectation": "Servo、循环",
+      "status": "timeout",
+      "durationMs": 420015,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_context",
+          "status": "running"
+        },
+        {
+          "name": "get_context",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
+    },
+    {
+      "id": "W8",
+      "workbench": "esp32-wroom",
+      "prompt": "做一个呼吸灯：PWM 占空比逐渐增大再减小。",
+      "expectation": "PWM、循环、变量/数学",
+      "status": "timeout",
+      "durationMs": 420001,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
+    },
+    {
+      "id": "E1",
+      "workbench": "esp8266-esp12e",
+      "prompt": "让板载 LED 每 500 毫秒闪烁一次。",
+      "expectation": "forever、pin write、sleep",
+      "status": "timeout",
+      "durationMs": 420010,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "相同工具调用已失败：工具返回失败。请先调整参数或方案后再继续。"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_context",
+          "status": "running"
+        },
+        {
+          "name": "get_context",
+          "status": "done"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
+    },
+    {
+      "id": "E2",
+      "workbench": "esp8266-esp12e",
+      "prompt": "读取 GPIO4 按键，按下时点亮 LED，松开时熄灭。",
+      "expectation": "if/else、pin read、pin write",
+      "status": "timeout",
+      "durationMs": 420009,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
+    },
+    {
+      "id": "E3",
+      "workbench": "esp8266-esp12e",
+      "prompt": "用 GPIO2 输出 PWM，频率 1000Hz，占空比从 0 到 1023 循环变化。",
+      "expectation": "PWM、循环",
+      "status": "timeout",
+      "durationMs": 420005,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_context",
+          "status": "running"
+        },
+        {
+          "name": "get_context",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_FIELD\",\"message\":\"字段 VAR 拒绝值“i”（积木 controls_for）；当前可选值：i(:cD9/|H3{V~N?wx%;P2`)、重命名变量“i”...(RENAME_VARIABLE_ID)、删除变量“i”(DELETE_VARIABLE_ID)。请让该值来自工作区当前可用的选项，或先创建它依赖的积木再设置。\",\"operationIndex\":4,\"blockType\":\"controls_for\",\"fieldName\":\"VAR\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
+    },
+    {
+      "id": "E4",
+      "workbench": "esp8266-esp12e",
+      "prompt": "读取 GPIO34 的模拟值，并每 1 秒打印一次。",
+      "expectation": "ADC、print、sleep",
+      "status": "timeout",
+      "durationMs": 420004,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_context",
+          "status": "running"
+        },
+        {
+          "name": "get_context",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        }
+      ]
+    },
+    {
+      "id": "E5",
+      "workbench": "esp8266-esp12e",
+      "prompt": "用 GPIO4 控制 8 颗 NeoPixel，循环显示红、绿、蓝。",
+      "expectation": "NeoPixel init/set/fill/write",
+      "status": "timeout",
+      "durationMs": 420008,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "相同工具调用已失败：工具返回失败。请先调整参数或方案后再继续。"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_context",
+          "status": "running"
+        },
+        {
+          "name": "get_context",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
+    },
+    {
+      "id": "E6",
+      "workbench": "esp8266-esp12e",
+      "prompt": "读取 GPIO4 的 DHT22 温湿度，显示到 OLED 上，每 2 秒刷新。",
+      "expectation": "DHT、OLED init/text/show",
+      "status": "timeout",
+      "durationMs": 420014,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        }
+      ]
+    },
+    {
+      "id": "E7",
+      "workbench": "esp8266-esp12e",
+      "prompt": "用 GPIO2 控制舵机，在 0 度和 180 度之间来回转动。",
+      "expectation": "Servo、循环",
+      "status": "timeout",
+      "durationMs": 420003,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "running"
+        },
+        {
+          "name": "get_block_templates",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_context",
+          "status": "running"
+        },
+        {
+          "name": "get_context",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_task_block_directory",
+          "status": "running"
+        },
+        {
+          "name": "get_task_block_directory",
+          "status": "done"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
+    },
+    {
+      "id": "E8",
+      "workbench": "esp8266-esp12e",
+      "prompt": "做一个呼吸灯：PWM 占空比逐渐增大再减小。",
+      "expectation": "PWM、循环、变量/数学",
+      "status": "timeout",
+      "durationMs": 420015,
+      "failedTools": [
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_block_program",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "message": "失败"
+        }
+      ],
+      "error": "This operation was aborted",
+      "toolTrace": [
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"tree: 积木节点必须是对象\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "running"
+        },
+        {
+          "name": "apply_block_program",
+          "status": "error",
+          "issues": "[{\"code\":\"CODE_VALIDATION_FAILED\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "running"
+        },
+        {
+          "name": "get_diagnostics",
+          "status": "done"
+        },
+        {
+          "name": "get_workspace",
+          "status": "running"
+        },
+        {
+          "name": "get_workspace",
+          "status": "done"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "running"
+        },
+        {
+          "name": "apply_python_as_blocks",
+          "status": "error",
+          "issues": "[{\"code\":\"INVALID_PLAN\",\"message\":\"Python 语法错误：语法错误\"}]"
+        }
+      ]
     }
   ]
 }

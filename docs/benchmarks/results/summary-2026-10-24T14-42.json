@@ -1,0 +1,27 @@
+{
+  "model": "qwen3.8-flash",
+  "total": 2,
+  "pass": 2,
+  "keywordFail": 0,
+  "structuralFail": 0,
+  "errorOrTimeout": 0,
+  "byWorkbench": {
+    "python": {
+      "total": 1,
+      "pass": 1,
+      "codeFirst": 1,
+      "tree": 0
+    },
+    "esp32-s3": {
+      "total": 1,
+      "pass": 1,
+      "codeFirst": 1,
+      "tree": 0
+    }
+  },
+  "byTool": {
+    "codeFirst": 2,
+    "tree": 0,
+    "none": 0
+  }
+}
