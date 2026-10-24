@@ -3446,6 +3446,92 @@ fn voice_clone_recording_directory(app: &AppHandle) -> Result<PathBuf, String> {
         .join("voice-clone-recordings"))
 }
 
+fn ai_conversations_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("无法读取应用数据目录：{error}"))?
+        .join("ai-conversations"))
+}
+
+/// 对话存储文件名只允许 encodeURIComponent 产出的安全字符，杜绝路径穿越。
+fn validate_ai_conversation_file_name(name: &str) -> Result<(), String> {
+    let valid = !name.is_empty()
+        && name.len() <= 256
+        && name.ends_with(".json")
+        && name != ".json"
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')' | '%'));
+    if valid {
+        Ok(())
+    } else {
+        Err("非法的对话存储文件名".into())
+    }
+}
+
+#[tauri::command]
+fn read_ai_conversation_store(app: AppHandle, file_name: String) -> Result<Option<String>, String> {
+    validate_ai_conversation_file_name(&file_name)?;
+    let path = ai_conversations_directory(&app)?.join(&file_name);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|error| format!("cannot read conversation store: {error}"))
+}
+
+#[tauri::command]
+fn write_ai_conversation_store(app: AppHandle, file_name: String, contents: String) -> Result<(), String> {
+    validate_ai_conversation_file_name(&file_name)?;
+    if contents.len() > 24 * 1024 * 1024 {
+        return Err("对话存储不能超过 24 MB".into());
+    }
+    let directory = ai_conversations_directory(&app)?;
+    fs::create_dir_all(&directory).map_err(|error| format!("无法创建对话存储目录：{error}"))?;
+    let path = directory.join(&file_name);
+    let staged = directory.join(format!(".{file_name}.staged"));
+    let backup = directory.join(format!(".{file_name}.backup"));
+    fs::write(&staged, contents.as_bytes())
+        .map_err(|error| format!("cannot stage conversation store: {error}"))?;
+    let had_existing = path.is_file();
+    if had_existing {
+        if let Err(error) = fs::rename(&path, &backup) {
+            let _ = fs::remove_file(&staged);
+            return Err(format!("cannot back up conversation store: {error}"));
+        }
+    }
+    if let Err(error) = fs::rename(&staged, &path) {
+        let _ = fs::remove_file(&staged);
+        if had_existing {
+            let _ = fs::rename(&backup, &path);
+        }
+        return Err(format!("cannot publish conversation store: {error}"));
+    }
+    let _ = fs::remove_file(&backup);
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_ai_conversation_store(app: AppHandle, file_name: String) -> Result<(), String> {
+    validate_ai_conversation_file_name(&file_name)?;
+    let path = ai_conversations_directory(&app)?.join(&file_name);
+    if path.is_file() {
+        fs::remove_file(&path).map_err(|error| format!("cannot delete conversation store: {error}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_ai_conversation_stores(app: AppHandle) -> Result<(), String> {
+    let directory = ai_conversations_directory(&app)?;
+    if !directory.exists() {
+        return Ok(());
+    }
+    fs::remove_dir_all(&directory).map_err(|error| format!("cannot clear conversation stores: {error}"))
+}
+
 #[tauri::command]
 fn save_voice_clone_recording(app: AppHandle, audio_base64: String) -> Result<String, String> {
     if audio_base64.len() > (MAX_VOICE_SAMPLE_BYTES as usize * 4 / 3) + 128 {
@@ -7132,6 +7218,10 @@ pub fn run() {
             get_startup_project,
             rename_project_file,
             read_project_file,
+            read_ai_conversation_store,
+            write_ai_conversation_store,
+            delete_ai_conversation_store,
+            clear_ai_conversation_stores,
             write_project_file,
             save_project_as,
             import_project_audio,
@@ -7221,6 +7311,20 @@ mod tests {
     use super::*;
     use serde_json::json;
     use zip::write::SimpleFileOptions;
+
+    #[test]
+    fn accepts_only_confined_ai_conversation_file_names() {
+        assert!(validate_ai_conversation_file_name("project-a%20%3A%3Aassistant.json").is_ok());
+        assert!(validate_ai_conversation_file_name("scope-123.json").is_ok());
+        assert!(validate_ai_conversation_file_name("").is_err());
+        assert!(validate_ai_conversation_file_name(".json").is_err());
+        assert!(validate_ai_conversation_file_name("scope").is_err());
+        assert!(validate_ai_conversation_file_name("../scope.json").is_err());
+        assert!(validate_ai_conversation_file_name("scope.json.exe").is_err());
+        assert!(validate_ai_conversation_file_name("a/b.json").is_err());
+        assert!(validate_ai_conversation_file_name("a\\b.json").is_err());
+        assert!(validate_ai_conversation_file_name(&format!("{}.json", "x".repeat(300))).is_err());
+    }
 
     #[test]
     fn accepts_only_supported_python_versions() {

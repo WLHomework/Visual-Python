@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentClockTime, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, summarizeAgentRun, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentClockTime, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, summarizeAgentRun, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
 import { estimateTokens, tokenBudgets } from "./agentV2/tokenEstimate";
@@ -1055,11 +1055,6 @@ describe("AI assistant conversation persistence", () => {
         result: { summary: "Done", toolCallCount: 1, lineCount: 10 },
       }],
     }],
-  });
-
-  it("persists completed and queued runs but skips rapidly changing running runs", () => {
-    expect(shouldPersistConversationRuns([{ status: "done" }, { status: "queued" }])).toBe(true);
-    expect(shouldPersistConversationRuns([{ status: "done" }, { status: "running" }])).toBe(false);
   });
 
   it("persists image metadata without the original sendable payload", () => {

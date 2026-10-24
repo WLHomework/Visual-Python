@@ -1,5 +1,5 @@
 import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { AlertCircle, Download, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -21,7 +21,10 @@ import { getAiAgentPermissionMode, getAiModelConfig, getAiReasoningEffort, saveA
 import { MAX_IMAGE_COUNT, pickImageFiles, prepareImageFile, restorePersistedImageAttachment, toPersistedImageAttachment, validateImageFiles, type AiImageAttachment, type PersistedAiImageAttachment } from "./aiImageAttachments";
 import { buildAiConversationHistory } from "./aiConversationContext";
 import { estimateTokens, tokenBudgets, truncateToTokens } from "./agentV2/tokenEstimate";
-import { CONVERSATION_STORES_PREFIX, conversationStoreKey, conversationStoreTimestamp, isStorageQuotaError } from "./sessionPersistence";
+import { aiConversationsAvailable, clearAllAiConversationStores, readAiConversationStore, writeAiConversationStore } from "./conversationFileStore";
+import { save as saveFileDialog } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { CONVERSATION_STORES_PREFIX, conversationStoreKey, conversationStoreTimestamp, isStorageQuotaError, pruneConversationStores } from "./sessionPersistence";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
 import { stripAgentFollowUpMarkup } from "./agentV2/followUps";
 import { subscribeLiveStream } from "./agentV2/liveStream";
@@ -149,6 +152,8 @@ const legacyAiHistoryStorageKey = "visual-python:ai-conversation-history";
 const maxStoredRuns = 30;
 const maxStoredConversations = 12;
 const maxStoredHistoryCharacters = 1_500_000;
+// 文件存储（app-data）没有 localStorage 的配额压力，保留更完整的历史。
+const maxStoredHistoryFileCharacters = 8_000_000;
 const maxContextTurns = 24;
 let conversationSequence = 1;
 
@@ -234,9 +239,8 @@ function loadStoredRuns(scope: string): AgentRun[] {
   }
 }
 
-function readConversationState(scope: string): AiConversationState {
+function parseConversationStateValue(value: unknown): AiConversationState | null {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(conversationStoreKey(scope)) || "null");
     if (value && typeof value === "object" && !Array.isArray(value)) {
       const candidate = value as Partial<AiConversationState>;
       const conversations = Array.isArray(candidate.conversations)
@@ -262,6 +266,12 @@ function readConversationState(scope: string): AiConversationState {
   } catch {
     // Fall through to the legacy conversation migration.
   }
+  return null;
+}
+
+function readConversationState(scope: string): AiConversationState {
+  const stored = parseConversationStateValue(JSON.parse(localStorage.getItem(conversationStoreKey(scope)) || "null"));
+  if (stored) return stored;
   const conversation = createConversation(loadStoredRuns(scope));
   return { activeId: conversation.id, conversations: [conversation] };
 }
@@ -291,7 +301,7 @@ function loadConversationState(scope: string, migrationScopes: string[] = []): A
   return imported.length ? mergeAiConversationStates(primary, imported) : primary;
 }
 
-function serializeConversationState(state: AiConversationState) {
+function serializeConversationState(state: AiConversationState, maxCharacters: number = maxStoredHistoryCharacters) {
   let conversations = state.conversations.slice(-maxStoredConversations).map((conversation) => ({
     ...conversation,
     runs: conversation.runs.slice(-maxStoredRuns).map((run): AgentRun => ({
@@ -318,7 +328,7 @@ function serializeConversationState(state: AiConversationState) {
     serialized = serialize();
   };
 
-  if (serialized.length > maxStoredHistoryCharacters) {
+  if (serialized.length > maxCharacters) {
     update((conversation) => ({
       ...conversation,
       runs: conversation.runs.map((run) => run.persistedAttachments?.length
@@ -327,7 +337,7 @@ function serializeConversationState(state: AiConversationState) {
     }));
   }
 
-  if (serialized.length > maxStoredHistoryCharacters) {
+  if (serialized.length > maxCharacters) {
     update((conversation) => ({
       ...conversation,
       runs: conversation.runs.map((run) => run.result?.taskChange
@@ -335,7 +345,7 @@ function serializeConversationState(state: AiConversationState) {
         : run),
     }));
   }
-  if (serialized.length > maxStoredHistoryCharacters) {
+  if (serialized.length > maxCharacters) {
     update((conversation) => ({
       ...conversation,
       runs: conversation.runs.map((run, runIndex) => {
@@ -347,7 +357,7 @@ function serializeConversationState(state: AiConversationState) {
       }),
     }));
   }
-  if (serialized.length > maxStoredHistoryCharacters) {
+  if (serialized.length > maxCharacters) {
     update((conversation) => ({
       ...conversation,
       runs: conversation.runs.map((run) => ({
@@ -363,21 +373,21 @@ function serializeConversationState(state: AiConversationState) {
       })),
     }));
   }
-  while (conversations.length > 1 && serialized.length > maxStoredHistoryCharacters) {
+  while (conversations.length > 1 && serialized.length > maxCharacters) {
     const removable = conversations.findIndex((conversation) => conversation.id !== state.activeId);
     if (removable < 0) break;
     conversations = conversations.filter((_, index) => index !== removable);
     serialized = serialize();
   }
   let activeIndex = conversations.findIndex((conversation) => conversation.id === state.activeId);
-  while (activeIndex >= 0 && conversations[activeIndex].runs.length > 1 && serialized.length > maxStoredHistoryCharacters) {
+  while (activeIndex >= 0 && conversations[activeIndex].runs.length > 1 && serialized.length > maxCharacters) {
     conversations = conversations.map((conversation, index) => index === activeIndex
       ? { ...conversation, runs: conversation.runs.slice(1) }
       : conversation);
     serialized = serialize();
     activeIndex = conversations.findIndex((conversation) => conversation.id === state.activeId);
   }
-  if (serialized.length > maxStoredHistoryCharacters && activeIndex >= 0) {
+  if (serialized.length > maxCharacters && activeIndex >= 0) {
     conversations = conversations.map((conversation, index) => index !== activeIndex ? conversation : {
       ...conversation,
       runs: conversation.runs.slice(-1).map((run) => ({
@@ -1668,6 +1678,8 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const [conversationPersistenceFailed, setConversationPersistenceFailed] = useState(false);
   const conversationMigrationKey = conversationMigrationScopes.join("|");
   const [conversationState, setConversationState] = useState<AiConversationState>(() => loadConversationState(conversationScope, conversationMigrationScopes));
+  const conversationStateRef = useRef(conversationState);
+  conversationStateRef.current = conversationState;
   const activeConversation = conversationState.conversations.find((conversation) => conversation.id === conversationState.activeId) ?? conversationState.conversations[0];
   const runs = activeConversation?.runs ?? [];
   const runId = useRef(Math.max(0, ...conversationState.conversations.flatMap((conversation) => conversation.runs.map((run) => run.id))) + 1);
@@ -1778,10 +1790,42 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   };
 
   useEffect(() => {
-    if (running || !shouldPersistConversationRuns(runs)) return;
-    const failed = !storeConversationState(conversationScope, conversationState);
-    setConversationPersistenceFailed((current) => current === failed ? current : failed);
+    // 运行中的任务也按防抖增量落盘：序列化与读取两侧都会把 running 归一为 stopped，
+    // 崩溃/强关后重开能看到停止前的部分记录。
+    const delay = running ? 2_000 : 0;
+    const timer = window.setTimeout(() => {
+      if (!mountedRef.current) return;
+      if (aiConversationsAvailable()) {
+        void writeAiConversationStore(conversationScope, serializeConversationState(conversationState, maxStoredHistoryFileCharacters))
+          .then((ok) => setConversationPersistenceFailed((current) => current === !ok ? current : !ok));
+        return;
+      }
+      const failed = !storeConversationState(conversationScope, conversationState);
+      setConversationPersistenceFailed((current) => current === failed ? current : failed);
+    }, delay);
+    return () => window.clearTimeout(timer);
   }, [conversationScope, conversationState, running, runs]);
+
+  // 桌面环境：文件是权威存储。启动时异步加载文件内容并合并；
+  // 文件还没有内容时把 localStorage 旧数据一次性迁移过去。
+  useEffect(() => {
+    if (!aiConversationsAvailable()) return;
+    let cancelled = false;
+    void (async () => {
+      const text = await readAiConversationStore(conversationScope);
+      if (cancelled) return;
+      const fromFile = text === null ? null : parseConversationStateValue(JSON.parse(text));
+      if (fromFile) {
+        setConversationState((current) => mergeAiConversationStates(current, [fromFile]));
+        return;
+      }
+      const hasLocalRuns = conversationStateRef.current.conversations.some((conversation) => conversation.runs.length);
+      if (hasLocalRuns) {
+        void writeAiConversationStore(conversationScope, serializeConversationState(conversationStateRef.current, maxStoredHistoryFileCharacters));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [conversationScope]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -2161,6 +2205,30 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     requestAnimationFrame(() => promptRef.current?.focus());
   };
 
+  const exportConversation = async () => {
+    setConversationMenuOpen(false);
+    if (!runs.length) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const path = await saveFileDialog({ title: "导出 AI 对话", defaultPath: `visual-python-ai-conversation-${stamp}.json`, filters: [{ name: "AI 对话", extensions: ["json"] }] });
+    if (!path) return;
+    try {
+      await writeTextFile(path, serializeConversationState(conversationStateRef.current, maxStoredHistoryFileCharacters));
+    } catch {
+      setConversationPersistenceFailed(true);
+    }
+  };
+
+  const clearAllConversations = async () => {
+    if (running || !(await onClearConversationConfirm())) return;
+    setConversationMenuOpen(false);
+    const conversation = createConversation();
+    setConversationState({ activeId: conversation.id, conversations: [conversation] });
+    setPrompt("");
+    if (aiConversationsAvailable()) await clearAllAiConversationStores();
+    pruneConversationStores(localStorage, { keep: 0 });
+    requestAnimationFrame(() => promptRef.current?.focus());
+  };
+
   const selectSuggestion = (suggestion: string) => {
     applyAiAssistantSuggestion(suggestion, setPrompt, () => promptRef.current?.focus(), enqueuePrompt);
   };
@@ -2181,6 +2249,8 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
               })}
             </div>
             <button type="button" className="ai-conversation-clear" role="menuitem" disabled={!runs.length} onClick={clearConversation}><Trash2 size={14}/><span>清空当前对话</span></button>
+            {aiConversationsAvailable() && <button type="button" role="menuitem" disabled={!runs.length} onClick={() => void exportConversation()}><Download size={14}/><span>导出对话</span></button>}
+            {aiConversationsAvailable() && <button type="button" role="menuitem" disabled={!conversationState.conversations.some((conversation) => conversation.runs.length)} onClick={() => void clearAllConversations()}><Trash2 size={14}/><span>清除全部会话记录</span></button>}
           </div>}
         </div>
         <button type="button" onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={16}/></button>
