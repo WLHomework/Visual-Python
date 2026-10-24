@@ -58,6 +58,42 @@ describe("AI conversation context", () => {
     expect(history[0].assistant).toContain("没有找到场景类");
   });
 
+  it("keeps stopped runs with their partial work so the next turn can continue safely", () => {
+    const history = buildAiConversationHistory([{
+      id: 6,
+      prompt: "做一个呼吸灯",
+      status: "stopped",
+      activities: [
+        { id: "write", kind: "tool", status: "done", title: "应用积木程序", toolName: "apply_python_as_blocks", result: "{\"ok\":true,\"changed\":true,\"blockCount\":12}" },
+        { id: "interrupted", kind: "tool", status: "stopped", title: "检查代码", toolName: "check_code" },
+      ],
+    }]);
+
+    expect(history).toHaveLength(1);
+    expect(history[0].assistant).toContain("任务被用户停止");
+    expect(history[0].assistant).toContain("已写入：应用积木程序");
+    expect(history[0].assistant).toContain("积木 12 块");
+  });
+
+  it("records successful graphical writes as evidence for cross-turn edits", () => {
+    const history = buildAiConversationHistory([{
+      id: 7,
+      prompt: "生成动画积木",
+      status: "done",
+      result: { summary: "已生成" },
+      activities: [
+        { id: "tree", kind: "tool", status: "done", title: "应用积木程序", toolName: "apply_block_program", result: "{\"ok\":true,\"changed\":true,\"blockCount\":45,\"fallbackCount\":2}" },
+        { id: "read", kind: "tool", status: "done", title: "读取工作区", toolName: "get_workspace", result: "{\"blockCount\":45}" },
+      ],
+    }]);
+
+    expect(history[0].assistant).toContain("已写入：应用积木程序");
+    expect(history[0].assistant).toContain("积木 45 块");
+    expect(history[0].assistant).toContain("原始语句回退 2 条");
+    // 只读工具不进入证据，避免噪音。
+    expect(history[0].assistant).not.toContain("读取工作区");
+  });
+
   it("keeps same-session image payloads but only describes restored images", () => {
     const sendable = {
       id: "live",

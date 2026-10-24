@@ -23,8 +23,42 @@ export function createAiConversationScope(projectId: string, sceneId: string): s
   return `${project}::${scene}`;
 }
 
+// 这些工具成功返回意味着工作区/代码确实被改动过——跨轮次继续修改必须知道。
+const successfulWriteToolNames = new Set([
+  "apply_python_as_blocks",
+  "apply_block_program",
+  "apply_block_tree",
+  "apply_block_plan",
+  "replace_code",
+  "edit_code",
+  "insert_statements",
+  "replace_function_body",
+  "add_import",
+  "format_code",
+]);
+
+function writeToolEvidence(activity: AiAgentActivity): string | null {
+  if (activity.kind !== "tool" || activity.status !== "done" || !activity.toolName) return null;
+  if (!successfulWriteToolNames.has(activity.toolName) || activity.codeChange) return null;
+  let detail = "";
+  try {
+    const parsed = JSON.parse(activity.result || "{}") as { ok?: unknown; changed?: unknown; blockCount?: unknown; fallbackCount?: unknown };
+    if (parsed.ok === false) return null;
+    const parts = [
+      typeof parsed.blockCount === "number" ? `积木 ${parsed.blockCount} 块` : "",
+      typeof parsed.fallbackCount === "number" && parsed.fallbackCount > 0 ? `原始语句回退 ${parsed.fallbackCount} 条` : "",
+    ].filter(Boolean);
+    detail = parts.length ? `（${parts.join("，")}）` : "";
+  } catch {
+    // result 不是 JSON 时只记录标题。
+  }
+  return `已写入：${compact(activity.title, 160)}${detail}`;
+}
+
 function activityEvidence(activity: AiAgentActivity): string | null {
   if (activity.kind === "message") return compact(activity.title, 360) ? `说明：${compact(activity.title, 360)}` : null;
+  const writeEvidence = writeToolEvidence(activity);
+  if (writeEvidence) return writeEvidence;
   const important = activity.status === "error" || activity.codeChange || activity.execution?.state === "failed";
   if (!important) return null;
   const detail = compact(activity.detail, 500);
@@ -35,7 +69,7 @@ function activityEvidence(activity: AiAgentActivity): string | null {
 
 export function buildAiConversationHistory(runs: AiConversationRunForContext[]): AiConversationTurn[] {
   return runs
-    .filter((run) => run.status === "done" || run.status === "error")
+    .filter((run) => run.status === "done" || run.status === "error" || run.status === "stopped")
     .slice(-12)
     .flatMap((run) => {
       const evidence = run.activities.slice(-16).flatMap((activity) => {
@@ -48,7 +82,9 @@ export function buildAiConversationHistory(runs: AiConversationRunForContext[]):
       const imageMetadata = (run.attachments || [])
         .map((attachment) => `${attachment.name} (${attachment.width}x${attachment.height})`)
         .join(", ");
-      const assistant = [summary ? `结果：${summary}` : "", error ? `任务失败：${error}` : "", ...evidence]
+      // 被停止的任务往往已经改动过工作区：必须保留已完成部分，否则下一轮会在不知情的情况下重复或冲突写入。
+      const stoppedNote = run.status === "stopped" ? "任务被用户停止、未正式收尾；以下为停止前已完成的部分（工作区可能已被改动）" : "";
+      const assistant = [stoppedNote, summary ? `结果：${summary}` : "", error ? `任务失败：${error}` : "", ...evidence]
         .filter(Boolean)
         .join("\n")
         .slice(0, 7000);
