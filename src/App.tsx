@@ -71,7 +71,7 @@ import { createCodeDocument, createCodeDocumentFromSource, renameCodeDocument, t
 import { isBlockWorkspaceMode, normalizeWorkspaceMode, type WorkspaceMode } from "./workspaceMode";
 import { getWorkbenchShortcutAction } from "./workbenchShortcuts";
 import { isWindowDragInteractiveTarget } from "./windowDragTargets";
-import { blockSearchFlyout, createBlockCatalog, createBlockSearchIndex, createTaskBlockDirectory, searchBlockIndex } from "./blockSearch";
+import { blockSearchFlyout, createBlockCatalog, createBlockSearchIndex, createTaskBlockDirectory, searchBlockIndex, type BlockSearchEntry } from "./blockSearch";
 import { getPythonBlockAgentMetadata, mergeBlockAgentMetadata } from "./pythonBlockKnowledge";
 import { buildBlockOutline, compactBlockOutline, filterBlockOutline, type BlockOutlineNode } from "./blockOutline";
 import { installFunctionCallLinks } from "./functionCallLinks";
@@ -186,6 +186,35 @@ const FormulaEditorDialog = lazy(() => import("./FormulaEditorDialog"));
 const codeDiagnosticMarkerOwner = "visual-python-code-diagnostic";
 const pyrightDiagnosticMarkerOwner = "visual-python-pyright-diagnostic";
 const resolveCodeDocumentName = (code: string, fallback: string) => pluginRegistry.resolveCodeDocumentName(code, fallback);
+
+function pluginSearchEntries(profileId: string, labelForType: (type: string) => string): BlockSearchEntry[] {
+  const contents = pluginRegistry.getRecords()
+    .filter((record) => record.state === "active" && pluginSupportsProfile(record.plugin.manifest, profileId))
+    .flatMap((record) => pluginRegistry.getToolboxCategories(record.plugin.manifest.id).map((category) => ({
+      kind: "category",
+      id: category.id,
+      name: category.name,
+      colour: category.colour,
+      contents: category.contents,
+    })));
+  if (!contents.length) return [];
+  return createBlockSearchIndex(
+    { kind: "categoryToolbox", contents } as Blockly.utils.toolbox.ToolboxDefinition,
+    labelForType,
+    undefined,
+    { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) },
+  );
+}
+
+function mergeBlockSearchEntries(base: BlockSearchEntry[], extra: BlockSearchEntry[]): BlockSearchEntry[] {
+  const seen = new Set(base.map((entry) => `${entry.type}:${JSON.stringify(entry.item)}`));
+  return [...base, ...extra.filter((entry) => {
+    const key = `${entry.type}:${JSON.stringify(entry.item)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  })];
+}
 const legacyCodeDocument = (code: string) => createCodeDocumentFromSource(code, resolveCodeDocumentName(code, "main"), "scene-main");
 
 const readLocalAudioDuration = (path: string) => new Promise<number>((resolve, reject) => {
@@ -5815,12 +5844,12 @@ export default function App() {
           },
           getCapabilities: getActiveAgentCapabilities,
           getBlockCatalog: (_task) => {
-            const index = createBlockSearchIndex(
+            const index = mergeBlockSearchEntries(createBlockSearchIndex(
               blockSearchDefinition.current,
               blockSearchLabelForType,
               (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null,
               { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) },
-            );
+            ), pluginSearchEntries(profileRef.current.id, blockSearchLabelForType));
             return JSON.stringify(createBlockCatalog(index, describeBlocklyBlockContract));
           },
           getTools: () => [
@@ -5847,20 +5876,20 @@ export default function App() {
             workspace: workspace.current!,
             selectedBlockId: () => selectedBlockIdRef.current,
             getTaskBlockDirectory: (task, limit) => {
-              const index = createBlockSearchIndex(
+              const index = mergeBlockSearchEntries(createBlockSearchIndex(
                 blockSearchDefinition.current,
                 blockSearchLabelForType,
                 (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null,
                 { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) },
-              );
+              ), pluginSearchEntries(profileRef.current.id, blockSearchLabelForType));
               return createTaskBlockDirectory(index, task, { limit, describe: describeBlocklyBlockContract });
             },
             searchBlocks: (query, limit) => {
-              const index = createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null, { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) });
+              const index = mergeBlockSearchEntries(createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null, { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) }), pluginSearchEntries(profileRef.current.id, blockSearchLabelForType));
               return searchBlockIndex(index, query, limit).map((entry) => ({ type: entry.type, label: entry.label, category: entry.category, state: entry.item as unknown as Record<string, unknown>, ...describeBlocklyBlockContract(entry.type, entry.item as unknown as Record<string, unknown>) }));
             },
             getBlockTemplates: (types) => {
-              const index = createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null, { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) });
+              const index = mergeBlockSearchEntries(createBlockSearchIndex(blockSearchDefinition.current, blockSearchLabelForType, (custom) => workspace.current?.getToolboxCategoryCallback(custom)?.(workspace.current!) ?? null, { metadataForType: (type) => mergeBlockAgentMetadata(getPythonBlockAgentMetadata(type), pluginRegistry.getBlockKnowledgeMetadata(type)) }), pluginSearchEntries(profileRef.current.id, blockSearchLabelForType));
               const wanted = new Set(types);
               return index.filter((entry) => wanted.has(entry.type)).map((entry) => ({ type: entry.type, label: entry.label, category: entry.category, state: entry.item as unknown as Record<string, unknown>, ...describeBlocklyBlockContract(entry.type, entry.item as unknown as Record<string, unknown>) }));
             },

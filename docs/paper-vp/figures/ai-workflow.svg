@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="640" viewBox="0 0 1250 640" font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5A6B78"/>
+    </marker>
+    <marker id="arrT" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2F9E8F"/>
+    </marker>
+  </defs>
+  <rect width="1250" height="640" fill="#FFFFFF"/>
+
+  <!-- 顶部：学习者 -->
+  <g>
+    <rect x="500" y="36" width="250" height="66" rx="30" fill="#EEF6F3" stroke="#2F9E8F" stroke-width="1.5"/>
+    <text x="625" y="64" font-size="15" font-weight="600" text-anchor="middle" fill="#1F3A34">学习者</text>
+    <text x="625" y="86" font-size="12" text-anchor="middle" fill="#5B6E78">任务描述 / 追问 / 修正</text>
+  </g>
+  <line x1="625" y1="102" x2="625" y2="140" stroke="#5A6B78" stroke-width="1.6" marker-end="url(#arr2)"/>
+
+  <!-- 第一行流程 -->
+  <g>
+    <rect x="60" y="146" width="250" height="86" rx="8" fill="#FFFFFF" stroke="#B9CFC8" stroke-width="1.3"/>
+    <text x="185" y="180" font-size="14.5" font-weight="600" text-anchor="middle" fill="#22333C">AI 助手面板</text>
+    <text x="185" y="203" font-size="12" text-anchor="middle" fill="#6B7B84">自然语言交互 · 权限审批</text>
+    <text x="185" y="221" font-size="12" text-anchor="middle" fill="#6B7B84">对话上下文管理</text>
+
+    <rect x="360" y="146" width="250" height="86" rx="8" fill="#FFFFFF" stroke="#B9CFC8" stroke-width="1.3"/>
+    <text x="485" y="180" font-size="14.5" font-weight="600" text-anchor="middle" fill="#22333C">Codex 智能体</text>
+    <text x="485" y="203" font-size="12" text-anchor="middle" fill="#6B7B84">任务理解 · 规划 · 工具调用</text>
+    <text x="485" y="221" font-size="12" text-anchor="middle" fill="#6B7B84">进程内 App Server</text>
+
+    <rect x="660" y="146" width="250" height="86" rx="8" fill="#FFFFFF" stroke="#B9CFC8" stroke-width="1.3"/>
+    <text x="785" y="180" font-size="14.5" font-weight="600" text-anchor="middle" fill="#22333C">积木编辑计划（blockPlan）</text>
+    <text x="785" y="203" font-size="12" text-anchor="middle" fill="#6B7B84">结构化中间表示</text>
+    <text x="785" y="221" font-size="12" text-anchor="middle" fill="#6B7B84">可校验 · 可回滚</text>
+
+    <rect x="960" y="146" width="250" height="86" rx="8" fill="#FFFFFF" stroke="#B9CFC8" stroke-width="1.3"/>
+    <text x="1085" y="180" font-size="14.5" font-weight="600" text-anchor="middle" fill="#22333C">计划编译器</text>
+    <text x="1085" y="203" font-size="12" text-anchor="middle" fill="#6B7B84">计划 → Blockly 工作区操作</text>
+    <text x="1085" y="221" font-size="12" text-anchor="middle" fill="#6B7B84">diff 合并 · 撤销支持</text>
+  </g>
+  <line x1="625" y1="140" x2="310" y2="176" stroke="#5A6B78" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <line x1="310" y1="189" x2="356" y2="189" stroke="#5A6B78" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <line x1="610" y1="189" x2="656" y2="189" stroke="#5A6B78" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <line x1="910" y1="189" x2="956" y2="189" stroke="#5A6B78" stroke-width="1.6" marker-end="url(#arr2)"/>
+
+  <!-- 下降箭头 -->
+  <line x1="1085" y1="232" x2="1085" y2="300" stroke="#5A6B78" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <text x="1098" y="272" font-size="12" fill="#6B7B84">应用到工作区</text>
+
+  <!-- 第二行流程（从右到左） -->
+  <g>
+    <rect x="960" y="306" width="250" height="86" rx="8" fill="#FFFFFF" stroke="#B9CFC8" stroke-width="1.3"/>
+    <text x="1085" y="340" font-size="14.5" font-weight="600" text-anchor="middle" fill="#22333C">积木工作区更新</text>
+    <text x="1085" y="363" font-size="12" text-anchor="middle" fill="#6B7B84">积木增删改 · 高亮定位</text>
+    <text x="1085" y="381" font-size="12" text-anchor="middle" fill="#6B7B84">学习者可见每一步</text>
+
+    <rect x="660" y="306" width="250" height="86" rx="8" fill="#FFFFFF" stroke="#B9CFC8" stroke-width="1.3"/>
+    <text x="785" y="340" font-size="14.5" font-weight="600" text-anchor="middle" fill="#22333C">Python 实时生成</text>
+    <text x="785" y="363" font-size="12" text-anchor="middle" fill="#6B7B84">积木 → 代码同步映射</text>
+
+    <rect x="360" y="306" width="250" height="86" rx="8" fill="#FFFFFF" stroke="#B9CFC8" stroke-width="1.3"/>
+    <text x="485" y="340" font-size="14.5" font-weight="600" text-anchor="middle" fill="#22333C">静态校验</text>
+    <text x="485" y="363" font-size="12" text-anchor="middle" fill="#6B7B84">语法诊断 · Pyright 类型检查</text>
+    <text x="485" y="381" font-size="12" text-anchor="middle" fill="#6B7B84">错误归因为中文提示</text>
+
+    <rect x="60" y="306" width="250" height="86" rx="8" fill="#EEF6F3" stroke="#2F9E8F" stroke-width="1.5"/>
+    <text x="185" y="340" font-size="14.5" font-weight="600" text-anchor="middle" fill="#1F3A34">运行与渲染验证</text>
+    <text x="185" y="363" font-size="12" text-anchor="middle" fill="#5B6E78">本地执行 / Manim 渲染</text>
+    <text x="185" y="381" font-size="12" text-anchor="middle" fill="#5B6E78">输出 · 视频 · 定位图</text>
+  </g>
+  <line x1="960" y1="349" x2="916" y2="349" stroke="#5A6B78" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <line x1="660" y1="349" x2="616" y2="349" stroke="#5A6B78" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <line x1="360" y1="349" x2="316" y2="349" stroke="#5A6B78" stroke-width="1.6" marker-end="url(#arr2)"/>
+
+  <!-- 反馈回路 -->
+  <path d="M 185 392 L 185 480 L 485 480 L 485 238" fill="none" stroke="#2F9E8F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrT)"/>
+  <text x="330" y="470" font-size="12.5" fill="#1F7A6C">执行反馈：输出、错误与渲染结果回流智能体，驱动迭代修正</text>
+
+  <!-- 学习者查看结果 -->
+  <path d="M 185 392 L 185 452" fill="none" stroke="#5A6B78" stroke-width="0" />
+  <line x1="300" y1="480" x2="560" y2="530" stroke="#000000" stroke-width="0" />
+  <path d="M 90 392 C 90 540 420 560 520 108" fill="none" stroke="#000000" stroke-width="0"/>
+  <line x1="148" y1="446" x2="512" y2="528" stroke="#000000" stroke-width="0"/>
+  <path d="M 185 435 L 185 520 L 520 520 L 552 108" fill="none" stroke="#8AA0AA" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arr2)"/>
+  <text x="390" y="540" font-size="12.5" fill="#6B7B84">结果呈现与解释返回学习者</text>
+
+  <!-- 底部说明带 -->
+  <rect x="60" y="565" width="1150" height="48" rx="8" fill="#F7F9FA" stroke="#D5DEE2" stroke-width="1"/>
+  <text x="635" y="594" font-size="13" text-anchor="middle" fill="#44565F">闭环特性：智能体不直接改写代码文本，而是经由可校验的积木编辑计划作用于图形化工作区，全程对学习者可见、可撤销</text>
+</svg>

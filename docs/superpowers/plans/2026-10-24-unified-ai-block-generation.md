@@ -762,3 +762,19 @@ python | esp32-s3 | esp32-wroom | esp8266-esp12e
 - 现有“AI 插件验收测试”是 legacy 无 targets，需重新按 esp32-s3 创建后复测；
 - 插件分类在硬件工作台仍出现空 contents 的问题，需要从 pluginRegistry active contributions 直接构建 block 模板索引；
 - 插件 block 尚未通过 apply_block_program 端到端生成。
+### 19.1 插件目标与模板索引
+
+- 插件 manifest / IR / plan 增加 `targets`；
+- `create_simple_plugin` 强制要求 targets；
+- `pluginRegistry.extendToolbox(base, profileId)` 按目标过滤；
+- App 的插件 Agent 工具按当前 Profile 过滤；
+- 新增 `pluginSearchEntries`：直接从 `pluginRegistry` 的 active toolbox categories 构建 block 搜索索引，并合并进 `getBlockCatalog`、`searchBlocks`、`getBlockTemplates`；
+- 旧插件无 targets 默认 python；
+- 测试：1284 passed。
+
+### 19.2 待复测
+
+- 重新创建 `targets: ["esp32-s3"]` 的测试插件；
+- 确认 Python 模式不可见、ESP32-S3 可见；
+- 用 `apply_block_program` 生成插件积木；
+- COM6 上传运行。

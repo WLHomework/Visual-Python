@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="740" viewBox="0 0 1250 740" font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif">
+  <defs>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5A6B78"/>
+    </marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2F9E8F"/>
+    </marker>
+  </defs>
+  <rect width="1250" height="740" fill="#FFFFFF"/>
+
+  <!-- 泳道表头 -->
+  <g font-size="15" font-weight="600" text-anchor="middle">
+    <rect x="40" y="36" width="380" height="44" rx="8" fill="#F8F3EA" stroke="#D8C9A8" stroke-width="1.2"/>
+    <text x="230" y="64" fill="#5A4A22">教师</text>
+    <rect x="435" y="36" width="380" height="44" rx="8" fill="#EEF6F3" stroke="#BBD8CF" stroke-width="1.2"/>
+    <text x="625" y="64" fill="#1F3A34">学习者</text>
+    <rect x="830" y="36" width="380" height="44" rx="8" fill="#EEF3F9" stroke="#C3D2E4" stroke-width="1.2"/>
+    <text x="1020" y="64" fill="#223A55">平台与智能体</text>
+  </g>
+
+  <!-- 环节 1：情境创设 -->
+  <g>
+    <rect x="40" y="100" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#E2D8C2" stroke-width="1.1"/>
+    <text x="230" y="132" font-size="13.5" text-anchor="middle" fill="#4A3E22">创设问题情境，发布任务单</text>
+    <text x="230" y="154" font-size="12" text-anchor="middle" fill="#8A7C58">明确目标与评价要求</text>
+    <rect x="435" y="100" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D2E5DE" stroke-width="1.1"/>
+    <text x="625" y="132" font-size="13.5" text-anchor="middle" fill="#22333C">理解情境，提出初步想法</text>
+    <text x="625" y="154" font-size="12" text-anchor="middle" fill="#6B7B84">用自然语言描述方案</text>
+    <rect x="830" y="100" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D8E2EE" stroke-width="1.1"/>
+    <text x="1020" y="132" font-size="13.5" text-anchor="middle" fill="#22333C">提供示例工程与积木文档</text>
+    <text x="1020" y="154" font-size="12" text-anchor="middle" fill="#6B7B84">144 个 Manim 积木可检索</text>
+  </g>
+
+  <!-- 环节 2：方案设计 -->
+  <g>
+    <rect x="40" y="196" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#E2D8C2" stroke-width="1.1"/>
+    <text x="230" y="228" font-size="13.5" text-anchor="middle" fill="#4A3E22">引导分解任务，把关方案</text>
+    <rect x="435" y="196" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D2E5DE" stroke-width="1.1"/>
+    <text x="625" y="228" font-size="13.5" text-anchor="middle" fill="#22333C">分解步骤，规划积木组合</text>
+    <rect x="830" y="196" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D8E2EE" stroke-width="1.1"/>
+    <text x="1020" y="221" font-size="13.5" text-anchor="middle" fill="#22333C">智能体对话澄清需求</text>
+    <text x="1020" y="243" font-size="12" text-anchor="middle" fill="#6B7B84">生成计划并说明理由</text>
+  </g>
+
+  <!-- 环节 3：积木搭建 -->
+  <g>
+    <rect x="435" y="292" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D2E5DE" stroke-width="1.1"/>
+    <text x="625" y="318" font-size="13.5" text-anchor="middle" fill="#22333C">拖拽搭建，或审批智能体方案</text>
+    <text x="625" y="340" font-size="12" text-anchor="middle" fill="#6B7B84">人工搭建与 AI 生成可交替</text>
+    <rect x="830" y="292" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D8E2EE" stroke-width="1.1"/>
+    <text x="1020" y="318" font-size="13.5" text-anchor="middle" fill="#22333C">编译计划为工作区操作</text>
+    <text x="1020" y="340" font-size="12" text-anchor="middle" fill="#6B7B84">每一步可见、可撤销</text>
+    <rect x="40" y="292" width="380" height="76" rx="8" fill="#FCFAF5" stroke="#EDE4D0" stroke-width="1.1" stroke-dasharray="5 4"/>
+    <text x="230" y="324" font-size="12.5" text-anchor="middle" fill="#8A7C58">巡视指导，关注计算思维表现</text>
+  </g>
+
+  <!-- 环节 4：代码对照理解 -->
+  <g>
+    <rect x="435" y="388" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D2E5DE" stroke-width="1.1"/>
+    <text x="625" y="414" font-size="13.5" text-anchor="middle" fill="#22333C">对照积木与 Python 代码</text>
+    <text x="625" y="436" font-size="12" text-anchor="middle" fill="#6B7B84">选中定位 · 补全 · 诊断提示</text>
+    <rect x="830" y="388" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D8E2EE" stroke-width="1.1"/>
+    <text x="1020" y="414" font-size="13.5" text-anchor="middle" fill="#22333C">实时生成并解释代码</text>
+    <text x="1020" y="436" font-size="12" text-anchor="middle" fill="#6B7B84">Pyright 校验 · 中文错误归因</text>
+    <rect x="40" y="388" width="380" height="76" rx="8" fill="#FCFAF5" stroke="#EDE4D0" stroke-width="1.1" stroke-dasharray="5 4"/>
+    <text x="230" y="420" font-size="12.5" text-anchor="middle" fill="#8A7C58">讲解语法对照要点</text>
+  </g>
+
+  <!-- 环节 5：运行验证 -->
+  <g>
+    <rect x="435" y="484" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D2E5DE" stroke-width="1.1"/>
+    <text x="625" y="510" font-size="13.5" text-anchor="middle" fill="#22333C">运行程序，观察输出与动画</text>
+    <text x="625" y="532" font-size="12" text-anchor="middle" fill="#6B7B84">控制台三面板 · 视频预览</text>
+    <rect x="830" y="484" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D8E2EE" stroke-width="1.1"/>
+    <text x="1020" y="510" font-size="13.5" text-anchor="middle" fill="#22333C">本地执行 / Manim 渲染</text>
+    <text x="1020" y="532" font-size="12" text-anchor="middle" fill="#6B7B84">错误回流智能体自动修正</text>
+  </g>
+
+  <!-- 环节 6：反思迁移 -->
+  <g>
+    <rect x="435" y="580" width="380" height="76" rx="8" fill="#EEF6F3" stroke="#BBD8CF" stroke-width="1.3"/>
+    <text x="625" y="612" font-size="13.5" font-weight="600" text-anchor="middle" fill="#1F3A34">反思过程，迁移到新任务</text>
+    <text x="625" y="634" font-size="12" text-anchor="middle" fill="#5B6E78">保存 .vpy 工程 · 作品分享</text>
+    <rect x="40" y="580" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#E2D8C2" stroke-width="1.1"/>
+    <text x="230" y="606" font-size="13.5" text-anchor="middle" fill="#4A3E22">组织展示与多元评价</text>
+    <text x="230" y="628" font-size="12" text-anchor="middle" fill="#8A7C58">关注过程性与作品质量</text>
+    <rect x="830" y="580" width="380" height="76" rx="8" fill="#FFFFFF" stroke="#D8E2EE" stroke-width="1.1"/>
+    <text x="1020" y="606" font-size="13.5" text-anchor="middle" fill="#22333C">沉淀对话与工程档案</text>
+    <text x="1020" y="628" font-size="12" text-anchor="middle" fill="#6B7B84">供教师回溯学习轨迹</text>
+  </g>
+
+  <!-- 纵向流程箭头 -->
+  <g stroke="#5A6B78" stroke-width="1.6">
+    <line x1="625" y1="176" x2="625" y2="192" marker-end="url(#arr3)"/>
+    <line x1="625" y1="272" x2="625" y2="288" marker-end="url(#arr3)"/>
+    <line x1="625" y1="368" x2="625" y2="384" marker-end="url(#arr3)"/>
+    <line x1="625" y1="464" x2="625" y2="480" marker-end="url(#arr3)"/>
+    <line x1="625" y1="560" x2="625" y2="576" marker-end="url(#arr3)"/>
+  </g>
+
+  <!-- 迭代回路 -->
+  <path d="M 430 618 L 1180 618 L 1180 234 L 1216 234" fill="none" stroke="#2F9E8F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrG)" opacity="0"/>
+  <path d="M 1022 580 C 1022 700 190 700 190 276" fill="none" stroke="#2F9E8F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrG)"/>
+  <text x="606" y="712" font-size="12.5" fill="#1F7A6C" text-anchor="middle">验证未通过或方案调整时，在任一环节回到方案设计，形成迭代闭环</text>
+</svg>

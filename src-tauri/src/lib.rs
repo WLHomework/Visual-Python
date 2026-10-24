@@ -4308,6 +4308,7 @@ struct PluginManifest {
     description: Option<String>,
     builtin: Option<bool>,
     entry: Option<String>,
+    targets: Option<Vec<String>>,
     python: Option<PluginPythonManifest>,
     agent: Option<PluginAgentManifest>,
 }
@@ -4500,6 +4501,16 @@ fn validate_plugin_manifest_value(value: &Value) -> Result<PluginManifest, Vec<S
     }
     if manifest.builtin.unwrap_or(false) {
         errors.push("external plugins cannot declare builtin: true".into());
+    }
+    if let Some(targets) = &manifest.targets {
+        if targets.is_empty() {
+            errors.push("targets cannot be empty".into());
+        }
+        for target in targets {
+            if !matches!(target.as_str(), "python" | "esp32-s3" | "esp32-wroom" | "esp8266-esp12e") {
+                errors.push(format!("unsupported plugin target: {target}"));
+            }
+        }
     }
     match &manifest.entry {
         Some(entry) => {
