@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AiChatMessage } from "../aiConfig";
 import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext, graphicalCatalogInstructions } from "./context";
+import { estimateTokens, tokenBudgets } from "./tokenEstimate";
 
 describe("Agent context compression", () => {
   it("builds one immutable initial request with the current code snapshot", () => {
@@ -210,21 +211,23 @@ describe("Agent context compression", () => {
     expect(joined).not.toContain("user-15");
   });
 
-  it("keeps the newest turns when the conversation history exceeds the character budget", () => {
+  it("keeps the newest turns when the conversation history exceeds the token budget", () => {
     const context = createAgentRequestContext({
       system: "system",
       prompt: "当前任务",
-      history: Array.from({ length: 10 }, (_, index) => ({
-        user: `user-${index}:${"x".repeat(6_000)}`,
-        assistant: `assistant-${index}:${"y".repeat(6_000)}`,
+      history: Array.from({ length: 12 }, (_, index) => ({
+        // 每条 ~2000 token（低于单条预算不会被截断），一轮 ~4000 token，16k 预算只容最新 4 轮。
+        user: `user-${index}:${"x".repeat(7_996)}`,
+        assistant: `assistant-${index}:${"y".repeat(7_996)}`,
       })),
       snapshot: {},
       memory: "memory",
     });
 
     const joined = buildAgentRequestMessages(context).map((message) => message.content).join("\n");
-    expect(joined).toContain("user-9:");
-    expect(joined).not.toContain("user-7:");
+    expect(joined).toContain("user-11:");
+    expect(joined).not.toContain("user-5:");
+    expect(joined).not.toContain("[内容已截断]");
   });
 
   it("appends tool-call rounds without changing the existing request prefix", () => {
@@ -246,12 +249,12 @@ describe("Agent context compression", () => {
     for (let index = 0; index < 5; index += 1) {
       messages = appendAgentTurn(messages, [
         { role: "assistant", content: "", toolCalls: [{ id: `call-${index}`, type: "function", function: { name: "get_context", arguments: "{}" } }] },
-        { role: "tool", toolCallId: `call-${index}`, content: `round-${index}:${"x".repeat(10_000)}` },
+        { role: "tool", toolCallId: `call-${index}`, content: `round-${index}:${"x".repeat(40_000)}` },
       ]);
     }
 
     const serialized = JSON.stringify(messages);
-    expect(serialized.length).toBeLessThan(40_000);
+    expect(estimateTokens(serialized)).toBeLessThanOrEqual(tokenBudgets.toolHistory);
     expect(serialized).not.toContain("round-0:");
     expect(serialized).toContain("round-4:");
     expect(serialized).toContain("历史工具回合已压缩");
@@ -281,7 +284,7 @@ describe("Agent context compression", () => {
     for (let index = 0; index < 2; index += 1) {
       compacted = appendAgentTurn(compacted, [
         { role: "assistant", content: "继续处理", toolCalls: [{ id: `large-call-${index}`, type: "function", function: { name: "get_context", arguments: "{}" } }] },
-        { role: "tool", toolCallId: `large-call-${index}`, content: "x".repeat(18_000) },
+        { role: "tool", toolCallId: `large-call-${index}`, content: "x".repeat(60_000) },
       ]);
     }
 

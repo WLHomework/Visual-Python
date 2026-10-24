@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentClockTime, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldPersistConversationRuns, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, summarizeAgentRun, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
+import { estimateTokens, tokenBudgets } from "./agentV2/tokenEstimate";
 import { MAX_IMAGE_COUNT, type AiImageAttachment } from "./aiImageAttachments";
 
 const attachment = (id: string, sendable = true): AiImageAttachment => ({ id, name: `${id}.png`, mimeType: "image/png", width: 100, height: 100, sourceBytes: 100, dataUrl: sendable ? `data:image/png;base64,${id}` : undefined, sendable });
@@ -658,12 +659,27 @@ describe("AI assistant Markdown", () => {
     expect(trimmed.at(-1)?.user).toBe("user-29");
   });
 
-  it("limits context characters while retaining the newest turns", () => {
+  it("limits context tokens while retaining the newest turns", () => {
     const history = Array.from({ length: 12 }, (_, index) => ({ user: `${index}${"u".repeat(5000)}`, assistant: "a".repeat(5000) }));
     const trimmed = trimAiConversationHistory(history);
-    expect(trimmed).toHaveLength(8);
+    // 12 轮 × ~2500 token 超出 16k 预算：只保留最新几轮，且单条不超消息预算。
+    expect(trimmed.length).toBeLessThan(12);
     expect(trimmed.at(-1)?.user.startsWith("11")).toBe(true);
-    expect(trimmed.every((turn) => turn.user.length <= 4000 && turn.assistant.length <= 4000)).toBe(true);
+    expect(trimmed[0]?.user.startsWith("0")).toBe(false);
+    expect(trimmed.every((turn) => estimateTokens(turn.user) <= tokenBudgets.historyPerMessage && estimateTokens(turn.assistant) <= tokenBudgets.historyPerMessage)).toBe(true);
+  });
+
+  it("keeps image payloads only on the newest turn to cap multimodal cost", () => {
+    const attachment = { id: "old", name: "old.png", mimeType: "image/png" as const, width: 10, height: 10, sourceBytes: 8, dataUrl: "data:image/png;base64,old", sendable: true };
+    const history = [
+      { user: "旧任务", assistant: "旧答复", attachments: [attachment] },
+      { user: "新任务", assistant: "新答复", attachments: [{ ...attachment, id: "new", name: "new.png" }] },
+    ];
+    const trimmed = trimAiConversationHistory(history);
+    expect(trimmed).toHaveLength(2);
+    expect(trimmed[0].attachments).toBeUndefined();
+    expect(trimmed[1].attachments).toHaveLength(1);
+    expect(trimmed[1].attachments?.[0]?.name).toBe("new.png");
   });
 
   it("preserves clarification state in conversation context", () => {

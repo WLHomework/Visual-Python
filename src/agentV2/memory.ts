@@ -10,11 +10,11 @@ const limit = 8;
 const trim = (value: string, max = 700) => value.length > max ? `${value.slice(0, max)}...` : value;
 
 export function createAgentMemory(history: AgentConversationTurn[]): AgentMemory {
-  return {
-    facts: history.slice(-3).map((turn) => trim(`用户：${turn.user}`)),
-    decisions: history.slice(-3).map((turn) => trim(`上一轮结果：${turn.assistant}`)),
-    evidence: [],
-  };
+  // 历史轮次本身会作为真实消息重放（见 context.ts historyMessages），
+  // 这里不再用同样的内容填充摘要，避免同一请求里双份注入；
+  // memory 只承载本轮运行中积累的证据与决策。
+  void history;
+  return { facts: [], decisions: [], evidence: [] };
 }
 
 export function rememberAgentEvidence(memory: AgentMemory, label: string, result: string): void {
@@ -31,5 +31,6 @@ export function serializeAgentMemory(memory: AgentMemory): string {
     memory.decisions.length ? `已做决策：\n${memory.decisions.map((item) => `- ${item}`).join("\n")}` : "",
     memory.evidence.length ? `验证证据：\n${memory.evidence.map((item) => `- ${item}`).join("\n")}` : "",
   ].filter(Boolean);
-  return sections.length ? `任务记忆摘要：\n${sections.join("\n")}` : "任务记忆摘要：暂无额外记录。";
+  // 没有累积记录时返回空串，调用方按需拼接，避免每轮请求都带一句"暂无记录"。
+  return sections.length ? `任务记忆摘要：\n${sections.join("\n")}` : "";
 }

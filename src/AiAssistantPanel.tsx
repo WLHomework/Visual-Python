@@ -20,6 +20,7 @@ import type { AgentTokenUsage, AiAgentActivity, AiAgentExecution, AiAgentMode, A
 import { getAiAgentPermissionMode, getAiModelConfig, getAiReasoningEffort, saveAiAgentPermissionMode, saveAiReasoningEffort, type AiAgentPermissionMode, type AiReasoningEffort } from "./aiConfig";
 import { MAX_IMAGE_COUNT, pickImageFiles, prepareImageFile, restorePersistedImageAttachment, toPersistedImageAttachment, validateImageFiles, type AiImageAttachment, type PersistedAiImageAttachment } from "./aiImageAttachments";
 import { buildAiConversationHistory } from "./aiConversationContext";
+import { estimateTokens, tokenBudgets, truncateToTokens } from "./agentV2/tokenEstimate";
 import { CONVERSATION_STORES_PREFIX, conversationStoreKey, conversationStoreTimestamp, isStorageQuotaError } from "./sessionPersistence";
 import { stripManagedAudioMetadataForDisplay } from "./managedAudioMetadata";
 import { stripAgentFollowUpMarkup } from "./agentV2/followUps";
@@ -149,7 +150,6 @@ const maxStoredRuns = 30;
 const maxStoredConversations = 12;
 const maxStoredHistoryCharacters = 1_500_000;
 const maxContextTurns = 24;
-const maxContextCharacters = 64_000;
 let conversationSequence = 1;
 
 function formatImageAttachmentSize(bytes: number): string {
@@ -432,20 +432,22 @@ export function storeConversationState(scope: string, state: AiConversationState
 
 export function trimAiConversationHistory(turns: AiConversationTurn[]): AiConversationTurn[] {
   const selected: AiConversationTurn[] = [];
-  let characters = 0;
+  let tokens = 0;
   for (let index = turns.length - 1; index >= 0 && selected.length < maxContextTurns; index -= 1) {
+    const isLatest = selected.length === 0;
     const turn = {
-      user: turns[index].user.slice(0, 4000),
-      assistant: turns[index].assistant.slice(0, 4000),
-      ...((turns[index].attachments || []).some((attachment) => attachment.sendable && attachment.dataUrl)
+      user: truncateToTokens(turns[index].user, tokenBudgets.historyPerMessage),
+      assistant: truncateToTokens(turns[index].assistant, tokenBudgets.historyPerMessage),
+      // 原图只随最近一轮重发；更早轮次仅保留 user 文本里的图片元数据，控制多模态成本。
+      ...((turns[index].attachments || []).some((attachment) => attachment.sendable && attachment.dataUrl) && isLatest
         ? { attachments: (turns[index].attachments || []).filter((attachment) => attachment.sendable && attachment.dataUrl) }
         : {}),
       ...(turns[index].clarification ? { clarification: true } : {}),
     };
-    const turnCharacters = turn.user.length + turn.assistant.length;
-    if (selected.length && characters + turnCharacters > maxContextCharacters) break;
+    const turnTokens = estimateTokens(turn.user) + estimateTokens(turn.assistant);
+    if (selected.length && tokens + turnTokens > tokenBudgets.history) break;
     selected.unshift(turn);
-    characters += turnCharacters;
+    tokens += turnTokens;
   }
   return selected;
 }

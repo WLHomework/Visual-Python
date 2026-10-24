@@ -1,4 +1,5 @@
 import { createAiChatContentParts, type AiChatMessage } from "../aiConfig";
+import { estimateTokens, tokenBudgets, truncateToTokens } from "./tokenEstimate";
 import type { AgentConversationTurn } from "./types";
 
 type AgentRequestContextInput = {
@@ -14,13 +15,7 @@ type AgentRequestContextInput = {
 export type AgentRequestContext = AgentRequestContextInput;
 
 const truncate = (value: string, max: number) => value.length > max ? `${value.slice(0, max)}\n[内容已截断]` : value;
-const maxAgentToolHistoryCharacters = 32_000;
-const maxCompactedToolHistoryCharacters = 12_000;
-const maxBlockCatalogCharacters = 90_000;
-const maxInitialRequestCharacters = 150_000;
 const maxContextHistoryTurns = 24;
-const maxContextHistoryCharacters = 24_000;
-const maxContextHistoryMessageCharacters = 4_000;
 const compactedToolHistoryPrefix = "历史工具回合已压缩。已完成的工具结果摘要（除非需要新信息，不要重复读取）：\n";
 
 type CatalogCategory = {
@@ -29,8 +24,8 @@ type CatalogCategory = {
   blocks?: Record<string, unknown>[];
 };
 
-export function compactBlockCatalogForPrompt(value: string, maxCharacters = 8_000): string | null {
-  return compactTaskBlockDirectory(value, maxCharacters)?.text || compactBlockCatalog(value, maxCharacters)?.text || null;
+export function compactBlockCatalogForPrompt(value: string, maxTokens: number = tokenBudgets.blockCatalogForPrompt): string | null {
+  return compactTaskBlockDirectory(value, maxTokens)?.text || compactBlockCatalog(value, maxTokens)?.text || null;
 }
 
 export function hasTruncatedBlockCatalog(value?: string): boolean {
@@ -73,7 +68,7 @@ const planningCandidateKeys = new Set([
   "inputDescriptions", "inputTypes", "outputType", "statement", "examples", "contract",
 ]);
 
-function compactTaskBlockDirectory(value: string, maxCharacters: number): { text: string; omittedBlocks: number } | null {
+function compactTaskBlockDirectory(value: string, maxTokens: number): { text: string; omittedBlocks: number } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -107,7 +102,7 @@ function compactTaskBlockDirectory(value: string, maxCharacters: number): { text
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
     const candidate = build(middle);
-    if (candidate.text.length <= maxCharacters) {
+    if (estimateTokens(candidate.text) <= maxTokens) {
       best = candidate;
       low = middle + 1;
     } else {
@@ -117,17 +112,17 @@ function compactTaskBlockDirectory(value: string, maxCharacters: number): { text
   return best;
 }
 
-function compactBlockCatalog(value: string, maxCharacters: number): { text: string; omittedBlocks: number } | null {
+function compactBlockCatalog(value: string, maxTokens: number): { text: string; omittedBlocks: number } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
   } catch {
-    return { text: JSON.stringify({ content: truncate(value, Math.max(0, maxCharacters - 64)), truncated: value.length > maxCharacters }), omittedBlocks: value.length > maxCharacters ? 1 : 0 };
+    return { text: JSON.stringify({ content: truncateToTokens(value, Math.max(0, maxTokens - 32)), truncated: estimateTokens(value) > maxTokens }), omittedBlocks: estimateTokens(value) > maxTokens ? 1 : 0 };
   }
   if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { categories?: unknown }).categories)) {
-    return value.length <= maxCharacters
+    return estimateTokens(value) <= maxTokens
       ? { text: value, omittedBlocks: 0 }
-      : { text: JSON.stringify({ content: truncate(value, Math.max(0, maxCharacters - 64)), truncated: true }), omittedBlocks: 1 };
+      : { text: JSON.stringify({ content: truncateToTokens(value, Math.max(0, maxTokens - 32)), truncated: true }), omittedBlocks: 1 };
   }
 
   const source = parsed as { categories: CatalogCategory[]; omittedBlockCount?: unknown };
@@ -166,7 +161,7 @@ function compactBlockCatalog(value: string, maxCharacters: number): { text: stri
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
     const candidate = buildPrefix(middle);
-    if (candidate.text.length <= maxCharacters) {
+    if (estimateTokens(candidate.text) <= maxTokens) {
       best = candidate;
       low = middle + 1;
     } else {
@@ -184,15 +179,15 @@ function snapshotText(snapshot: Record<string, unknown>): string {
 function historyMessages(history: AgentConversationTurn[]): AiChatMessage[] {
   // Fill from the newest turn backwards so the budget never drops the most recent context.
   const selected: Array<{ user: string; assistant: string; attachments?: AgentConversationTurn["attachments"] }> = [];
-  let characters = 0;
+  let tokens = 0;
   for (let index = history.length - 1; index >= 0 && selected.length < maxContextHistoryTurns; index -= 1) {
-    const user = truncate(history[index].user, maxContextHistoryMessageCharacters);
-    const assistant = truncate(history[index].assistant, maxContextHistoryMessageCharacters);
-    const turnCharacters = user.length + assistant.length;
-    if (selected.length && characters + turnCharacters > maxContextHistoryCharacters) break;
+    const user = truncateToTokens(history[index].user, tokenBudgets.historyPerMessage);
+    const assistant = truncateToTokens(history[index].assistant, tokenBudgets.historyPerMessage);
+    const turnTokens = estimateTokens(user) + estimateTokens(assistant);
+    if (selected.length && tokens + turnTokens > tokenBudgets.history) break;
     const attachments = history[index].attachments?.filter((attachment) => attachment.sendable && attachment.dataUrl);
     selected.unshift({ user, assistant, ...(attachments?.length ? { attachments } : {}) });
-    characters += turnCharacters;
+    tokens += turnTokens;
   }
   return selected.flatMap((turn) => [
     { role: "user" as const, content: turn.user, ...(turn.attachments?.length ? { contentParts: createAiChatContentParts(turn.user, turn.attachments) } : {}) },
@@ -205,20 +200,25 @@ export function createAgentRequestContext(input: AgentRequestContextInput): Agen
 }
 
 export function buildAgentRequestMessages(context: AgentRequestContext): AiChatMessage[] {
+  const taskContent = [
+    `用户任务：\n${context.prompt.trim()}`,
+    `当前工程快照：\n${snapshotText(context.snapshot)}`,
+    context.memory,
+  ].filter(Boolean).join("\n\n");
   const messages: AiChatMessage[] = [
     { role: "system", content: context.system },
     ...historyMessages(context.history),
     {
       role: "user",
-      content: `用户任务：\n${context.prompt.trim()}\n\n当前工程快照：\n${snapshotText(context.snapshot)}\n\n${context.memory}`,
+      content: taskContent,
       ...(context.attachments?.some((attachment) => attachment.sendable && attachment.dataUrl)
-        ? { contentParts: createAiChatContentParts(`用户任务：\n${context.prompt.trim()}\n\n当前工程快照：\n${snapshotText(context.snapshot)}\n\n${context.memory}`, context.attachments) }
+        ? { contentParts: createAiChatContentParts(taskContent, context.attachments) }
         : {}),
     },
   ];
   if (context.blockCatalog?.trim()) {
-    const baseCharacters = messages.reduce((total, message) => total + message.content.length, 0);
-    const catalogBudget = Math.min(maxBlockCatalogCharacters, Math.max(0, maxInitialRequestCharacters - baseCharacters - 512));
+    const baseTokens = messages.reduce((total, message) => total + estimateTokens(message.content), 0);
+    const catalogBudget = Math.min(tokenBudgets.blockCatalog, Math.max(0, tokenBudgets.initialRequest - baseTokens - 256));
     if (catalogBudget < 256) return messages;
     const catalog = compactTaskBlockDirectory(context.blockCatalog.trim(), catalogBudget) ?? compactBlockCatalog(context.blockCatalog.trim(), catalogBudget);
     if (!catalog?.text) return messages;
@@ -232,14 +232,14 @@ export function buildAgentRequestMessages(context: AgentRequestContext): AiChatM
 
 export function appendAgentTurn(messages: AiChatMessage[], turn: AiChatMessage[]): AiChatMessage[] {
   const next = [...messages, ...turn];
-  if (JSON.stringify(next).length <= maxAgentToolHistoryCharacters) return next;
+  if (estimateTokens(JSON.stringify(next)) <= tokenBudgets.toolHistory) return next;
 
   let removedRounds = 0;
   const previousSummaryIndex = next.findIndex((message) => message.role === "user" && message.content.startsWith(compactedToolHistoryPrefix));
   let compactedEvidence = previousSummaryIndex >= 0
     ? next.splice(previousSummaryIndex, 1)[0].content.slice(compactedToolHistoryPrefix.length)
     : "";
-  while (JSON.stringify(next).length > maxAgentToolHistoryCharacters) {
+  while (estimateTokens(JSON.stringify(next)) > tokenBudgets.toolHistory) {
     let start = -1;
     let end = -1;
     for (let index = 0; index < next.length; index += 1) {
@@ -280,7 +280,7 @@ function summarizeToolRound(round: AiChatMessage[]): string {
         structured = true;
         content = compactAgentToolResult(call.function.name, parsed as Record<string, unknown>);
         if (call.function.name === "get_task_block_directory") {
-          content = compactTaskBlockDirectory(content, 4_000)?.text || content;
+          content = compactTaskBlockDirectory(content, 1_400)?.text || content;
         } else if (call.function.name === "get_block_templates" && content.length > 4_000) {
           const templates = (JSON.parse(content) as { templates?: unknown[] }).templates || [];
           content = JSON.stringify({ templates: templates.slice(0, 12), omittedTemplateCount: Math.max(0, templates.length - 12) });
@@ -298,8 +298,8 @@ function summarizeToolRound(round: AiChatMessage[]): string {
 
 function mergeCompactedToolEvidence(previous: string, next: string): string {
   const combined = [previous.trim(), next.trim()].filter(Boolean).join("\n");
-  return combined.length > maxCompactedToolHistoryCharacters
-    ? `[较早的工具证据已省略]\n${combined.slice(-maxCompactedToolHistoryCharacters + 30)}`
+  return estimateTokens(combined) > tokenBudgets.compactedToolHistory
+    ? `[较早的工具证据已省略]\n${truncateToTokens(combined, tokenBudgets.compactedToolHistory - 30)}`
     : combined;
 }
 
@@ -329,7 +329,7 @@ export function compactAgentToolResult(_toolName: string, result: Record<string,
   try {
     if (_toolName === "read_plugin_draft_file" || _toolName === "read_plugin_guide") return JSON.stringify(result);
     if (_toolName === "get_task_block_directory") {
-      const compact = compactTaskBlockDirectory(JSON.stringify(result), 6_000);
+      const compact = compactTaskBlockDirectory(JSON.stringify(result), 1_400);
       if (compact) return compact.text;
     }
     if (_toolName === "get_block_templates") {
