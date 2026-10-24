@@ -59,7 +59,11 @@ function compactHistory(history: AgentConversationTurn[]): string {
 export function buildCodexPrompt(input: CodexPromptInput, includeHistory: boolean): string {
   const history = includeHistory ? compactHistory(input.history) : "";
   const sections = [
-    history ? `最近对话：\n${history}` : "",
+    // includeHistory 只在服务端线程缺失（新会话或模型/供应商切换）时为真：
+    // 明确告知模型上下文来自摘要而非完整线程，避免它假装记得全部细节。
+    history
+      ? `最近对话（注意：服务端线程已重置，以下是最近对话的摘要，仅用于衔接；如用户询问更早的细节，请如实说明只掌握摘要内容）：\n${history}`
+      : "",
     `当前工程状态：\n${compactSnapshot(input.snapshot)}`,
     `用户任务：\n${input.prompt.trim()}`,
   ];

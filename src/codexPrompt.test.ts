@@ -14,6 +14,20 @@ describe("Codex prompt compaction", () => {
     expect(buildCodexPrompt(input, false)).toContain("继续修改代码");
   });
 
+  it("tells the model the thread was reset and only a digest is available", () => {
+    const input = {
+      prompt: "继续",
+      history: [{ user: "旧请求", assistant: "旧回复" }],
+      snapshot: {},
+    };
+
+    const prompt = buildCodexPrompt(input, true);
+    expect(prompt).toContain("服务端线程已重置");
+    expect(prompt).toContain("仅用于衔接");
+    // 已有线程续跑时不加该说明。
+    expect(buildCodexPrompt(input, false)).not.toContain("服务端线程已重置");
+  });
+
   it("keeps every recent turn that fits the larger handoff budget", () => {
     const history = Array.from({ length: 5 }, (_, index) => ({
       user: `请求-${index}：${"u".repeat(800)}`,

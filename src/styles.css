@@ -7884,3 +7884,87 @@ body.resizing-hardware-preview * {
   font-size: 10px;
   font-style: normal;
 }
+
+/* 会话菜单行：选择区 + 时间戳 + 重命名/删除操作 */
+.ai-conversation-menu-list .ai-conversation-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 4px;
+}
+
+.ai-conversation-menu-list .ai-conversation-item.selected {
+  background: color-mix(in srgb,var(--hover),#2f9e8f 8%);
+  color: var(--text);
+}
+
+.ai-conversation-menu-list .ai-conversation-item .ai-conversation-select {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 6px 0 9px;
+  text-align: left;
+}
+
+.ai-conversation-menu-list .ai-conversation-item .ai-conversation-select span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ai-conversation-menu-list .ai-conversation-item .ai-conversation-select small {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ai-conversation-menu-list .ai-conversation-item-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.ai-conversation-menu-list .ai-conversation-item:hover .ai-conversation-item-actions,
+.ai-conversation-menu-list .ai-conversation-item.selected .ai-conversation-item-actions {
+  display: inline-flex;
+}
+
+.ai-conversation-menu-list .ai-conversation-item-actions button {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--muted);
+  border-radius: 4px;
+}
+
+.ai-conversation-menu-list .ai-conversation-item-actions button:hover:not(:disabled) {
+  background: color-mix(in srgb,var(--surface-2),#2f9e8f 12%);
+  color: var(--text);
+}
+
+.ai-conversation-menu-list .ai-conversation-item-actions .ai-conversation-delete-button:hover:not(:disabled) {
+  background: color-mix(in srgb,var(--surface-2),#ef5350 14%);
+  color: #e57373;
+}
+
+.ai-conversation-menu-list .ai-conversation-rename {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  margin: 3px 6px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb,#2f9e8f 55%,var(--border));
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}

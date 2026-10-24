@@ -1,5 +1,5 @@
 import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, Download, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { AlertCircle, Download, PenLine, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -184,8 +184,17 @@ function conversationTitle(prompt?: string) {
   return normalized.length > 32 ? `${normalized.slice(0, 32)}...` : normalized;
 }
 
-function createConversation(runs: AgentRun[] = []): AiConversation {
-  const now = Date.now();
+function formatConversationMenuTime(timestamp: number): string {
+  if (!Number.isFinite(timestamp)) return "";
+  const date = new Date(timestamp);
+  const now = new Date();
+  const clock = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return date.toDateString() === now.toDateString()
+    ? clock
+    : `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${clock}`;
+}
+
+function createConversation(runs: AgentRun[] = []): AiConversation {  const now = Date.now();
   return {
     id: createConversationId(),
     title: conversationTitle(runs[0]?.prompt),
@@ -1674,12 +1683,17 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const [permissionMode, setPermissionMode] = useState<AiAgentPermissionMode>(() => getAiAgentPermissionMode());
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
+  const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
   const [conversationPersistenceFailed, setConversationPersistenceFailed] = useState(false);
   const conversationMigrationKey = conversationMigrationScopes.join("|");
   const [conversationState, setConversationState] = useState<AiConversationState>(() => loadConversationState(conversationScope, conversationMigrationScopes));
   const conversationStateRef = useRef(conversationState);
   conversationStateRef.current = conversationState;
+  // 当前正在执行的任务属于哪个会话；null 表示空闲。异步文件加载可能在运行中改变 activeId，
+  // 活动必须始终写回任务启动时所属的会话。
+  const runningConversationIdRef = useRef<string | null>(null);
   const activeConversation = conversationState.conversations.find((conversation) => conversation.id === conversationState.activeId) ?? conversationState.conversations[0];
   const runs = activeConversation?.runs ?? [];
   const runId = useRef(Math.max(0, ...conversationState.conversations.flatMap((conversation) => conversation.runs.map((run) => run.id))) + 1);
@@ -1781,12 +1795,16 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     if (!mountedRef.current) return;
     const nextRuns = update(runsRef.current);
     runsRef.current = nextRuns;
-    setConversationState((state) => ({
-      ...state,
-      conversations: state.conversations.map((conversation) => conversation.id === state.activeId
-        ? { ...conversation, runs: nextRuns, updatedAt: Date.now() }
-        : conversation),
-    }));
+    setConversationState((state) => {
+      // 运行中的任务始终写回它启动时所属的会话：期间用户切换/新建会话不会错挂活动。
+      const targetId = runningConversationIdRef.current ?? state.activeId;
+      return {
+        ...state,
+        conversations: state.conversations.map((conversation) => conversation.id === targetId
+          ? { ...conversation, runs: nextRuns, updatedAt: Date.now() }
+          : conversation),
+      };
+    });
   };
 
   useEffect(() => {
@@ -2018,6 +2036,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     if (!canSubmitAiPrompt(normalizedPrompt, runAttachments) || runsRef.current.some((run) => run.status === "running")) return;
     const id = existingRunId ?? runId.current++;
     const controller = new AbortController();
+    runningConversationIdRef.current = conversationStateRef.current.activeId;
     const history = trimAiConversationHistory(buildAiConversationHistory(
       runsRef.current.filter((run) => run.id !== excludedRunId),
     ));
@@ -2097,7 +2116,9 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       });
     } finally {
       if (activeController.current === controller) activeController.current = null;
-      if (completedSuccessfully) {
+      runningConversationIdRef.current = null;
+      // 用户主动停止时不自动继续队列；任务失败（error）时队列里的下一条照常执行。
+      if (completedSuccessfully || !controller.signal.aborted) {
         const next = runsRef.current.find((run) => run.status === "queued");
         if (next) queueMicrotask(() => void runAgent(next.request || next.prompt, undefined, next.id, next.prompt, next.mode, next.initialPlan, next.attachments));
       }
@@ -2205,6 +2226,38 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     requestAnimationFrame(() => promptRef.current?.focus());
   };
 
+  const deleteConversation = (id: string) => {
+    if (running) return;
+    setConversationState((state) => {
+      const remaining = state.conversations.filter((conversation) => conversation.id !== id);
+      if (remaining.length) {
+        const activeId = state.activeId === id ? remaining[remaining.length - 1]!.id : state.activeId;
+        return { ...state, activeId, conversations: remaining };
+      }
+      const conversation = createConversation();
+      return { activeId: conversation.id, conversations: [conversation] };
+    });
+    setRenamingConversationId(null);
+  };
+
+  const commitConversationRename = () => {
+    const id = renamingConversationId;
+    const title = renameDraft.replace(/\s+/g, " ").trim().slice(0, 80);
+    setRenamingConversationId(null);
+    if (!id || !title) return;
+    setConversationState((state) => ({
+      ...state,
+      conversations: state.conversations.map((conversation) => conversation.id === id
+        ? { ...conversation, title, updatedAt: Date.now() }
+        : conversation),
+    }));
+  };
+
+  const startRenamingConversation = (id: string, currentTitle: string) => {
+    setRenamingConversationId(id);
+    setRenameDraft(currentTitle);
+  };
+
   const exportConversation = async () => {
     setConversationMenuOpen(false);
     if (!runs.length) return;
@@ -2245,7 +2298,22 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
               <button type="button" className="ai-conversation-new" role="menuitem" onClick={startConversation}><MessageSquarePlus size={14}/><span>新建对话</span></button>
               {conversationState.conversations.map((conversation) => {
               const selected = conversation.id === conversationState.activeId;
-              return <button type="button" role="menuitemradio" aria-checked={selected} className={selected ? "selected" : ""} key={conversation.id} onClick={() => switchConversation(conversation.id)}><span>{conversation.title}</span>{selected && <Check size={14}/>}</button>;
+              const renaming = renamingConversationId === conversation.id;
+              return <div className={`ai-conversation-item${selected ? " selected" : ""}`} role="menuitemradio" aria-checked={selected} key={conversation.id}>
+                {renaming
+                  ? <input className="ai-conversation-rename" value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onBlur={commitConversationRename} onKeyDown={(event) => {
+                      if (event.key === "Enter") commitConversationRename();
+                      else if (event.key === "Escape") setRenamingConversationId(null);
+                    }} autoFocus aria-label="重命名对话" maxLength={80}/>
+                  : <button type="button" className="ai-conversation-select" onClick={() => switchConversation(conversation.id)} title={conversation.title}>
+                    <span>{conversation.title}</span>
+                    <small>{conversation.runs.length ? formatConversationMenuTime(conversation.updatedAt) : "空"}</small>
+                  </button>}
+                {!renaming && <span className="ai-conversation-item-actions">
+                  <button type="button" className="ai-conversation-rename-button" title="重命名" aria-label={`重命名对话：${conversation.title}`} onClick={() => startRenamingConversation(conversation.id, conversation.title)}><PenLine size={12}/></button>
+                  <button type="button" className="ai-conversation-delete-button" title="删除此对话" aria-label={`删除对话：${conversation.title}`} disabled={running} onClick={() => deleteConversation(conversation.id)}><Trash2 size={12}/></button>
+                </span>}
+              </div>;
               })}
             </div>
             <button type="button" className="ai-conversation-clear" role="menuitem" disabled={!runs.length} onClick={clearConversation}><Trash2 size={14}/><span>清空当前对话</span></button>
