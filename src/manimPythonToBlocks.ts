@@ -343,6 +343,10 @@ function compileStatement(statement: string) {
 export function manimPythonToWorkspace(code: string) {
   const source = code.replace(/\r\n/g, "\n").trim();
   if (!source) throw new Error("Python 代码不能为空");
+  // 跨工作台隔离：硬件代码在 Manim 工作台永远无法转换，尽早给出明确指引。
+  if (/from\s+machine\s+import|import\s+machine\b|import\s+neopixel\b|import\s+dht\b/.test(source)) {
+    throw new Error("这是 MicroPython 硬件代码，当前是 Python（Manim）图形化工作台，无法转换。请让用户切换到硬件工作台后重新请求");
+  }
   const scene = extractConstruct(source);
   const statements = (scene ? splitStatements(scene.body) : splitStatements(source).filter((statement) => !/^from\s+manim\s+import|^import\s+manim/.test(statement)));
   if (!statements.length) throw new Error(scene ? "construct 方法是空的" : "没有可转换成积木的 Python 语句");

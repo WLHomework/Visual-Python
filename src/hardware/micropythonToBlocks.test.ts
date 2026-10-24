@@ -83,6 +83,11 @@ np.write()
     expect(() => micropythonToWorkspace("np.write()\n", "esp32-wroom")).toThrow(MicroPythonConversionError);
   });
 
+  it("rejects Manim programs with a cross-workbench error", () => {
+    expect(() => micropythonToWorkspace("from manim import *\n\nclass S(Scene):\n    def construct(self):\n        self.play(Create(Circle()))\n", "esp32-s3"))
+      .toThrow(/Manim.*硬件工作台|硬件工作台.*Manim/);
+  });
+
   it("recognizes NeoPixel init when the Pin carries a mode argument", () => {
     const workspace = load(`import neopixel
 from machine import Pin

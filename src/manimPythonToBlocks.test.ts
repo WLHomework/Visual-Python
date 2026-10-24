@@ -67,6 +67,11 @@ class Demo(Scene):
     expect(serialized).toContain("visual_python_manim_wait");
   });
 
+  it("rejects MicroPython hardware programs with a cross-workbench error", () => {
+    expect(() => manimPythonToWorkspace("from machine import Pin\n\nled = Pin(2, Pin.OUT)\nled.value(1)\n"))
+      .toThrow(/硬件工作台/);
+  });
+
   it("converts Rectangle assignments and animate scale plays", () => {
     const workspace = manimPythonToWorkspace(`from manim import *
 

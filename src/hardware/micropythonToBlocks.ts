@@ -606,6 +606,10 @@ function compileBody(lines: SourceLine[], start: number, indent: number, pins: M
 }
 
 export function micropythonToWorkspace(source: string, _boardId?: HardwareBoardId): object {
+  // 跨工作台隔离：Manim 代码在硬件工作台永远无法转换，尽早给出明确指引而不是晦涩的逐行报错。
+  if (/from\s+manim\s+import|import\s+manim\b|class\s+\w+\s*\(\s*Scene\s*\)|self\.play\s*\(/.test(source)) {
+    throw new MicroPythonConversionError("这是 Manim 动画代码，当前是 MicroPython 硬件工作台，无法转换。请让用户切换到 Python（Manim）工作台后重新请求");
+  }
   const lines = sourceLines(source);
   if (!lines.length) throw new MicroPythonConversionError("MicroPython 代码不能为空");
   const pins = new Map<string, string>();

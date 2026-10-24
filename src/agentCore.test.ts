@@ -27,6 +27,8 @@ describe("MicroPython 工作台提示词", () => {
     expect(prompt).toContain("apply_python_as_blocks");
     expect(prompt).toContain("apply_block_program");
     expect(prompt).not.toContain("apply_block_plan");
+    expect(prompt).toContain("跨工作台请求必须明确拒绝");
+    expect(prompt).toContain("禁止虚构结果");
   });
 
   it("纯 Python 工作台不附加硬件提示词", async () => {
