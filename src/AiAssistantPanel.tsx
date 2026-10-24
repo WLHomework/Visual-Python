@@ -2316,9 +2316,9 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
               </div>;
               })}
             </div>
-            <button type="button" className="ai-conversation-clear" role="menuitem" disabled={!runs.length} onClick={clearConversation}><Trash2 size={14}/><span>清空当前对话</span></button>
-            {aiConversationsAvailable() && <button type="button" role="menuitem" disabled={!runs.length} onClick={() => void exportConversation()}><Download size={14}/><span>导出对话</span></button>}
-            {aiConversationsAvailable() && <button type="button" role="menuitem" disabled={!conversationState.conversations.some((conversation) => conversation.runs.length)} onClick={() => void clearAllConversations()}><Trash2 size={14}/><span>清除全部会话记录</span></button>}
+            <button type="button" className="ai-conversation-clear ai-conversation-footer" role="menuitem" disabled={!runs.length} onClick={clearConversation}><Trash2 size={14}/><span>清空当前对话</span></button>
+            {aiConversationsAvailable() && <button type="button" className="ai-conversation-footer" role="menuitem" disabled={!runs.length} onClick={() => void exportConversation()}><Download size={14}/><span>导出对话</span></button>}
+            {aiConversationsAvailable() && <button type="button" className="ai-conversation-clear ai-conversation-footer" role="menuitem" disabled={!conversationState.conversations.some((conversation) => conversation.runs.length)} onClick={() => void clearAllConversations()}><Trash2 size={14}/><span>清除全部会话记录</span></button>}
           </div>}
         </div>
         <button type="button" onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={16}/></button>

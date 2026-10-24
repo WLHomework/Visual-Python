@@ -5845,6 +5845,27 @@ code.voiceover-clone-value { font-family: "Cascadia Code",Consolas,monospace; co
   color: var(--muted);
 }
 
+.ai-conversation-menu .ai-conversation-footer {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ai-conversation-menu .ai-conversation-footer:hover:not(:disabled) {
+  background: color-mix(in srgb,var(--surface-2),#2f9e8f 10%);
+  color: var(--text);
+}
+
 .ai-conversation-menu .ai-conversation-clear:hover:not(:disabled) {
   background: color-mix(in srgb,var(--surface-2),#ef5350 10%);
   color: #e57373;
@@ -7907,6 +7928,11 @@ body.resizing-hardware-preview * {
   justify-content: space-between;
   gap: 8px;
   padding: 0 6px 0 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
   text-align: left;
 }
 
@@ -7930,8 +7956,7 @@ body.resizing-hardware-preview * {
   padding-right: 4px;
 }
 
-.ai-conversation-menu-list .ai-conversation-item:hover .ai-conversation-item-actions,
-.ai-conversation-menu-list .ai-conversation-item.selected .ai-conversation-item-actions {
+.ai-conversation-menu-list .ai-conversation-item:hover .ai-conversation-item-actions {
   display: inline-flex;
 }
 
@@ -7942,8 +7967,11 @@ body.resizing-hardware-preview * {
   align-items: center;
   justify-content: center;
   padding: 0;
-  color: var(--muted);
+  border: 0;
   border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
 }
 
 .ai-conversation-menu-list .ai-conversation-item-actions button:hover:not(:disabled) {
