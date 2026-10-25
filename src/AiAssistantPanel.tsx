@@ -1,4 +1,4 @@
-import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { isValidElement, memo, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { AlertCircle, ArrowLeft, Download, MoreHorizontal, PenLine, Search, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
@@ -2314,7 +2314,18 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     applyAiAssistantSuggestion(suggestion, setPrompt, () => promptRef.current?.focus(), enqueuePrompt);
   };
 
-  return <section className="ai-assistant" aria-label="AI 编程助手" onDragEnter={handlePanelDragEnter} onDragOver={handlePanelDragOver} onDragLeave={handlePanelDragLeave} onDrop={handlePanelDrop}>
+  // 思考强度快捷键（Ctrl+T 循环切换）。挂在面板 section 上：仅焦点在面板内时生效，
+  // 不会干扰代码编辑器里的同名快捷键。
+  const handlePanelKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (event.key === "t" || event.key === "T")) {
+      event.preventDefault();
+      const efforts = Object.keys(reasoningEffortLabels) as AiReasoningEffort[];
+      const next = efforts[(efforts.indexOf(reasoningEffort) + 1) % efforts.length]!;
+      setReasoningEffort(saveAiReasoningEffort(next));
+    }
+  };
+
+  return <section className="ai-assistant" aria-label="AI 编程助手" onKeyDown={handlePanelKeyDown} onDragEnter={handlePanelDragEnter} onDragOver={handlePanelDragOver} onDragLeave={handlePanelDragLeave} onDrop={handlePanelDrop}>
     <header className="ai-assistant-header">
       <div className="ai-assistant-title"><span className="ai-assistant-icon"><Sparkles size={16}/></span><strong>AI 编程助手</strong><small title={activeConversation?.title}>{activeConversation?.title || "新对话"}</small></div>
       <div className="ai-assistant-actions">
@@ -2395,11 +2406,6 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
             </div>}
           </div>
           <span className="ai-composer-footer-spacer"/>
-          <div className="ai-effort-segments" role="radiogroup" aria-label="思考强度">
-            {(Object.keys(reasoningEffortLabels) as AiReasoningEffort[]).map((effort) => (
-              <button type="button" key={effort} role="radio" aria-checked={reasoningEffort === effort} className={reasoningEffort === effort ? "selected" : ""} title={`思考强度：${reasoningEffortLabels[effort]}`} onClick={() => setReasoningEffort(saveAiReasoningEffort(effort))}>{reasoningEffortLabels[effort]}</button>
-            ))}
-          </div>
           <div className="ai-composer-menu ai-composer-model-menu" ref={composerMenuRef}>
             <button ref={composerMenuTriggerRef} type="button" className={`ai-composer-control ai-composer-model ${composerMenuOpen ? "open" : ""}`} onClick={() => { setPermissionMenuOpen(false); setComposerMenuOpen((open) => !open); }} title={`${modelName} · ${agentMode === "plan" ? "计划模式" : "智能体模式"}`} aria-label={`模型与工作模式：${modelName}`} aria-haspopup="menu" aria-expanded={composerMenuOpen}>
               {agentMode === "plan" ? <ListChecks size={14}/> : <Sparkles size={14}/>}<span className="ai-composer-model-name">{modelName}</span><ChevronDown size={12}/>
@@ -2408,6 +2414,17 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
               <span className="ai-composer-menu-heading">工作模式</span>
               <button type="button" role="menuitemradio" aria-checked={agentMode === "agent"} className={agentMode === "agent" ? "selected" : ""} onClick={() => { setAgentMode("agent"); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><Sparkles size={14}/><span>智能体</span>{agentMode === "agent" && <Check size={13}/>}</button>
               <button type="button" role="menuitemradio" aria-checked={agentMode === "plan"} className={agentMode === "plan" ? "selected" : ""} onClick={() => { setAgentMode("plan"); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><ListChecks size={14}/><span>计划</span>{agentMode === "plan" && <Check size={13}/>}</button>
+              <span className="ai-composer-popover-separator"/>
+              <div className="ai-effort-slider-row">
+                <span className="ai-effort-slider-label">思考强度 <strong>{reasoningEffortLabels[reasoningEffort]}</strong></span>
+                <kbd title="按 Ctrl+T 循环切换">Ctrl+T</kbd>
+              </div>
+              <div className="ai-effort-slider">
+                <input type="range" min={0} max={Object.keys(reasoningEffortLabels).length - 1} step={1} value={Object.keys(reasoningEffortLabels).indexOf(reasoningEffort)} aria-label="思考强度" aria-valuetext={reasoningEffortLabels[reasoningEffort]} onChange={(event) => {
+                  const efforts = Object.keys(reasoningEffortLabels) as AiReasoningEffort[];
+                  setReasoningEffort(saveAiReasoningEffort(efforts[Number(event.target.value)] ?? "high"));
+                }}/>
+              </div>
               <span className="ai-composer-popover-separator"/>
               <button type="button" className="ai-composer-settings" onClick={() => { setComposerMenuOpen(false); onOpenSettings(); }}><Settings size={14}/><span>模型设置</span></button>
             </div>}
