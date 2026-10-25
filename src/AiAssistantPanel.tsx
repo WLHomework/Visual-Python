@@ -2395,16 +2395,19 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
             </div>}
           </div>
           <span className="ai-composer-footer-spacer"/>
+          <div className="ai-effort-segments" role="radiogroup" aria-label="思考强度">
+            {(Object.keys(reasoningEffortLabels) as AiReasoningEffort[]).map((effort) => (
+              <button type="button" key={effort} role="radio" aria-checked={reasoningEffort === effort} className={reasoningEffort === effort ? "selected" : ""} title={`思考强度：${reasoningEffortLabels[effort]}`} onClick={() => setReasoningEffort(saveAiReasoningEffort(effort))}>{reasoningEffortLabels[effort]}</button>
+            ))}
+          </div>
           <div className="ai-composer-menu ai-composer-model-menu" ref={composerMenuRef}>
-            <button ref={composerMenuTriggerRef} type="button" className={`ai-composer-control ai-composer-model ${composerMenuOpen ? "open" : ""}`} onClick={() => { setPermissionMenuOpen(false); setComposerMenuOpen((open) => !open); }} title={`${modelName} · ${agentMode === "plan" ? "计划模式" : "智能体模式"} · 思考强度${reasoningEffortLabels[reasoningEffort]}`} aria-label={`模型与思考强度：${modelName}，${reasoningEffortLabels[reasoningEffort]}`} aria-haspopup="menu" aria-expanded={composerMenuOpen}>
-              {agentMode === "plan" ? <ListChecks size={14}/> : <Sparkles size={14}/>}<span className="ai-composer-model-name">{modelName}</span><small>{reasoningEffortLabels[reasoningEffort]}</small><ChevronDown size={12}/>
+            <button ref={composerMenuTriggerRef} type="button" className={`ai-composer-control ai-composer-model ${composerMenuOpen ? "open" : ""}`} onClick={() => { setPermissionMenuOpen(false); setComposerMenuOpen((open) => !open); }} title={`${modelName} · ${agentMode === "plan" ? "计划模式" : "智能体模式"}`} aria-label={`模型与工作模式：${modelName}`} aria-haspopup="menu" aria-expanded={composerMenuOpen}>
+              {agentMode === "plan" ? <ListChecks size={14}/> : <Sparkles size={14}/>}<span className="ai-composer-model-name">{modelName}</span><ChevronDown size={12}/>
             </button>
-            {composerMenuOpen && <div className="ai-composer-popover ai-composer-model-popover" role="menu" aria-label="模型、模式与思考强度">
+            {composerMenuOpen && <div className="ai-composer-popover ai-composer-model-popover" role="menu" aria-label="模型与工作模式">
               <span className="ai-composer-menu-heading">工作模式</span>
               <button type="button" role="menuitemradio" aria-checked={agentMode === "agent"} className={agentMode === "agent" ? "selected" : ""} onClick={() => { setAgentMode("agent"); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><Sparkles size={14}/><span>智能体</span>{agentMode === "agent" && <Check size={13}/>}</button>
               <button type="button" role="menuitemradio" aria-checked={agentMode === "plan"} className={agentMode === "plan" ? "selected" : ""} onClick={() => { setAgentMode("plan"); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><ListChecks size={14}/><span>计划</span>{agentMode === "plan" && <Check size={13}/>}</button>
-              <span className="ai-composer-menu-heading">思考强度</span>
-              {(Object.keys(reasoningEffortLabels) as AiReasoningEffort[]).map((effort) => <button type="button" role="menuitemradio" aria-checked={reasoningEffort === effort} className={`ai-composer-menu-plain ${reasoningEffort === effort ? "selected" : ""}`} key={effort} onClick={() => { setReasoningEffort(saveAiReasoningEffort(effort)); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><span>{reasoningEffortLabels[effort]}</span>{reasoningEffort === effort && <Check size={13}/>}</button>)}
               <span className="ai-composer-popover-separator"/>
               <button type="button" className="ai-composer-settings" onClick={() => { setComposerMenuOpen(false); onOpenSettings(); }}><Settings size={14}/><span>模型设置</span></button>
             </div>}

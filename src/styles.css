@@ -8152,3 +8152,46 @@ body.resizing-hardware-preview * {
   opacity: .45;
   cursor: default;
 }
+
+/* 思考强度分段选择器：胶囊容器，选中段实心青绿（渐变），带滑块过渡 */
+.ai-effort-segments {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface-2);
+}
+
+.ai-effort-segments button {
+  position: relative;
+  height: 100%;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  transition: color .18s ease;
+}
+
+.ai-effort-segments button:hover:not(.selected) {
+  color: var(--text);
+}
+
+.ai-effort-segments button.selected {
+  color: #fff;
+  background: linear-gradient(90deg, #2f9e8f 0%, #2f86c8 100%);
+  box-shadow: 0 1px 5px rgba(47, 158, 143, .35);
+  transition: background-color .18s ease, box-shadow .18s ease;
+}
+
+.ai-effort-segments button:focus-visible {
+  outline: 2px solid #2f9e8f;
+  outline-offset: 1px;
+}
