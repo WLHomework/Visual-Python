@@ -2420,6 +2420,9 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
                 <kbd title="按 Ctrl+T 循环切换">Ctrl+T</kbd>
               </div>
               <div className="ai-effort-slider">
+                <div className="ai-effort-slider-track" aria-hidden="true">
+                  <span className="ai-effort-slider-fill" style={{ width: `calc((100% - 18px) * ${Object.keys(reasoningEffortLabels).indexOf(reasoningEffort) / (Object.keys(reasoningEffortLabels).length - 1)} + 9px)` }}/>
+                </div>
                 <input type="range" min={0} max={Object.keys(reasoningEffortLabels).length - 1} step={1} value={Object.keys(reasoningEffortLabels).indexOf(reasoningEffort)} aria-label="思考强度" aria-valuetext={reasoningEffortLabels[reasoningEffort]} onChange={(event) => {
                   const efforts = Object.keys(reasoningEffortLabels) as AiReasoningEffort[];
                   setReasoningEffort(saveAiReasoningEffort(efforts[Number(event.target.value)] ?? "high"));
