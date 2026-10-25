@@ -124,7 +124,6 @@ export type AiAgentResult = {
   tokenUsage?: AiAgentTokenUsage;
   mode?: AiAgentMode;
   intent?: "chat" | "inspect" | "execute";
-  planPrompt?: string;
   taskPlan?: AiAgentPlanStep[];
   taskChange?: AiTaskChangeSnapshot;
   clarification?: AiClarification;
@@ -184,6 +183,7 @@ export type AgentRunResult = {
   summary: string;
   toolCallCount: number;
   tokenUsage: AgentTokenUsage;
+  taskPlan?: AiAgentPlanStep[];
   clarification?: AgentClarification;
   followUpSuggestions?: AiFollowUpSuggestion[];
 };
@@ -192,13 +192,14 @@ export type AgentProgress = {
   phase: "preparing" | "thinking" | "executing" | "observing" | "responding" | "completed";
   label: string;
   tokenUsage?: AgentTokenUsage;
+  taskPlan?: AiAgentPlanStep[];
 };
 
 export type RunVisualPythonAgentArgs = {
   prompt: string;
   attachments?: AiImageAttachment[];
   history?: AgentConversationTurn[];
-  mode?: AgentMode;
+  initialPlan?: AiAgentPlanStep[];
   reasoningEffort?: AiReasoningEffort;
   conversationTargetId?: string;
   host: AgentHost;

@@ -4,7 +4,7 @@ import { coreAgentTools, isCacheableTool } from "./agentV2/toolRegistry";
 import { createAgentMemory, rememberAgentDecision, rememberAgentEvidence, serializeAgentMemory } from "./agentV2/memory";
 import { appendAgentTurn, buildAgentRequestMessages, compactAgentAssistantMessage, compactAgentToolResult, createAgentRequestContext, graphicalCatalogInstructions } from "./agentV2/context";
 import { createAgentTokenUsage, mergeProviderTokenUsage, recordAgentRequest, recordAgentToolResult } from "./agentV2/tokenLedger";
-import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
+import type { AiAgentPlanStep,  AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import { publishLiveStream } from "./agentV2/liveStream";
 import { isStreamingCodeTool, previewCodeFromStreamingTool } from "./agentV2/streamingCodePreview";
@@ -223,7 +223,7 @@ function isFailedToolResult(result: Record<string, unknown>): boolean {
   return Boolean(validation && typeof validation === "object" && !Array.isArray(validation) && (validation as Record<string, unknown>).valid === false);
 }
 
-export async function runAgentCore({ prompt, attachments, history = [], mode = "agent", reasoningEffort = "high", host, onEvent, onProgress, permissionMode, onPermissionRequest, signal, transport = chatCompletionsTransport }: RunVisualPythonAgentArgs & { transport?: AgentModelTransport }): Promise<AgentRunResult> {
+export async function runAgentCore({ prompt, attachments, history = [], initialPlan, reasoningEffort = "high", host, onEvent, onProgress, permissionMode, onPermissionRequest, signal, transport = chatCompletionsTransport }: RunVisualPythonAgentArgs & { transport?: AgentModelTransport }): Promise<AgentRunResult> {
   if (!prompt.trim() && !attachments?.some((attachment) => attachment.sendable && attachment.dataUrl)) throw new Error("请输入任务或添加可发送的图片");
   const memory = createAgentMemory(history);
   const capabilities = host.getCapabilities?.() ?? [];
@@ -242,7 +242,10 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
 - 跨工作台请求必须明确拒绝：用户要求开发板/硬件任务（machine、MicroPython、GPIO、NeoPixel、DHT 等）时，直接告知当前是 Python（Manim）工作台无法生成，请用户切换到硬件工作台后重新请求；不要为此生成任何代码。本轮需要产出图形化程序时，只有写入工具成功返回后才能报告完成，禁止虚构结果。`
     : "";
   const requestContext = createAgentRequestContext({
-    system: `${systemRules}${imageContextRules}${workbenchPromptRules(snapshot)}${pluginAuthoringRules}${capabilityRules}${workspaceConstructionRules}\n\n当前模式：${mode === "plan" ? "计划模式，只能读取和分析，不得修改工程" : "智能体模式，可以执行必要的工程操作"}`,
+    system: `${systemRules}${imageContextRules}${workbenchPromptRules(snapshot)}${pluginAuthoringRules}${capabilityRules}${workspaceConstructionRules}\n\n任务规划（由你自主决策）：
+- 简单任务（2-3 个工具调用内可完成）直接执行，不要列清单。
+- 复杂、多步或需求含糊的任务：先调用 update_task_plan 登记 3-6 条编号步骤（首条 in_progress，其余 pending），然后立即在同一轮内开始执行；每完成一步就把对应步骤标为 completed、下一步标为 in_progress。不要列完计划就停下等待确认。
+- 计划要具体可执行（包含对象名、参数、目标文件），不要空泛套话。`,
     history,
     prompt,
     snapshot,
@@ -251,6 +254,7 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
     attachments,
   });
   const usage = createAgentTokenUsage();
+  const taskPlan: AiAgentPlanStep[] = (initialPlan ?? []).map((step) => ({ ...step }));
   let requestMessages = buildAgentRequestMessages(requestContext);
   const getTaskAgentTools = () => {
     const allTools = [...coreAgentTools, ...(host.getTools?.() ?? [])];
@@ -264,7 +268,7 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
       if ((workspaceMode === "visual" || workspaceMode === "split") && blockWorkspaceCodeMutationTools.has(name)) return false;
       return true;
     });
-    return mode === "plan" ? activeTools.filter((tool) => tool.readOnly) : activeTools;
+    return activeTools;
   };
   let taskAgentTools = getTaskAgentTools();
   const toolLabel = (name: string) => toolByName(taskAgentTools, name)?.label || name;
@@ -293,7 +297,7 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
   const emit = (event: Omit<AgentActivityEvent, "id"> & { id?: string }) => {
     onEvent({ ...event, id: event.id || createId(event.kind, sequence++) });
   };
-  const reportProgress = (progress: AgentProgress) => onProgress?.({ ...progress, tokenUsage: progress.tokenUsage || usage });
+  const reportProgress = (progress: AgentProgress) => onProgress?.({ ...progress, taskPlan: taskPlan.length ? taskPlan : undefined, tokenUsage: progress.tokenUsage || usage });
   const pushToolResponse = (messages: AiChatMessage[], toolCallId: string, content: string) => {
     messages.push({ role: "tool", toolCallId, content });
     recordAgentToolResult(usage, content);
@@ -386,7 +390,7 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
       reportProgress({ phase: "responding", label: "整理已验证的结果" });
       emit({ id: messageId, kind: "message", status: "done", title: finalSummary, markdown: finalSummary });
       reportProgress({ phase: "completed", label: "任务完成" });
-      return { summary: finalSummary, toolCallCount, tokenUsage: usage, ...(finalResponse.suggestions.length ? { followUpSuggestions: finalResponse.suggestions } : {}) };
+      return { summary: finalSummary, toolCallCount, tokenUsage: usage, ...(taskPlan.length ? { taskPlan } : {}), ...(finalResponse.suggestions.length ? { followUpSuggestions: finalResponse.suggestions } : {}) };
     }
     emit({ id: messageId, kind: "message", status: "done", title: content.trim(), markdown: content.trim() });
     const turnMessages: AiChatMessage[] = [{ role: "assistant", content: compactAgentAssistantMessage(content), toolCalls: calls }];
@@ -460,8 +464,8 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
               ? "该操作会在宿主中运行插件草稿的 JavaScript，用于验证激活、工具箱和生成的代码。"
               : "该操作会修改工程或启动任务。",
         })));
-      if (mode === "plan" || permissionDenied) {
-        const denied = { ok: false, error: mode === "plan" ? "计划模式禁止执行修改或运行操作" : "用户拒绝了这次操作" };
+      if (permissionDenied) {
+        const denied = { ok: false, error: "用户拒绝了这次操作" };
         recordFailure(fingerprint, call.function.name, denied.error, false);
         emit({ id: toolId, kind: "tool", status: "error", title: toolLabel(call.function.name), detail: denied.error, toolName: call.function.name, result: denied, resultText: JSON.stringify(denied) });
         pushToolResponse(turnMessages, call.id, JSON.stringify(denied));
@@ -469,6 +473,28 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
       }
       try {
         let result: Record<string, unknown>;
+        if (call.function.name === "update_task_plan") {
+          const steps = Array.isArray(args.steps) ? args.steps.flatMap((candidate) => {
+            const step = candidate as Partial<AiAgentPlanStep>;
+            return typeof step?.step === "string" && step.step.trim() && (step.status === "pending" || step.status === "in_progress" || step.status === "completed")
+              ? [{ step: step.step.trim().slice(0, 120), status: step.status }]
+              : [];
+          }) as AiAgentPlanStep[]
+            : [];
+          if (!steps.length) {
+            const denied = { ok: false, error: "steps 至少需要一条有效的任务步骤（step + status）" };
+            recordFailure(fingerprint, call.function.name, denied.error, false);
+            emit({ id: toolId, kind: "tool", status: "error", title: toolLabel(call.function.name), detail: denied.error, toolName: call.function.name, result: denied, resultText: JSON.stringify(denied) });
+            pushToolResponse(turnMessages, call.id, JSON.stringify(denied));
+            continue;
+          }
+          taskPlan.splice(0, taskPlan.length, ...steps);
+          const result = { ok: true, changed: true, steps };
+          reportProgress({ phase: "thinking", label: "任务清单已更新" });
+          emit({ id: toolId, kind: "decision", status: "done", title: "更新任务清单", detail: steps.map((step) => `${step.status === "completed" ? "✓" : step.status === "in_progress" ? "▶" : "·"} ${step.step}`).join("\n"), toolName: call.function.name, result, resultText: JSON.stringify(result) });
+          pushToolResponse(turnMessages, call.id, JSON.stringify(result));
+          continue;
+        }
         if (call.function.name === "ask_user") result = { ok: true, question: args.question, options: args.options };
         else result = await host.executeTool(call.function.name, args, signal);
         const resultText = serializeResult(result);
@@ -504,7 +530,7 @@ export async function runAgentCore({ prompt, attachments, history = [], mode = "
           clarification = question;
           emit({ kind: "question", status: "done", title: question.question, markdown: `${question.question}\n\n${question.options.map((item, index) => `${index + 1}. ${item}`).join("\n")}`, result: question as unknown as Record<string, unknown> });
           reportProgress({ phase: "completed", label: "等待用户选择" });
-          return { summary: question.question, toolCallCount, tokenUsage: usage, clarification };
+          return { summary: question.question, toolCallCount, tokenUsage: usage, ...(taskPlan.length ? { taskPlan } : {}), clarification };
         }
         if (currentTool?.longRunning && isExecutionStarted(result) && host.observeExecution) {
           const observationId = `observation-${round}-${toolCallCount}`;

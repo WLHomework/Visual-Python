@@ -9,7 +9,7 @@ import { pluginAuthoringRules } from "./agentV2/pluginAuthoringPrompt";
 import { coreAgentTools, isCacheableTool } from "./agentV2/toolRegistry";
 import { buildCodexPrompt } from "./codexPrompt";
 import { createDynamicToolsSignature, getCodexThreadWithTools } from "./codexThreadStore";
-import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTokenUsage, AgentTool, RunVisualPythonAgentArgs } from "./agentV2/types";
+import type { AgentActivityEvent, AgentClarification, AgentProgress, AgentRunResult, AgentTokenUsage, AgentTool, AiAgentPlanStep, RunVisualPythonAgentArgs } from "./agentV2/types";
 
 export type CodexAgentTransport = {
   runTurn: (prompt: string, options: CodexRunTurnOptions) => Promise<CodexTurnResult>;
@@ -76,7 +76,7 @@ function toolsForRun(args: RunVisualPythonAgentArgs): AgentTool[] {
   const workspaceMode = snapshot.workspaceMode === "visual" || snapshot.workspaceMode === "split" ? snapshot.workspaceMode : "code";
   return uniqueTools([...coreAgentTools, ...(args.host.getTools?.() || [])])
     .filter((tool) => !tool.workspaceModes?.length || tool.workspaceModes.includes(workspaceMode))
-    .filter((tool) => args.mode !== "plan" || tool.readOnly);
+;
 }
 
 function toDynamicTool(tool: AgentTool): CodexDynamicTool {
@@ -174,7 +174,8 @@ export async function runCodexVisualPythonAgent(
   const maxRepeatedFailures = 3;
 
   const emit = (event: Omit<AgentActivityEvent, "id"> & { id?: string }) => args.onEvent({ ...event, id: event.id || `codex-${Date.now().toString(36)}-${sequence++}` });
-  const progress = (value: AgentProgress) => args.onProgress?.({ ...value, tokenUsage: usage });
+  const progress = (value: AgentProgress) => args.onProgress?.({ ...value, taskPlan: taskPlan.length ? taskPlan : undefined, tokenUsage: usage });
+  const taskPlan: AiAgentPlanStep[] = (args.initialPlan ?? []).map((step) => ({ ...step }));
   const lastUiUpdate = new Map<string, number>();
   const shouldEmitUi = (key: string) => {
     const now = Date.now();
@@ -260,6 +261,27 @@ export async function runCodexVisualPythonAgent(
     }
     try {
       let result: Record<string, unknown>;
+      if (toolName === "update_task_plan") {
+        const steps = Array.isArray(toolArgs.steps) ? toolArgs.steps.flatMap((candidate) => {
+          const step = candidate as Partial<AiAgentPlanStep>;
+          return typeof step?.step === "string" && step.step.trim() && (step.status === "pending" || step.status === "in_progress" || step.status === "completed")
+            ? [{ step: step.step.trim().slice(0, 120), status: step.status }]
+            : [];
+        }) as AiAgentPlanStep[]
+          : [];
+        if (!steps.length) {
+          const denied = { ok: false, error: "steps 至少需要一条有效的任务步骤（step + status）" };
+          emit({ id: toolId, kind: "tool", status: "error", title: tool.label, detail: denied.error, toolName, result: denied, resultText: JSON.stringify(denied) });
+          await transport.respondToServerRequest(request.id, { success: false, contentItems: [{ type: "inputText", text: JSON.stringify(denied) }] });
+          return;
+        }
+        taskPlan.splice(0, taskPlan.length, ...steps);
+        const result = { ok: true, changed: true, steps };
+        progress({ phase: "thinking", label: "任务清单已更新" });
+        emit({ id: toolId, kind: "decision", status: "done", title: "更新任务清单", detail: steps.map((step) => `${step.status === "completed" ? "✓" : step.status === "in_progress" ? "▶" : "·"} ${step.step}`).join("\n"), toolName, result, resultText: JSON.stringify(result) });
+        await transport.respondToServerRequest(request.id, { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(result) }] });
+        return;
+      }
       if (toolName === "ask_user") {
         const question = typeof toolArgs.question === "string" ? toolArgs.question : "需要你的选择";
         const options = Array.isArray(toolArgs.options) ? toolArgs.options.filter((item): item is string => typeof item === "string").slice(0, 4) : [];
@@ -327,9 +349,7 @@ export async function runCodexVisualPythonAgent(
 
   progress({ phase: "preparing", label: "准备当前工程上下文", tokenUsage: usage });
   try {
-    const developerInstructions = args.mode === "plan"
-      ? `当前是计划模式，只能读取和分析，不得修改、运行或保存工程。${imageContextInstruction}${pluginAuthoringRules}${workbenchInstructions(snapshot)}`
-      : `当前是智能体模式。所有工程操作必须使用 Visual Python 动态工具。${imageContextInstruction}${pluginAuthoringRules}${workbenchInstructions(snapshot)}${graphicalWorkspace ? `\n${graphicalInstructions(promptBlockCatalog)}` : ""}`;
+    const developerInstructions = `当前是智能体模式。所有工程操作必须使用 Visual Python 动态工具。${imageContextInstruction}${pluginAuthoringRules}${workbenchInstructions(snapshot)}${graphicalWorkspace ? `\n${graphicalInstructions(promptBlockCatalog)}` : ""}`;
     if (!existingThread && (args.history?.length ?? 0) > 0) {
       emit({ id: "context-handoff", kind: "observation", status: "done", title: "已开启新的服务端线程，本次任务附带最近对话摘要" });
     }
@@ -371,6 +391,7 @@ export async function runCodexVisualPythonAgent(
     summary: finalResponse.content || "任务已完成。",
     toolCallCount,
     tokenUsage: usage,
+    ...(taskPlan.length ? { taskPlan } : {}),
     clarification,
     ...(finalResponse.suggestions.length ? { followUpSuggestions: finalResponse.suggestions } : {}),
   };

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentClockTime, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, summarizeAgentRun, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody, groupConversationsByRecency, conversationMatchesQuery } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, finalizeAgentRunActivities, formatAgentClockTime, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, summarizeAgentRun, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody, groupConversationsByRecency, conversationMatchesQuery } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
 import { estimateTokens, tokenBudgets } from "./agentV2/tokenEstimate";
@@ -1214,34 +1214,8 @@ describe("AI assistant token usage", () => {
   });
 });
 
-describe("AI assistant Plan mode", () => {
-  it("extracts concise execution steps from reviewed Markdown", () => {
-    expect(extractPlanSteps("## 实施计划\n\n1. **读取**当前代码结构\n2. 定点修改动画\n3. 检查并渲染")).toEqual([
-      "读取当前代码结构",
-      "定点修改动画",
-      "检查并渲染",
-    ]);
-    expect(extractPlanSteps("- [x] 分析现状\n- [ ] 修改代码\n- [ ] 验证结果")).toEqual(["分析现状", "修改代码", "验证结果"]);
-  });
-
-  it("builds a bounded execution request from the reviewed plan", () => {
-    const request = buildPlanExecutionRequest("重构当前动画", "1. 读取结构\n2. 定点修改\n3. 验证场景");
-    expect(request).toContain("原始任务：\n重构当前动画");
-    expect(request).toContain("实施计划：\n1. 读取结构");
-    expect(request).toContain("不要重新输出计划");
-
-    const longRequest = buildPlanExecutionRequest("需".repeat(30_000), "计划".repeat(30_000));
-    expect(longRequest.length).toBeLessThan(50_000);
-    expect(longRequest).toContain("[内容已截断]");
-  });
-
+describe("AI assistant task plan resume", () => {
   it("preserves completed steps when preparing a failed task for resume", () => {
-    const initial = createInitialTaskPlan(["读取结构", "修改动画", "验证场景"]);
-    expect(initial).toEqual([
-      { step: "读取结构", status: "in_progress" },
-      { step: "修改动画", status: "pending" },
-      { step: "验证场景", status: "pending" },
-    ]);
     expect(prepareTaskPlanForResume([
       { step: "读取结构", status: "completed" },
       { step: "修改动画", status: "in_progress" },

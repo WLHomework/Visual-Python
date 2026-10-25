@@ -17,6 +17,7 @@ function tool(name: string, description: string, parameters: Record<string, unkn
 }
 
 export const visualPythonTools: AiChatToolDefinition[] = [
+  tool("update_task_plan", "创建或更新当前任务的执行清单，让用户实时看到进度。复杂任务开始时登记 3-6 条步骤，每完成一步就更新状态；简单任务不要使用。", objectSchema({ steps: { type: "array", minItems: 1, maxItems: 10, items: objectSchema({ step: text, status: { type: "string", enum: ["pending", "in_progress", "completed"] } }, ["step", "status"]) } }, ["steps"])),
   tool("ask_user", "当任务存在会显著影响结果的歧义时向用户提问。普通视觉细节和实现细节由 Agent 自行判断。", objectSchema({ question: { type: "string", minLength: 1, maxLength: 500 }, options: { type: "array", minItems: 2, maxItems: 4, items: text } }, ["question", "options"])),
   tool("web_search", "搜索公开互联网，查找当前工程之外的最新信息、官方文档、版本说明、API 变化、新闻或事实依据。是否需要联网由你根据任务判断：项目内已有代码、普通编程问题和稳定知识不要搜索；涉及最新版本、实时信息或不确定的外部事实时先搜索。返回标题、摘要和 URL，引用时保留 URL。", objectSchema({ query: { type: "string", minLength: 1, maxLength: 300, description: "简洁、具体的搜索查询。" }, maxResults: { type: "integer", minimum: 1, maximum: 10, description: "最多返回几条结果，默认 5。" } }, ["query"])),
   tool("get_context", "读取当前工程、文档、工作区、运行状态和环境摘要。修改前或状态不确定时使用。", objectSchema({ includeResources: { type: "boolean" } })),
@@ -48,6 +49,7 @@ export const visualPythonTools: AiChatToolDefinition[] = [
 ];
 
 const labels: Record<string, string> = {
+  update_task_plan: "更新任务清单",
   ask_user: "询问用户",
   web_search: "搜索网页",
   get_context: "读取当前工程",

@@ -25,7 +25,7 @@ import { NewProjectDialog } from "./profiles/NewProjectDialog";
 import { useHardwareRunner } from "./profiles/useHardwareRunner";
 import { getWorkbenchProfile, isHardwareWorkbench, listWorkbenchProfiles, readStoredWorkbenchProfileId, storeWorkbenchProfileId, type WorkbenchProfile, type WorkbenchProfileId } from "./profiles/workbenchProfile";
 import { createVisualPythonHostAdapter } from "./agentV2/hostAdapter";
-import type { AgentActivityEvent, AgentTokenUsage, AiAgentActivity, AiAgentMode, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
+import type { AgentActivityEvent, AgentTokenUsage, AiAgentActivity, AiAgentPermissionRequest, AiAgentPlanStep, AiAgentProgress, AiAgentResult, AiAgentToolName, AiCodeChangeSnapshot, AiConversationTurn, AiTaskChangeSnapshot } from "./agentV2/types";
 import { resolveAgentEventText } from "./agentEvents";
 import { allBlocklyToolNames, blocklyAgentTools, createBlocklyToolExecutor, describeBlocklyBlockContract } from "./agentV2/blocklyHost";
 import { createPluginDraftStore, createPluginDraftStorePersistence, validatePluginDraft, type PluginDraft, type PluginDraftStore } from "./agentV2/pluginAuthoring";
@@ -5531,7 +5531,7 @@ export default function App() {
     attachments,
     history,
     conversationId,
-    agentMode,
+    initialPlan,
     reasoningEffort,
     onActivity,
     onProgress,
@@ -5543,7 +5543,6 @@ export default function App() {
     attachments?: AiImageAttachment[];
     history: AiConversationTurn[];
     conversationId: string;
-    agentMode: AiAgentMode;
     reasoningEffort: AiReasoningEffort;
     initialPlan?: AiAgentPlanStep[];
     onActivity: (activity: AiAgentActivity) => void;
@@ -5992,7 +5991,7 @@ export default function App() {
         prompt,
         attachments,
         history,
-        mode: agentMode,
+        initialPlan,
         reasoningEffort,
         onEvent: reportAgentV2Event,
         onProgress: reportAgentV2Progress,
@@ -6010,8 +6009,7 @@ export default function App() {
         toolCallCount: agentResult.toolCallCount,
         lineCount: sourceCodeRef.current ? sourceCodeRef.current.split("\n").length : 0,
         tokenUsage: agentResult.tokenUsage,
-        mode: agentMode,
-        intent: agentMode === "plan" ? "inspect" : "execute",
+        intent: "execute",
         clarification: agentResult.clarification,
         ...(agentResult.followUpSuggestions?.length
           ? { followUpSuggestions: agentResult.followUpSuggestions }

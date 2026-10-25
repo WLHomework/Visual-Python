@@ -119,7 +119,7 @@ describe("runCodexVisualPythonAgent", () => {
     vi.unstubAllGlobals();
   });
 
-  it("injects the shared plugin authoring rules into the Codex instructions in both modes", async () => {
+  it("injects the shared plugin authoring rules into the Codex instructions", async () => {
     const instructions: string[] = [];
     const host: AgentHost = {
       getSnapshot: () => ({ workspaceMode: "code" }),
@@ -137,14 +137,11 @@ describe("runCodexVisualPythonAgent", () => {
     };
 
     await runCodexVisualPythonAgent(args(host, vi.fn()), transport);
-    await runCodexVisualPythonAgent({ ...args(host, vi.fn()), mode: "plan" as const }, transport);
 
-    expect(instructions).toHaveLength(2);
+    expect(instructions).toHaveLength(1);
     expect(instructions[0]).toContain("插件开发规则");
     expect(instructions[0]).toContain("inspect_plugin_api");
     expect(instructions[0]).toContain("宿主会请求用户确认");
-    expect(instructions[1]).toContain("计划模式");
-    expect(instructions[1]).toContain("插件开发规则");
   });
 
   it("keeps assistant text from every message item in the final summary", async () => {

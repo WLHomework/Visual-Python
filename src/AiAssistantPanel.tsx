@@ -47,7 +47,6 @@ type RunAgentArgs = {
   attachments?: AiImageAttachment[];
   history: AiConversationTurn[];
   conversationId: string;
-  agentMode: AiAgentMode;
   reasoningEffort: AiReasoningEffort;
   initialPlan?: AiAgentPlanStep[];
   onActivity: (activity: AiAgentActivity) => void;
@@ -491,39 +490,6 @@ export function trimAiConversationHistory(turns: AiConversationTurn[]): AiConver
     tokens += turnTokens;
   }
   return selected;
-}
-
-export function buildPlanExecutionRequest(originalPrompt: string, plan: string): string {
-  const truncate = (value: string, limit: number) => value.length > limit ? `${value.slice(0, limit)}\n[内容已截断]` : value;
-  return [
-    "请按照以下已审阅计划执行原始任务。直接实施、检查并修复，不要重新输出计划。",
-    `原始任务：\n${truncate(originalPrompt.trim(), 16_000)}`,
-    `实施计划：\n${truncate(plan.trim(), 30_000)}`,
-  ].join("\n\n");
-}
-
-export function extractPlanSteps(markdown: string): string[] {
-  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
-  const collect = (pattern: RegExp) => lines.flatMap((line) => {
-    const match = line.match(pattern);
-    if (!match) return [];
-    const step = match[1]
-      .replace(/^\[[ xX]\]\s*/, "")
-      .replace(/[*_`~]/g, "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 120);
-    return step ? [step] : [];
-  });
-  const numbered = collect(/^\s*\d+[.)、]\s+(.+)$/);
-  const candidates = numbered.length >= 2 ? numbered : collect(/^\s*[-*+]\s+(.+)$/);
-  return [...new Set(candidates)].slice(0, 10);
-}
-
-export function createInitialTaskPlan(steps: string[]): AiAgentPlanStep[] {
-  const normalized = [...new Set(steps.map((step) => step.replace(/\s+/g, " ").trim().slice(0, 120)).filter(Boolean))].slice(0, 10);
-  if (normalized.length < 2) return [];
-  return normalized.map((step, index) => ({ step, status: index === 0 ? "in_progress" : "pending" }));
 }
 
 export function prepareTaskPlanForResume(steps: AiAgentPlanStep[]): AiAgentPlanStep[] {
@@ -1699,7 +1665,6 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<AiImagePreview | null>(null);
   const [dropDepth, setDropDepth] = useState(0);
-  const [agentMode, setAgentMode] = useState<AiAgentMode>("agent");
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<AiReasoningEffort>(() => getAiReasoningEffort());
   const [permissionMode, setPermissionMode] = useState<AiAgentPermissionMode>(() => getAiAgentPermissionMode());
@@ -2047,7 +2012,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     }));
   };
 
-  const runAgent = async (nextPrompt = prompt, excludedRunId?: number, existingRunId?: number, visiblePrompt = nextPrompt, runMode: AiAgentMode = agentMode, initialPlan: AiAgentPlanStep[] = [], nextAttachments?: AiImageAttachment[]): Promise<void> => {
+  const runAgent = async (nextPrompt = prompt, excludedRunId?: number, existingRunId?: number, visiblePrompt = nextPrompt, runMode: AiAgentMode = "agent", initialPlan: AiAgentPlanStep[] = [], nextAttachments?: AiImageAttachment[]): Promise<void> => {
     const normalizedPrompt = nextPrompt.trim();
     const existingRun = existingRunId === undefined ? undefined : runsRef.current.find((run) => run.id === existingRunId);
     const runEffort = resolveRunEffort(existingRun, reasoningEffort);
@@ -2101,7 +2066,6 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         attachments: runAttachments,
         history,
         conversationId: conversationState.activeId,
-        agentMode: runMode,
         reasoningEffort: runEffort,
         ...(initialPlan.length ? { initialPlan } : {}),
         onActivity: (activity) => updateActivity(id, activity),
@@ -2157,10 +2121,10 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     const normalizedPrompt = nextPrompt.trim();
     if (!canSubmitAiPrompt(normalizedPrompt, nextAttachments)) return;
     if (!runsRef.current.some((run) => run.status === "running")) {
-      void runAgent(normalizedPrompt, undefined, undefined, normalizedPrompt, agentMode, [], nextAttachments);
+      void runAgent(normalizedPrompt, undefined, undefined, normalizedPrompt, "agent", [], nextAttachments);
       return;
     }
-    setRuns((items) => [...items, { id: runId.current++, prompt: normalizedPrompt || `图片附件（${nextAttachments.length} 张）`, mode: agentMode, effort: reasoningEffort, activities: [], status: "queued", attachments: nextAttachments }]);
+    setRuns((items) => [...items, { id: runId.current++, prompt: normalizedPrompt || `图片附件（${nextAttachments.length} 张）`, mode: "agent", effort: reasoningEffort, activities: [], status: "queued", attachments: nextAttachments }]);
     setPrompt("");
     setPendingAttachments([]);
   };
@@ -2177,20 +2141,11 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
     return pendingAttachments.length ? pendingAttachments : run.attachments;
   };
   const retryBlocked = (run: AgentRun) => Boolean(run.attachments?.some((attachment) => !attachment.sendable) && !pendingAttachments.some((attachment) => attachment.sendable && attachment.dataUrl));
-  const executePlan = (run: AgentRun) => {
-    const result = run.result;
-    if (running || result?.mode !== "plan" || !result.planPrompt || result.clarification) return;
-    const attachments = attachmentsForFollowUp(run);
-    if (attachments === null) return;
-    setAgentMode("agent");
-    void runAgent(buildPlanExecutionRequest(result.planPrompt, result.summary), undefined, undefined, "执行计划", "agent", createInitialTaskPlan(extractPlanSteps(result.summary)), attachments || undefined);
-  };
   const resumeRun = (run: AgentRun) => {
     const resumedPlan = prepareTaskPlanForResume(run.progress?.taskPlan || []);
     if (running || resumedPlan.length < 2) return;
     const attachments = attachmentsForFollowUp(run);
     if (attachments === null) return;
-    setAgentMode("agent");
     void runAgent(buildTaskResumeRequest(run.request || run.prompt, resumedPlan), undefined, undefined, "继续执行", "agent", resumedPlan, attachments || undefined);
   };
   const removeQueuedRun = (id: number) => setRuns((items) => items.filter((run) => run.id !== id || run.status !== "queued"));
@@ -2355,18 +2310,13 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
             <MarkdownContent>{run.result?.summary || "完成"}</MarkdownContent>
             <AgentResponseFooter status={run.result?.clarification
               ? "等待回复"
-              : run.result?.mode === "plan"
-                ? "计划完成"
-                : run.result?.intent === "chat"
-                  ? "回复"
-                  : run.result?.intent === "inspect"
-                    ? "已分析"
-                    : "完成"} meta={run.activities.length ? "" : agentRunMeta(run)}>
+              : run.result?.intent === "chat"
+                ? "回复"
+                : "完成"} meta={run.activities.length ? "" : agentRunMeta(run)}>
               {run.result?.taskChange && <span className="ai-task-change-actions">
                 <button disabled={!run.taskUndone} title={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} aria-label={run.taskUndone ? "重新应用本次任务" : "任务修改已应用"} onClick={() => { if (run.result?.taskChange && onApplyTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: false }); }}><Check size={13}/></button>
                 <button disabled={run.taskUndone} title={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} aria-label={run.taskUndone ? "任务修改已撤销" : "撤销本次任务"} onClick={() => { if (run.result?.taskChange && onUndoTaskChange(run.result.taskChange)) updateRun(run.id, { taskUndone: true }); }}><Undo2 size={13}/></button>
               </span>}
-              {run.result?.mode === "plan" && run.result.planPrompt && !run.result.clarification && <button type="button" className="ai-plan-execute" disabled={running} onClick={() => executePlan(run)} title="由 Agent 按此计划执行"><Play size={13}/><span>执行计划</span></button>}
               <AiResponseActions markdown={run.result?.summary || "完成"} disabled={running || retryBlocked(run)} onRetry={() => void runAgent(run.request || run.prompt, run.id, undefined, run.prompt, run.mode, run.initialPlan, pendingAttachments.length ? pendingAttachments : undefined)}/>
               <AgentResponseTime timestamp={run.finishedAt ?? run.startedAt}/>
             </AgentResponseFooter>
@@ -2392,7 +2342,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
           </div>)}
         </div>}
         {attachmentError && <div className="ai-composer-attachment-error" role="alert"><AlertCircle size={13}/><span>{attachmentError}</span></div>}
-        <textarea ref={promptRef} value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} onPaste={handleComposerPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); running ? enqueuePrompt() : void runAgent(); } }} placeholder={running ? "输入后续指令..." : awaitingClarification ? "输入序号或补充要求..." : agentMode === "plan" ? "描述需要规划的任务..." : "输入任务..."} aria-label="AI 指令" title={`${contextName} · ${lineCount} 行代码`} rows={1}/>
+        <textarea ref={promptRef} value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} onPaste={handleComposerPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); running ? enqueuePrompt() : void runAgent(); } }} placeholder={running ? "输入后续指令..." : awaitingClarification ? "输入序号或补充要求..." : "输入任务..."} aria-label="AI 指令" title={`${contextName} · ${lineCount} 行代码`} rows={1}/>
         <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={handleImageInputChange}/>
         <div className="ai-composer-footer">
           <button type="button" className="ai-composer-add" onClick={() => imageInputRef.current?.click()} disabled={!canAddAiAttachments(pendingAttachments)} title="添加图片" aria-label="添加图片"><Plus size={18}/></button>
@@ -2407,13 +2357,10 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
           </div>
           <span className="ai-composer-footer-spacer"/>
           <div className="ai-composer-menu ai-composer-model-menu" ref={composerMenuRef}>
-            <button ref={composerMenuTriggerRef} type="button" className={`ai-composer-control ai-composer-model ${composerMenuOpen ? "open" : ""}`} onClick={() => { setPermissionMenuOpen(false); setComposerMenuOpen((open) => !open); }} title={`${modelName} · ${agentMode === "plan" ? "计划模式" : "智能体模式"}`} aria-label={`模型与工作模式：${modelName}`} aria-haspopup="menu" aria-expanded={composerMenuOpen}>
-              {agentMode === "plan" ? <ListChecks size={14}/> : <Sparkles size={14}/>}<span className="ai-composer-model-name">{modelName}</span><ChevronDown size={12}/>
+            <button ref={composerMenuTriggerRef} type="button" className={`ai-composer-control ai-composer-model ${composerMenuOpen ? "open" : ""}`} onClick={() => { setPermissionMenuOpen(false); setComposerMenuOpen((open) => !open); }} title={modelName} aria-label={`模型与工作模式：${modelName}`} aria-haspopup="menu" aria-expanded={composerMenuOpen}>
+              <Sparkles size={14}/><span className="ai-composer-model-name">{modelName}</span><ChevronDown size={12}/>
             </button>
             {composerMenuOpen && <div className="ai-composer-popover ai-composer-model-popover" role="menu" aria-label="模型与工作模式">
-              <span className="ai-composer-menu-heading">工作模式</span>
-              <button type="button" role="menuitemradio" aria-checked={agentMode === "agent"} className={agentMode === "agent" ? "selected" : ""} onClick={() => { setAgentMode("agent"); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><Sparkles size={14}/><span>智能体</span>{agentMode === "agent" && <Check size={13}/>}</button>
-              <button type="button" role="menuitemradio" aria-checked={agentMode === "plan"} className={agentMode === "plan" ? "selected" : ""} onClick={() => { setAgentMode("plan"); setComposerMenuOpen(false); requestAnimationFrame(() => composerMenuTriggerRef.current?.focus()); }}><ListChecks size={14}/><span>计划</span>{agentMode === "plan" && <Check size={13}/>}</button>
               <span className="ai-composer-popover-separator"/>
               <div className="ai-effort-slider-row">
                 <span className="ai-effort-slider-label">思考强度 <strong>{reasoningEffortLabels[reasoningEffort]}</strong></span>
