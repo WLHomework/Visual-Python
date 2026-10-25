@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   plugins: [react()],
   server: {
+    // WebView2 对开发资源（尤其 styles.css 模块）有激进缓存，重启也不重新验证，
+    // 导致"JS 新、CSS 旧"的样式失效假象；no-store 强制每次都从服务器取。
+    headers: { "Cache-Control": "no-store, must-revalidate" },
     port: 43127,
     strictPort: true,
     host: "127.0.0.1",
