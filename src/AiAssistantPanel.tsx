@@ -1,5 +1,5 @@
 import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, Download, PenLine, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Download, MoreHorizontal, PenLine, Search, ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, Clock3, Code2, Compass, Copy, Film, Hammer, ImageIcon, ImagePlus, ListChecks, LoaderCircle, MessageSquarePlus, MessagesSquare, Play, Plus, RefreshCw, SearchCheck, Settings, ShieldCheck, ShieldQuestion, Sparkles, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -184,14 +184,36 @@ function conversationTitle(prompt?: string) {
   return normalized.length > 32 ? `${normalized.slice(0, 32)}...` : normalized;
 }
 
-function formatConversationMenuTime(timestamp: number): string {
-  if (!Number.isFinite(timestamp)) return "";
-  const date = new Date(timestamp);
-  const now = new Date();
-  const clock = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-  return date.toDateString() === now.toDateString()
-    ? clock
-    : `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${clock}`;
+export type ConversationHistoryGroup = { label: string; conversations: AiConversation[] };
+
+const conversationHistoryGroupLabels = { today: "今天", yesterday: "昨天", week: "近 7 天", earlier: "更早" } as const;
+
+/** ChatGPT 式时间分组：今天 / 昨天 / 近 7 天 / 更早，组内按最近使用倒序。 */
+export function groupConversationsByRecency(conversations: AiConversation[], now = Date.now()): ConversationHistoryGroup[] {
+  const startOfDay = (timestamp: number) => {
+    const date = new Date(timestamp);
+    date.setHours(0, 0, 0, 0);
+    return date.getTime();
+  };
+  const todayStart = startOfDay(now);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const buckets: Record<keyof typeof conversationHistoryGroupLabels, AiConversation[]> = { today: [], yesterday: [], week: [], earlier: [] };
+  for (const conversation of [...conversations].sort((left, right) => right.updatedAt - left.updatedAt)) {
+    const updated = startOfDay(conversation.updatedAt);
+    if (updated === todayStart) buckets.today.push(conversation);
+    else if (updated === todayStart - dayMs) buckets.yesterday.push(conversation);
+    else if (now - conversation.updatedAt < 7 * dayMs) buckets.week.push(conversation);
+    else buckets.earlier.push(conversation);
+  }
+  return (Object.keys(conversationHistoryGroupLabels) as Array<keyof typeof conversationHistoryGroupLabels>)
+    .flatMap((key) => buckets[key].length ? [{ label: conversationHistoryGroupLabels[key], conversations: buckets[key] }] : []);
+}
+
+export function conversationMatchesQuery(conversation: AiConversation, query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  const firstPrompt = conversation.runs[0]?.prompt ?? "";
+  return conversation.title.toLowerCase().includes(normalized) || firstPrompt.toLowerCase().includes(normalized);
 }
 
 function createConversation(runs: AgentRun[] = []): AiConversation {  const now = Date.now();
@@ -1685,6 +1707,8 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyMenuForId, setHistoryMenuForId] = useState<string | null>(null);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
   const [conversationPersistenceFailed, setConversationPersistenceFailed] = useState(false);
   const conversationMigrationKey = conversationMigrationScopes.join("|");
@@ -1707,7 +1731,7 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   const threadScrollbarDragRef = useRef<{ startY: number; startScrollTop: number; maxScrollTop: number; maxThumbTop: number } | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const conversationMenuRef = useRef<HTMLDivElement>(null);
+  const conversationMenuRef = useRef<HTMLButtonElement>(null);
   const composerMenuRef = useRef<HTMLDivElement>(null);
   const composerMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const permissionMenuRef = useRef<HTMLDivElement>(null);
@@ -1959,7 +1983,11 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
   useEffect(() => {
     if (!conversationMenuOpen) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!conversationMenuRef.current?.contains(event.target as Node)) setConversationMenuOpen(false);
+      const target = event.target as Node;
+      // 覆盖页内部点击不关闭；点在面板其它区域（如头部按钮）也交由按钮自身切换。
+      if (!conversationMenuRef.current?.contains(target) && !document.querySelector(".ai-conversation-history")?.contains(target)) setConversationMenuOpen(false);
+      const kebabMenu = (target as Element | null)?.closest?.(".ai-conversation-history-menu, .ai-conversation-history-actions");
+      if (!kebabMenu) setHistoryMenuForId(null);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setConversationMenuOpen(false);
@@ -2291,36 +2319,54 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       <div className="ai-assistant-title"><span className="ai-assistant-icon"><Sparkles size={16}/></span><strong>AI 编程助手</strong><small title={activeConversation?.title}>{activeConversation?.title || "新对话"}</small></div>
       <div className="ai-assistant-actions">
         {conversationPersistenceFailed && <span className="ai-conversation-persistence-warning" role="status" title="AI 对话记录未能保存，请清理部分历史记录后重试"><AlertCircle size={14}/><span>记录未保存</span></span>}
-        <div className="ai-conversation-menu-anchor" ref={conversationMenuRef}>
-          <button type="button" className={conversationMenuOpen ? "active" : ""} disabled={running} onClick={() => setConversationMenuOpen((open) => !open)} title="会话记录" aria-label="会话记录" aria-haspopup="menu" aria-expanded={conversationMenuOpen}><MessagesSquare size={16}/></button>
-          {conversationMenuOpen && <div className="ai-conversation-menu" role="menu" aria-label="AI 会话记录">
-            <div className="ai-conversation-menu-list">
-              <button type="button" className="ai-conversation-new" role="menuitem" onClick={startConversation}><MessageSquarePlus size={14}/><span>新建对话</span></button>
-              {conversationState.conversations.map((conversation) => {
+          <button type="button" ref={conversationMenuRef} className={conversationMenuOpen ? "active" : ""} onClick={() => { setConversationMenuOpen((open) => !open); setHistoryQuery(""); setHistoryMenuForId(null); }} title="会话记录" aria-label="会话记录" aria-expanded={conversationMenuOpen}><MessagesSquare size={16}/></button>
+                {conversationMenuOpen && <div className="ai-conversation-history" role="dialog" aria-label="会话记录">
+        <header className="ai-conversation-history-header">
+          <button type="button" className="ai-conversation-history-back" onClick={() => setConversationMenuOpen(false)} title="返回对话" aria-label="返回对话"><ArrowLeft size={15}/></button>
+          <strong>会话记录</strong>
+          <button type="button" className="ai-conversation-history-new" onClick={startConversation} disabled={running} title="新建对话" aria-label="新建对话"><MessageSquarePlus size={14}/><span>新建对话</span></button>
+        </header>
+        <div className="ai-conversation-history-search">
+          <Search size={13}/>
+          <input value={historyQuery} onChange={(event) => { setHistoryQuery(event.target.value); setHistoryMenuForId(null); }} placeholder="搜索对话" aria-label="搜索对话" maxLength={60}/>
+          {historyQuery && <button type="button" onClick={() => setHistoryQuery("")} title="清除搜索" aria-label="清除搜索"><X size={12}/></button>}
+        </div>
+        <div className="ai-conversation-history-list">
+          {groupConversationsByRecency(conversationState.conversations.filter((conversation) => conversation.runs.length || conversation.id === conversationState.activeId).filter((conversation) => conversationMatchesQuery(conversation, historyQuery))).map((group) => <section key={group.label}>
+            <h3>{group.label}</h3>
+            {group.conversations.map((conversation) => {
               const selected = conversation.id === conversationState.activeId;
               const renaming = renamingConversationId === conversation.id;
-              return <div className={`ai-conversation-item${selected ? " selected" : ""}`} role="menuitemradio" aria-checked={selected} key={conversation.id}>
+              const busy = conversation.runs.some((run) => run.status === "running" || run.status === "queued");
+              return <div className={`ai-conversation-history-item${selected ? " selected" : ""}`} key={conversation.id}>
                 {renaming
-                  ? <input className="ai-conversation-rename" value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onBlur={commitConversationRename} onKeyDown={(event) => {
+                  ? <input className="ai-conversation-history-rename" value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onBlur={commitConversationRename} onKeyDown={(event) => {
                       if (event.key === "Enter") commitConversationRename();
                       else if (event.key === "Escape") setRenamingConversationId(null);
                     }} autoFocus aria-label="重命名对话" maxLength={80}/>
-                  : <button type="button" className="ai-conversation-select" onClick={() => switchConversation(conversation.id)} title={conversation.title}>
+                  : <button type="button" className="ai-conversation-history-select" disabled={running || selected} onClick={() => switchConversation(conversation.id)} title={conversation.title}>
                     <span>{conversation.title}</span>
-                    <small>{conversation.runs.length ? formatConversationMenuTime(conversation.updatedAt) : "空"}</small>
+                    {busy && <em className="ai-conversation-history-live" title="进行中"/>}
                   </button>}
-                {!renaming && <span className="ai-conversation-item-actions">
-                  <button type="button" className="ai-conversation-rename-button" title="重命名" aria-label={`重命名对话：${conversation.title}`} onClick={() => startRenamingConversation(conversation.id, conversation.title)}><PenLine size={12}/></button>
-                  <button type="button" className="ai-conversation-delete-button" title="删除此对话" aria-label={`删除对话：${conversation.title}`} disabled={running} onClick={() => deleteConversation(conversation.id)}><Trash2 size={12}/></button>
-                </span>}
-              </div>;
-              })}
-            </div>
-            <button type="button" className="ai-conversation-clear ai-conversation-footer" role="menuitem" disabled={!runs.length} onClick={clearConversation}><Trash2 size={14}/><span>清空当前对话</span></button>
-            {aiConversationsAvailable() && <button type="button" className="ai-conversation-footer" role="menuitem" disabled={!runs.length} onClick={() => void exportConversation()}><Download size={14}/><span>导出对话</span></button>}
-            {aiConversationsAvailable() && <button type="button" className="ai-conversation-clear ai-conversation-footer" role="menuitem" disabled={!conversationState.conversations.some((conversation) => conversation.runs.length)} onClick={() => void clearAllConversations()}><Trash2 size={14}/><span>清除全部会话记录</span></button>}
-          </div>}
+                <span className="ai-conversation-history-actions">
+                  <button type="button" title="更多操作" aria-label={`更多操作：${conversation.title}`} aria-haspopup="menu" aria-expanded={historyMenuForId === conversation.id} onClick={(event) => { event.stopPropagation(); setHistoryMenuForId((current) => current === conversation.id ? null : conversation.id); }}><MoreHorizontal size={14}/></button>
+                </span>
+                {historyMenuForId === conversation.id && <div className="ai-conversation-history-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={() => { setHistoryMenuForId(null); startRenamingConversation(conversation.id, conversation.title); }}><PenLine size={12}/><span>重命名</span></button>
+                  {selected && conversation.runs.length > 0 && <button type="button" role="menuitem" disabled={running} onClick={() => { setHistoryMenuForId(null); void clearConversation(); }}><Trash2 size={12}/><span>清空消息</span></button>}
+                  <button type="button" role="menuitem" className="danger" disabled={running} onClick={() => { setHistoryMenuForId(null); deleteConversation(conversation.id); }}><Trash2 size={12}/><span>删除对话</span></button>
+                </div>}
+              </div>
+            })}
+          </section>)}
+          {conversationState.conversations.filter((conversation) => conversation.runs.length || conversation.id === conversationState.activeId).every((conversation) => !conversationMatchesQuery(conversation, historyQuery)) && <p className="ai-conversation-history-empty">没有匹配的对话</p>}
         </div>
+        <footer className="ai-conversation-history-footer">
+          {aiConversationsAvailable() && <button type="button" disabled={!runs.length} onClick={() => void exportConversation()}><Download size={12}/><span>导出对话</span></button>}
+          <span aria-hidden="true">·</span>
+          {aiConversationsAvailable() && <button type="button" className="danger" disabled={!conversationState.conversations.some((conversation) => conversation.runs.length)} onClick={() => void clearAllConversations()}><Trash2 size={12}/><span>清除全部记录</span></button>}
+        </footer>
+      </div>}
         <button type="button" onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={16}/></button>
         <button type="button" onClick={onClose} title="关闭 AI 编程助手" aria-label="关闭 AI 编程助手"><X size={16}/></button>
       </div>

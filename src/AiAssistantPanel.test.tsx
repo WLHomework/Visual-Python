@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentClockTime, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, summarizeAgentRun, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody } from "./AiAssistantPanel";
+import { activityDisplayText, AgentActivityRow, AgentResponseFooter, agentTokenUsageTitle, aiAssistantSuggestions, AiAssistantSuggestionButtons, AiAssistantWelcome, applyAiAssistantSuggestion, attachAiThreadWheelHandler, buildAiFollowUpSuggestions, buildPlanExecutionRequest, buildTaskResumeRequest, canAddAiAttachments, canSubmitAiPrompt, CodeChangeSummary, composeAgentRunBody, createInitialTaskPlan, extractPlanSteps, finalizeAgentRunActivities, formatAgentClockTime, formatAgentElapsed, formatAiTokenCount, formatAgentRunError, formatAgentToolResult, formatCodeChangeStats, getAiThreadScrollbarMetrics, groupAgentActivities, highlightAssistantCode, isFileDragPayload, isNearLatestScroll, MarkdownContent, mergeAiConversationStates, mergePendingAiAttachments, nextAiDropDepth, nextAiThreadScrollTop, normalizeAssistantMarkdown, parseStoredRuns, prepareTaskPlanForResume, removeFinalMessageActivity, resolveRunEffort, safeExternalMarkdownUrl, scrollThreadToLatest, settlePermissionResolvers, shouldShowAiFollowUpSuggestions, storeConversationState, StreamingRichText, summarizeAgentActivities, summarizeAgentRun, taskPlanResumeLabel, trimAiConversationHistory, AgentRunBody, groupConversationsByRecency, conversationMatchesQuery } from "./AiAssistantPanel";
 import { parseAgentFollowUpSuggestions } from "./agentV2/followUps";
 import type { AiAgentActivity } from "./agentV2/types";
 import { estimateTokens, tokenBudgets } from "./agentV2/tokenEstimate";
@@ -667,6 +667,31 @@ describe("AI assistant Markdown", () => {
     expect(trimmed.at(-1)?.user.startsWith("11")).toBe(true);
     expect(trimmed[0]?.user.startsWith("0")).toBe(false);
     expect(trimmed.every((turn) => estimateTokens(turn.user) <= tokenBudgets.historyPerMessage && estimateTokens(turn.assistant) <= tokenBudgets.historyPerMessage)).toBe(true);
+  });
+
+  it("groups conversations into recency buckets used by the history page", () => {
+    const now = new Date("2026-10-25T15:00:00").getTime();
+    const conversation = (id: string, updatedAt: number, runs: Array<Record<string, unknown>> = [{ id: 1, prompt: "p", activities: [], status: "done" }]) =>
+      ({ id, title: id, createdAt: updatedAt, updatedAt, runs }) as never;
+    const groups = groupConversationsByRecency([
+      conversation("earlier", now - 20 * 24 * 3600 * 1000),
+      conversation("today-b", now - 3600 * 1000),
+      conversation("yesterday", now - 24 * 3600 * 1000 - 3600 * 1000),
+      conversation("today-a", now - 60 * 1000),
+      conversation("week", now - 5 * 24 * 3600 * 1000),
+    ], now);
+    expect(groups.map((group) => group.label)).toEqual(["今天", "昨天", "近 7 天", "更早"]);
+    expect(groups[0].conversations.map((item) => item.id)).toEqual(["today-a", "today-b"]);
+    expect(groups[1].conversations[0].id).toBe("yesterday");
+    expect(groups[3].conversations[0].id).toBe("earlier");
+  });
+
+  it("matches history search against titles and first prompts", () => {
+    const conversation = { id: "c", title: "新对话", createdAt: 1, updatedAt: 2, runs: [{ id: 1, prompt: "画一个 Manim 动画", activities: [], status: "done" }] } as never;
+    expect(conversationMatchesQuery(conversation, "")).toBe(true);
+    expect(conversationMatchesQuery(conversation, "manim")).toBe(true);
+    expect(conversationMatchesQuery(conversation, " 新对话 ")).toBe(true);
+    expect(conversationMatchesQuery(conversation, "NeoPixel")).toBe(false);
   });
 
   it("keeps image payloads only on the newest turn to cap multimodal cost", () => {
