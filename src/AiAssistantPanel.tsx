@@ -2320,53 +2320,6 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
       <div className="ai-assistant-actions">
         {conversationPersistenceFailed && <span className="ai-conversation-persistence-warning" role="status" title="AI 对话记录未能保存，请清理部分历史记录后重试"><AlertCircle size={14}/><span>记录未保存</span></span>}
           <button type="button" ref={conversationMenuRef} className={conversationMenuOpen ? "active" : ""} onClick={() => { setConversationMenuOpen((open) => !open); setHistoryQuery(""); setHistoryMenuForId(null); }} title="会话记录" aria-label="会话记录" aria-expanded={conversationMenuOpen}><MessagesSquare size={16}/></button>
-                {conversationMenuOpen && <div className="ai-conversation-history" role="dialog" aria-label="会话记录">
-        <header className="ai-conversation-history-header">
-          <button type="button" className="ai-conversation-history-back" onClick={() => setConversationMenuOpen(false)} title="返回对话" aria-label="返回对话"><ArrowLeft size={15}/></button>
-          <strong>会话记录</strong>
-          <button type="button" className="ai-conversation-history-new" onClick={startConversation} disabled={running} title="新建对话" aria-label="新建对话"><MessageSquarePlus size={14}/><span>新建对话</span></button>
-        </header>
-        <div className="ai-conversation-history-search">
-          <Search size={13}/>
-          <input value={historyQuery} onChange={(event) => { setHistoryQuery(event.target.value); setHistoryMenuForId(null); }} placeholder="搜索对话" aria-label="搜索对话" maxLength={60}/>
-          {historyQuery && <button type="button" onClick={() => setHistoryQuery("")} title="清除搜索" aria-label="清除搜索"><X size={12}/></button>}
-        </div>
-        <div className="ai-conversation-history-list">
-          {groupConversationsByRecency(conversationState.conversations.filter((conversation) => conversation.runs.length || conversation.id === conversationState.activeId).filter((conversation) => conversationMatchesQuery(conversation, historyQuery))).map((group) => <section key={group.label}>
-            <h3>{group.label}</h3>
-            {group.conversations.map((conversation) => {
-              const selected = conversation.id === conversationState.activeId;
-              const renaming = renamingConversationId === conversation.id;
-              const busy = conversation.runs.some((run) => run.status === "running" || run.status === "queued");
-              return <div className={`ai-conversation-history-item${selected ? " selected" : ""}`} key={conversation.id}>
-                {renaming
-                  ? <input className="ai-conversation-history-rename" value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onBlur={commitConversationRename} onKeyDown={(event) => {
-                      if (event.key === "Enter") commitConversationRename();
-                      else if (event.key === "Escape") setRenamingConversationId(null);
-                    }} autoFocus aria-label="重命名对话" maxLength={80}/>
-                  : <button type="button" className="ai-conversation-history-select" disabled={running || selected} onClick={() => switchConversation(conversation.id)} title={conversation.title}>
-                    <span>{conversation.title}</span>
-                    {busy && <em className="ai-conversation-history-live" title="进行中"/>}
-                  </button>}
-                <span className="ai-conversation-history-actions">
-                  <button type="button" title="更多操作" aria-label={`更多操作：${conversation.title}`} aria-haspopup="menu" aria-expanded={historyMenuForId === conversation.id} onClick={(event) => { event.stopPropagation(); setHistoryMenuForId((current) => current === conversation.id ? null : conversation.id); }}><MoreHorizontal size={14}/></button>
-                </span>
-                {historyMenuForId === conversation.id && <div className="ai-conversation-history-menu" role="menu">
-                  <button type="button" role="menuitem" onClick={() => { setHistoryMenuForId(null); startRenamingConversation(conversation.id, conversation.title); }}><PenLine size={12}/><span>重命名</span></button>
-                  {selected && conversation.runs.length > 0 && <button type="button" role="menuitem" disabled={running} onClick={() => { setHistoryMenuForId(null); void clearConversation(); }}><Trash2 size={12}/><span>清空消息</span></button>}
-                  <button type="button" role="menuitem" className="danger" disabled={running} onClick={() => { setHistoryMenuForId(null); deleteConversation(conversation.id); }}><Trash2 size={12}/><span>删除对话</span></button>
-                </div>}
-              </div>
-            })}
-          </section>)}
-          {conversationState.conversations.filter((conversation) => conversation.runs.length || conversation.id === conversationState.activeId).every((conversation) => !conversationMatchesQuery(conversation, historyQuery)) && <p className="ai-conversation-history-empty">没有匹配的对话</p>}
-        </div>
-        <footer className="ai-conversation-history-footer">
-          {aiConversationsAvailable() && <button type="button" disabled={!runs.length} onClick={() => void exportConversation()}><Download size={12}/><span>导出对话</span></button>}
-          <span aria-hidden="true">·</span>
-          {aiConversationsAvailable() && <button type="button" className="danger" disabled={!conversationState.conversations.some((conversation) => conversation.runs.length)} onClick={() => void clearAllConversations()}><Trash2 size={12}/><span>清除全部记录</span></button>}
-        </footer>
-      </div>}
         <button type="button" onClick={onOpenSettings} title="AI 模型设置" aria-label="AI 模型设置"><Settings size={16}/></button>
         <button type="button" onClick={onClose} title="关闭 AI 编程助手" aria-label="关闭 AI 编程助手"><X size={16}/></button>
       </div>
@@ -2462,6 +2415,53 @@ export function AiAssistantPanel({ lineCount, contextName, conversationScope, co
         </div>
       </div>
     </div>
+    {conversationMenuOpen && <div className="ai-conversation-history" role="dialog" aria-label="会话记录">
+      <header className="ai-conversation-history-header">
+        <button type="button" className="ai-conversation-history-back" onClick={() => setConversationMenuOpen(false)} title="返回对话" aria-label="返回对话"><ArrowLeft size={15}/></button>
+        <strong>会话记录</strong>
+        <button type="button" className="ai-conversation-history-new" onClick={startConversation} disabled={running} title="新建对话" aria-label="新建对话"><MessageSquarePlus size={14}/><span>新建对话</span></button>
+      </header>
+      <div className="ai-conversation-history-search">
+        <Search size={13}/>
+        <input value={historyQuery} onChange={(event) => { setHistoryQuery(event.target.value); setHistoryMenuForId(null); }} placeholder="搜索对话" aria-label="搜索对话" maxLength={60}/>
+        {historyQuery && <button type="button" onClick={() => setHistoryQuery("")} title="清除搜索" aria-label="清除搜索"><X size={12}/></button>}
+      </div>
+      <div className="ai-conversation-history-list">
+        {groupConversationsByRecency(conversationState.conversations.filter((conversation) => conversation.runs.length || conversation.id === conversationState.activeId).filter((conversation) => conversationMatchesQuery(conversation, historyQuery))).map((group) => <section key={group.label}>
+          <h3>{group.label}</h3>
+          {group.conversations.map((conversation) => {
+            const selected = conversation.id === conversationState.activeId;
+            const renaming = renamingConversationId === conversation.id;
+            const busy = conversation.runs.some((run) => run.status === "running" || run.status === "queued");
+            return <div className={`ai-conversation-history-item${selected ? " selected" : ""}`} key={conversation.id}>
+              {renaming
+                ? <input className="ai-conversation-history-rename" value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onBlur={commitConversationRename} onKeyDown={(event) => {
+                    if (event.key === "Enter") commitConversationRename();
+                    else if (event.key === "Escape") setRenamingConversationId(null);
+                  }} autoFocus aria-label="重命名对话" maxLength={80}/>
+                : <button type="button" className="ai-conversation-history-select" disabled={running || selected} onClick={() => switchConversation(conversation.id)} title={conversation.title}>
+                  <span>{conversation.title}</span>
+                  {busy && <em className="ai-conversation-history-live" title="进行中"/>}
+                </button>}
+              <span className="ai-conversation-history-actions">
+                <button type="button" title="更多操作" aria-label={`更多操作：${conversation.title}`} aria-haspopup="menu" aria-expanded={historyMenuForId === conversation.id} onClick={(event) => { event.stopPropagation(); setHistoryMenuForId((current) => current === conversation.id ? null : conversation.id); }}><MoreHorizontal size={14}/></button>
+              </span>
+              {historyMenuForId === conversation.id && <div className="ai-conversation-history-menu" role="menu">
+                <button type="button" role="menuitem" onClick={() => { setHistoryMenuForId(null); startRenamingConversation(conversation.id, conversation.title); }}><PenLine size={12}/><span>重命名</span></button>
+                {selected && conversation.runs.length > 0 && <button type="button" role="menuitem" disabled={running} onClick={() => { setHistoryMenuForId(null); void clearConversation(); }}><Trash2 size={12}/><span>清空消息</span></button>}
+                <button type="button" role="menuitem" className="danger" disabled={running} onClick={() => { setHistoryMenuForId(null); deleteConversation(conversation.id); }}><Trash2 size={12}/><span>删除对话</span></button>
+              </div>}
+            </div>
+          })}
+        </section>)}
+        {conversationState.conversations.filter((conversation) => conversation.runs.length || conversation.id === conversationState.activeId).every((conversation) => !conversationMatchesQuery(conversation, historyQuery)) && <p className="ai-conversation-history-empty">没有匹配的对话</p>}
+      </div>
+      <footer className="ai-conversation-history-footer">
+        {aiConversationsAvailable() && <button type="button" disabled={!runs.length} onClick={() => void exportConversation()}><Download size={12}/><span>导出对话</span></button>}
+        <span aria-hidden="true">·</span>
+        {aiConversationsAvailable() && <button type="button" className="danger" disabled={!conversationState.conversations.some((conversation) => conversation.runs.length)} onClick={() => void clearAllConversations()}><Trash2 size={12}/><span>清除全部记录</span></button>}
+      </footer>
+    </div>}
     {imagePreview && <AiImageLightbox image={imagePreview} onClose={() => setImagePreview(null)}/>}
     {dropDepth > 0 && <div className="ai-assistant-drop-overlay" aria-label="松开以添加图片"><span className="ai-assistant-drop-icon"><ImagePlus size={18}/></span><strong>松开以添加图片</strong><small>支持 PNG / JPEG / WebP，最多 {MAX_IMAGE_COUNT} 张</small></div>}
   </section>;
