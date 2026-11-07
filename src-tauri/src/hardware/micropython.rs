@@ -25,7 +25,6 @@ const CTRL_A: u8 = 0x01;
 const CTRL_B: u8 = 0x02;
 const CTRL_C: u8 = 0x03;
 const CTRL_D: u8 = 0x04;
-const CTRL_E: u8 = 0x05;
 
 /// 进入 Raw REPL 后设备打印的横幅，末尾带提示符。
 const RAW_REPL_READY: &[u8] = b"raw REPL; CTRL-B to exit\r\n>";
@@ -82,6 +81,7 @@ impl Default for ReplTimeouts {
 
 impl ReplTimeouts {
     /// 单元测试用：把等待压缩到毫秒级，不改变协议顺序。
+    #[cfg(test)]
     pub fn fast() -> Self {
         Self {
             banner: Duration::from_millis(200),
@@ -190,6 +190,7 @@ pub struct UploadReport {
     pub verified_hash: bool,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProgramRunReport {
     pub upload: UploadReport,
@@ -207,6 +208,7 @@ pub struct RunOptions {
 
 impl RunOptions {
     /// 一直运行，直到程序结束或用户停止（硬件程序的默认语义）。
+    #[cfg(test)]
     pub fn until_stopped() -> Self {
         Self {
             timeout: None,
@@ -216,6 +218,7 @@ impl RunOptions {
     }
 
     /// 只观察一段时间，用于脚本化的等待或测试。
+    #[cfg(test)]
     pub fn observing(timeout: Duration) -> Self {
         Self {
             timeout: Some(timeout),
@@ -224,13 +227,9 @@ impl RunOptions {
         }
     }
 
+    #[cfg(test)]
     pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
         self.cancel = Some(cancel);
-        self
-    }
-
-    pub fn with_stdin(mut self, stdin: Arc<Mutex<VecDeque<u8>>>) -> Self {
-        self.stdin = Some(stdin);
         self
     }
 }
@@ -265,27 +264,18 @@ impl<T: Transport> MicroPythonDevice<T> {
         }
     }
 
+    #[cfg(test)]
     pub fn set_timeouts(&mut self, timeouts: ReplTimeouts) {
         self.timeouts = timeouts;
     }
 
-    pub fn timeouts(&self) -> ReplTimeouts {
-        self.timeouts
-    }
-
-    pub fn label(&self) -> String {
-        self.transport.label()
-    }
-
-    /// 当前是否处于 Raw REPL（界面用它判断“已连接且空闲”）。
+    /// 当前是否处于 Raw REPL（测试用来确认协议状态）。
+    #[cfg(test)]
     pub fn in_raw_repl(&self) -> bool {
         self.in_raw_repl
     }
 
-    pub fn into_transport(self) -> T {
-        self.transport
-    }
-
+    #[cfg(test)]
     pub fn transport_mut(&mut self) -> &mut T {
         &mut self.transport
     }
@@ -816,6 +806,7 @@ impl<T: Transport> MicroPythonDevice<T> {
 
     /// 统一的“运行”：上传并校验 `entry_path`，成功后才软复位执行。
     /// 校验失败时直接返回错误，设备上的旧程序不会被启动。
+    #[cfg(test)]
     pub fn upload_and_run(
         &mut self,
         entry_path: &str,

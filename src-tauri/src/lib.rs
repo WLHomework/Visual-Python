@@ -1819,7 +1819,21 @@ fn tts_instruction(config: &TtsConfig) -> Result<Option<String>, String> {
 }
 
 fn is_bailian_voice_compatible(model: &str, voice: &str) -> bool {
-    is_valid_tts_id(model) && is_valid_tts_id(voice)
+    if !is_valid_tts_id(model) || !is_valid_tts_id(voice) {
+        return false;
+    }
+    match model {
+        "qwen-audio-3.0-tts-plus" => {
+            builtin_tts_voices(model)
+                .iter()
+                .any(|option| option.id == voice)
+                || is_bailian_plus_cloned_voice(voice)
+        }
+        "qwen-audio-3.0-tts-flash" => builtin_tts_voices(model)
+            .iter()
+            .any(|option| option.id == voice),
+        _ => false,
+    }
 }
 
 fn tts_voice_option_label(id: &str, name: Option<&str>) -> String {
@@ -8016,7 +8030,7 @@ mod tests {
             "qwen-audio-3.0-tts-plus",
             "longanlingxin"
         ));
-        assert!(!is_bailian_voice_compatible(
+        assert!(is_bailian_voice_compatible(
             "qwen-audio-3.0-tts-flash",
             "longanlingxi"
         ));
@@ -8035,6 +8049,15 @@ mod tests {
         assert!(!is_bailian_voice_compatible(
             BAILIAN_VOICE_CLONE_MODEL,
             "loongmary"
+        ));
+        assert!(!is_bailian_voice_compatible(
+            "qwen-audio-3.0-tts-flash",
+            "qwen-audio-3.0-tts-plus-vpvoice-a1b2c3"
+        ));
+        assert!(!is_bailian_voice_compatible("unknown-model", "longanlingxin"));
+        assert!(!is_bailian_voice_compatible(
+            "qwen-audio-3.0-tts-plus",
+            "not a valid voice"
         ));
         assert_eq!(
             voice_sample_mime(Path::new("sample.wav")),

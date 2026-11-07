@@ -1,0 +1,128 @@
+[
+  {
+    "voice": "xiaoxiao",
+    "line": "01-hook",
+    "path": "E:\\visual-python\\promo\\audio\\01-hook-xiaoxiao.mp3",
+    "seconds": 4.44,
+    "text": "Manim 是数学动画的天花板，但我不会 Python。"
+  },
+  {
+    "voice": "xiaoxiao",
+    "line": "02-blocks",
+    "path": "E:\\visual-python\\promo\\audio\\02-blocks-xiaoxiao.mp3",
+    "seconds": 2.76,
+    "text": "所以，我把它做成了积木。"
+  },
+  {
+    "voice": "xiaoxiao",
+    "line": "03-drag",
+    "path": "E:\\visual-python\\promo\\audio\\03-drag-xiaoxiao.mp3",
+    "seconds": 7.34,
+    "text": "拖一个场景，拖一个文字，再拖一个动画。右边，就是真正的 Manim 代码。"
+  },
+  {
+    "voice": "xiaoxiao",
+    "line": "04-render",
+    "path": "E:\\visual-python\\promo\\audio\\04-render-xiaoxiao.mp3",
+    "seconds": 3.19,
+    "text": "点一下渲染，动画真的跑起来了。"
+  },
+  {
+    "voice": "xiaoxiao",
+    "line": "05-edit",
+    "path": "E:\\visual-python\\promo\\audio\\05-edit-xiaoxiao.mp3",
+    "seconds": 3.58,
+    "text": "每一块都能改，每一行代码都能看懂。"
+  },
+  {
+    "voice": "xiaoxiao",
+    "line": "06-cta",
+    "path": "E:\\visual-python\\promo\\audio\\06-cta-xiaoxiao.mp3",
+    "seconds": 5.16,
+    "text": "不会 Python，也能让数学动起来。这是 Visual Python。"
+  },
+  {
+    "voice": "yunjian",
+    "line": "01-hook",
+    "path": "E:\\visual-python\\promo\\audio\\01-hook-yunjian.mp3",
+    "seconds": 4.82,
+    "text": "Manim 是数学动画的天花板，但我不会 Python。"
+  },
+  {
+    "voice": "yunjian",
+    "line": "02-blocks",
+    "path": "E:\\visual-python\\promo\\audio\\02-blocks-yunjian.mp3",
+    "seconds": 3.02,
+    "text": "所以，我把它做成了积木。"
+  },
+  {
+    "voice": "yunjian",
+    "line": "03-drag",
+    "path": "E:\\visual-python\\promo\\audio\\03-drag-yunjian.mp3",
+    "seconds": 7.61,
+    "text": "拖一个场景，拖一个文字，再拖一个动画。右边，就是真正的 Manim 代码。"
+  },
+  {
+    "voice": "yunjian",
+    "line": "04-render",
+    "path": "E:\\visual-python\\promo\\audio\\04-render-yunjian.mp3",
+    "seconds": 3.6,
+    "text": "点一下渲染，动画真的跑起来了。"
+  },
+  {
+    "voice": "yunjian",
+    "line": "05-edit",
+    "path": "E:\\visual-python\\promo\\audio\\05-edit-yunjian.mp3",
+    "seconds": 4.27,
+    "text": "每一块都能改，每一行代码都能看懂。"
+  },
+  {
+    "voice": "yunjian",
+    "line": "06-cta",
+    "path": "E:\\visual-python\\promo\\audio\\06-cta-yunjian.mp3",
+    "seconds": 5.45,
+    "text": "不会 Python，也能让数学动起来。这是 Visual Python。"
+  },
+  {
+    "voice": "yunxi",
+    "line": "01-hook",
+    "path": "E:\\visual-python\\promo\\audio\\01-hook-yunxi.mp3",
+    "seconds": 4.78,
+    "text": "Manim 是数学动画的天花板，但我不会 Python。"
+  },
+  {
+    "voice": "yunxi",
+    "line": "02-blocks",
+    "path": "E:\\visual-python\\promo\\audio\\02-blocks-yunxi.mp3",
+    "seconds": 3.1,
+    "text": "所以，我把它做成了积木。"
+  },
+  {
+    "voice": "yunxi",
+    "line": "03-drag",
+    "path": "E:\\visual-python\\promo\\audio\\03-drag-yunxi.mp3",
+    "seconds": 7.54,
+    "text": "拖一个场景，拖一个文字，再拖一个动画。右边，就是真正的 Manim 代码。"
+  },
+  {
+    "voice": "yunxi",
+    "line": "04-render",
+    "path": "E:\\visual-python\\promo\\audio\\04-render-yunxi.mp3",
+    "seconds": 3.55,
+    "text": "点一下渲染，动画真的跑起来了。"
+  },
+  {
+    "voice": "yunxi",
+    "line": "05-edit",
+    "path": "E:\\visual-python\\promo\\audio\\05-edit-yunxi.mp3",
+    "seconds": 3.91,
+    "text": "每一块都能改，每一行代码都能看懂。"
+  },
+  {
+    "voice": "yunxi",
+    "line": "06-cta",
+    "path": "E:\\visual-python\\promo\\audio\\06-cta-yunxi.mp3",
+    "seconds": 5.78,
+    "text": "不会 Python，也能让数学动起来。这是 Visual Python。"
+  }
+]

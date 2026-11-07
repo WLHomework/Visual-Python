@@ -98,6 +98,7 @@ pub fn firmware_image_for_board(board_id: &str) -> Option<FirmwareImage> {
         .find(|image| image.board_id == board_id)
 }
 
+#[cfg(test)]
 pub fn firmware_cache_filename(image: &FirmwareImage) -> String {
     format!("{}/{}", image.version, image.filename)
 }

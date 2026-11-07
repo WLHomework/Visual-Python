@@ -1,0 +1,32 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Caption,Microsoft YaHei,58,&H00FFFFFF,&H000000FF,&H000A0A0A,&H99000000,-1,0,0,0,100,100,1,0,4,7,0,2,50,50,0,1
+Style: Hook,Microsoft YaHei,84,&H00FFFFFF,&H000000FF,&H000A0A0A,&H99000000,-1,0,0,0,100,100,2,0,4,9,0,2,50,50,0,1
+Style: Brand,Microsoft YaHei,31,&H00FFFFFF,&H000000FF,&H000A0A0A,&H00000000,-1,0,0,0,100,100,1,0,1,0,0,7,60,60,78,1
+Style: BrandSub,Microsoft YaHei,23,&H00D7FFD7,&H000000FF,&H000A0A0A,&H00000000,-1,0,0,0,100,100,1,0,1,0,0,9,60,60,88,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+
+Dialogue: 0,0:00:00.00,0:00:33.00,Brand,,0,0,0,,{\an7\pos(60,78)}Visual Python
+Dialogue: 0,0:00:00.00,0:00:33.00,BrandSub,,0,0,0,,{\an9\pos(1020,88)}Manim × 积木
+Dialogue: 0,0:00:00.00,0:00:02.00,Hook,,0,0,0,,{\an2\pos(540,1450)}Manim 很强
+Dialogue: 0,0:00:02.00,0:00:04.50,Caption,,0,0,0,,Manim 是数学动画的天花板
+Dialogue: 0,0:00:04.50,0:00:07.04,Caption,,0,0,0,,{\an2\pos(540,1450)}但我不会 {\c&H00D7FF&}Python{\c&HFFFFFF&}
+Dialogue: 0,0:00:07.04,0:00:10.50,Caption,,0,0,0,,所以，我把它做成了积木
+Dialogue: 0,0:00:10.50,0:00:13.30,Caption,,0,0,0,,拖一个场景
+Dialogue: 0,0:00:13.30,0:00:16.00,Caption,,0,0,0,,拖一个文字，再拖一个动画
+Dialogue: 0,0:00:16.00,0:00:18.45,Caption,,0,0,0,,右边，就是真正的 Manim 代码
+Dialogue: 0,0:00:18.54,0:00:20.80,Caption,,0,0,0,,点一下渲染
+Dialogue: 0,0:00:20.80,0:00:22.28,Caption,,0,0,0,,动画真的跑起来了
+Dialogue: 0,0:00:22.28,0:00:24.50,Caption,,0,0,0,,每一块都能改
+Dialogue: 0,0:00:24.50,0:00:26.50,Caption,,0,0,0,,每一行代码都能看懂
+Dialogue: 0,0:00:26.51,0:00:30.90,Caption,,0,0,0,,不会 Python，也能让数学动起来
+Dialogue: 0,0:00:30.95,0:00:33.00,Caption,,0,0,0,,这是 Visual Python

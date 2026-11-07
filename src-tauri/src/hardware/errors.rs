@@ -76,6 +76,10 @@ impl HardwareError {
         Self::new(HardwareErrorKind::Port, message)
     }
 
+    pub fn disconnected(message: impl Into<String>) -> Self {
+        Self::new(HardwareErrorKind::Disconnected, message)
+    }
+
     pub fn protocol(message: impl Into<String>) -> Self {
         Self::new(HardwareErrorKind::Protocol, message)
     }
@@ -104,6 +108,7 @@ impl HardwareError {
         self.kind
     }
 
+    #[cfg(test)]
     pub fn detail(&self) -> &str {
         &self.message
     }

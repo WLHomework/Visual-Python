@@ -16,11 +16,14 @@ pub trait Transport: Send {
     /// 当前可读字节数，用于避免忙等。
     fn bytes_available(&mut self) -> Result<usize, HardwareError>;
 
-    /// 丢弃输入缓冲区里尚未读取的数据。
-    fn clear_input(&mut self) -> Result<(), HardwareError>;
-
-    /// 用于错误提示的设备标识，例如 `COM3`。
-    fn label(&self) -> String;
+    /// 底层连接是否仍然存在。
+    ///
+    /// 串口被拔掉时，Windows 的 `bytes_to_read` 有时会持续返回 0 而不是报错，
+    /// 只靠读取错误无法发现断线；协议层会周期性调用这个探针。
+    /// 模拟/测试传输默认认为连接一直有效。
+    fn is_connected(&mut self) -> Result<bool, HardwareError> {
+        Ok(true)
+    }
 }
 
 /// 让 `Box<dyn Transport>` 也是 `Transport`，这样设备会话可以持有“运行时才知道具体实现”的字节流：
@@ -38,12 +41,8 @@ impl Transport for Box<dyn Transport> {
         (**self).bytes_available()
     }
 
-    fn clear_input(&mut self) -> Result<(), HardwareError> {
-        (**self).clear_input()
-    }
-
-    fn label(&self) -> String {
-        (**self).label()
+    fn is_connected(&mut self) -> Result<bool, HardwareError> {
+        (**self).is_connected()
     }
 }
 
@@ -122,6 +121,17 @@ fn marker_overlap(pending: &[u8], ending: &[u8]) -> usize {
         .unwrap_or(0)
 }
 
+/// 静默断线探测的间隔。串口轮询本身是 2ms 一次，不能每次都枚举系统串口。
+const LIVENESS_PROBE_INTERVAL: Duration = Duration::from_millis(500);
+
+fn ensure_connected<T: Transport + ?Sized>(transport: &mut T) -> Result<(), HardwareError> {
+    if transport.is_connected()? {
+        Ok(())
+    } else {
+        Err(HardwareError::disconnected("串口连接已中断"))
+    }
+}
+
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || needle.len() > haystack.len() {
         return None;
@@ -146,6 +156,7 @@ pub fn read_until<T: Transport + ?Sized>(
     let mut buffer = [0u8; 512];
     let started = Instant::now();
     let mut last_byte = Instant::now();
+    let mut next_liveness_probe = Instant::now() + LIVENESS_PROBE_INTERVAL;
 
     loop {
         if options
@@ -153,6 +164,11 @@ pub fn read_until<T: Transport + ?Sized>(
             .is_some_and(|flag| flag.load(Ordering::SeqCst))
         {
             return Err(HardwareError::cancelled());
+        }
+
+        if Instant::now() >= next_liveness_probe {
+            ensure_connected(transport)?;
+            next_liveness_probe = Instant::now() + LIVENESS_PROBE_INTERVAL;
         }
 
         // 只在确认“缓冲区里没有结束标记”之后才把安全前缀流出，
@@ -255,9 +271,14 @@ pub fn read_exact<T: Transport + ?Sized>(
 ) -> Result<Vec<u8>, HardwareError> {
     let deadline = Instant::now() + timeout;
     let mut buffer = [0u8; 128];
+    let mut next_liveness_probe = Instant::now() + LIVENESS_PROBE_INTERVAL;
     loop {
         if pending.len() >= length {
             return Ok(pending.drain(..length).collect());
+        }
+        if Instant::now() >= next_liveness_probe {
+            ensure_connected(transport)?;
+            next_liveness_probe = Instant::now() + LIVENESS_PROBE_INTERVAL;
         }
         let available = transport.bytes_available()?;
         if available > 0 {
@@ -299,12 +320,11 @@ pub fn drain_input<T: Transport + ?Sized>(
     }
 }
 
-/// 测试用传输：把预置的“设备输出”喂给协议层，并记录主机写出的字节。
+/// 测试用传输：把预置的“设备输出”喂给协议层。
 #[cfg(test)]
 #[derive(Default)]
 pub struct RecordingTransport {
     pub output: VecDeque<u8>,
-    pub writes: Vec<u8>,
 }
 
 #[cfg(test)]
@@ -312,12 +332,7 @@ impl RecordingTransport {
     pub fn with_output(bytes: &[u8]) -> Self {
         Self {
             output: bytes.iter().copied().collect(),
-            writes: Vec::new(),
         }
-    }
-
-    pub fn written(&self) -> String {
-        String::from_utf8_lossy(&self.writes).into_owned()
     }
 
     pub fn append_output(&mut self, bytes: &[u8]) {
@@ -327,8 +342,7 @@ impl RecordingTransport {
 
 #[cfg(test)]
 impl Transport for RecordingTransport {
-    fn write_all(&mut self, bytes: &[u8]) -> Result<(), HardwareError> {
-        self.writes.extend_from_slice(bytes);
+    fn write_all(&mut self, _bytes: &[u8]) -> Result<(), HardwareError> {
         Ok(())
     }
 
@@ -349,20 +363,33 @@ impl Transport for RecordingTransport {
     fn bytes_available(&mut self) -> Result<usize, HardwareError> {
         Ok(self.output.len())
     }
-
-    fn clear_input(&mut self) -> Result<(), HardwareError> {
-        self.output.clear();
-        Ok(())
-    }
-
-    fn label(&self) -> String {
-        "recording".to_string()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::errors::HardwareErrorKind;
+
+    struct UnpluggedTransport;
+
+    impl Transport for UnpluggedTransport {
+        fn write_all(&mut self, _bytes: &[u8]) -> Result<(), HardwareError> {
+            Ok(())
+        }
+
+        fn read(&mut self, _buffer: &mut [u8]) -> Result<usize, HardwareError> {
+            Ok(0)
+        }
+
+        fn bytes_available(&mut self) -> Result<usize, HardwareError> {
+            // 真机拔线后 `bytes_to_read` 有时会一直返回 0，而不是报错。
+            Ok(0)
+        }
+
+        fn is_connected(&mut self) -> Result<bool, HardwareError> {
+            Ok(false)
+        }
+    }
 
     fn char_timeout(timeout: u64) -> Option<Duration> {
         Some(Duration::from_millis(timeout))
@@ -525,6 +552,31 @@ mod tests {
             error.kind(),
             crate::hardware::errors::HardwareErrorKind::Cancelled
         );
+    }
+
+    #[test]
+    fn detects_a_silently_unplugged_device_even_when_no_bytes_arrive() {
+        let mut transport = UnpluggedTransport;
+        let mut pending = VecDeque::new();
+        let options = ReadUntilOptions::new(b">").overall_timeout(char_timeout(3000));
+        let started = Instant::now();
+
+        let error =
+            read_until(&mut transport, &mut pending, &options, |_| {}).expect_err("unplugged");
+
+        assert_eq!(error.kind(), HardwareErrorKind::Disconnected);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn detects_a_silently_unplugged_device_while_waiting_for_an_exact_ack() {
+        let mut transport = UnpluggedTransport;
+        let mut pending = VecDeque::new();
+
+        let error = read_exact(&mut transport, &mut pending, 2, Duration::from_secs(3))
+            .expect_err("unplugged");
+
+        assert_eq!(error.kind(), HardwareErrorKind::Disconnected);
     }
 
     #[test]

@@ -1,6 +1,6 @@
-use crate::hardware::errors::{HardwareError, HardwareErrorKind};
+use crate::hardware::errors::HardwareError;
 use crate::hardware::transport::Transport;
-use serialport::{ClearBuffer, SerialPort};
+use serialport::SerialPort;
 use std::time::Duration;
 
 /// MicroPython 官方 REPL 默认波特率。刷写用 460800，日常通信固定 115200。
@@ -32,6 +32,9 @@ impl SerialTransport {
     }
 
     /// 设备被拔掉或驱动关闭时，读写会立刻失败，这里统一映射成“设备已断开”。
+    ///
+    /// Windows 拔线常返回 `Other`（例如 ERROR_DEVICE_NOT_CONNECTED），不能退化成
+    /// 普通 I/O 错误，否则上层只会结束运行、不会释放已经失效的会话。
     fn map_io_error(&self, error: std::io::Error) -> HardwareError {
         use std::io::ErrorKind as IoKind;
         match error.kind() {
@@ -40,21 +43,18 @@ impl SerialTransport {
             | IoKind::NotConnected
             | IoKind::ConnectionAborted
             | IoKind::ConnectionReset
-            | IoKind::UnexpectedEof => {
-                HardwareError::new(HardwareErrorKind::Disconnected, "串口连接已中断")
+            | IoKind::UnexpectedEof
+            | IoKind::NotFound
+            | IoKind::Other => {
+                HardwareError::disconnected(format!("{} 连接已中断：{}", self.label, error))
             }
             _ => HardwareError::io(error.to_string()),
         }
     }
 
     fn map_port_error(&self, error: serialport::Error) -> HardwareError {
-        if error.kind == serialport::ErrorKind::NoDevice {
-            return HardwareError::new(
-                HardwareErrorKind::Disconnected,
-                format!("{} 已断开", self.label),
-            );
-        }
-        HardwareError::port(error.description)
+        // 串口已经打开，`bytes_to_read`/`ClearCommError` 再失败通常就是句柄失效。
+        HardwareError::disconnected(format!("{} 连接已中断：{}", self.label, error.description))
     }
 }
 
@@ -85,20 +85,22 @@ impl Transport for SerialTransport {
             .map_err(|error| self.map_port_error(error))
     }
 
-    fn clear_input(&mut self) -> Result<(), HardwareError> {
-        self.port
-            .clear(ClearBuffer::Input)
-            .map_err(|error| self.map_port_error(error))
-    }
-
-    fn label(&self) -> String {
-        self.label.clone()
+    fn is_connected(&mut self) -> Result<bool, HardwareError> {
+        // 打开中的串口仍然会出现在系统端口列表里；被拔掉后会消失。
+        // 枚举失败时不要误判为断线（可能只是系统接口暂时不可用），交给下一次读写报错。
+        match serialport::available_ports() {
+            Ok(ports) => Ok(ports
+                .iter()
+                .any(|port| port.port_name.eq_ignore_ascii_case(&self.label))),
+            Err(_) => Ok(true),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::errors::HardwareErrorKind;
 
     #[test]
     fn reports_a_readable_port_error_when_the_device_is_missing() {

@@ -570,13 +570,4 @@ impl Transport for SimulatedDevice {
         }
         Ok(self.output.len())
     }
-
-    fn clear_input(&mut self) -> Result<(), HardwareError> {
-        self.output.clear();
-        Ok(())
-    }
-
-    fn label(&self) -> String {
-        "模拟设备".to_string()
-    }
 }

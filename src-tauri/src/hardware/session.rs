@@ -143,7 +143,8 @@ pub enum RunRequest {
 
 #[derive(Debug)]
 pub struct RunJobResult {
-    pub run_id: u64,
+    /// 上传报告保留给诊断与测试；后台命令只消费 `outcome`。
+    #[allow(dead_code)]
     pub upload: Option<UploadReport>,
     pub outcome: RunOutcome,
 }
@@ -187,6 +188,7 @@ impl Default for HardwareState {
 
 impl HardwareState {
     /// 测试用：缩短等待设备空闲的时间，避免用例真的等满 10 秒。
+    #[cfg(test)]
     pub fn with_idle_wait(idle_wait: Duration) -> Self {
         Self {
             idle_wait,
@@ -215,6 +217,7 @@ impl HardwareState {
             .map(|session| session.snapshot(self.is_running()))
     }
 
+    #[cfg(test)]
     pub fn is_connected(&self) -> bool {
         lock(&self.session).is_some()
     }
@@ -442,6 +445,7 @@ pub fn perform_upload(
 }
 
 /// 执行一次后台作业（上传 + 运行，或只重跑）。整个过程中设备被独占。
+#[cfg(test)]
 pub fn perform_run(
     state: &HardwareState,
     events: &dyn HardwareEvents,
@@ -516,11 +520,7 @@ fn execute_run(
         let outcome = session.device.run_main(&options, |chunk| {
             events.output(run_id, &String::from_utf8_lossy(chunk));
         })?;
-        Ok(RunJobResult {
-            run_id,
-            upload,
-            outcome,
-        })
+        Ok(RunJobResult { upload, outcome })
     })
 }
 
@@ -557,14 +557,6 @@ mod tests {
 
         fn bytes_available(&mut self) -> Result<usize, HardwareError> {
             self.0.lock().unwrap().bytes_available()
-        }
-
-        fn clear_input(&mut self) -> Result<(), HardwareError> {
-            self.0.lock().unwrap().clear_input()
-        }
-
-        fn label(&self) -> String {
-            "模拟设备".to_string()
         }
     }
 
