@@ -1057,7 +1057,8 @@ body.scene-tab-dragging { user-select: none; cursor: grabbing; }
 
 .app-settings-dialog .python-settings-section {
   min-height: 100%;
-  grid-template-rows: auto minmax(0,1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: stretch;
   gap: 18px;
 }
 
@@ -1077,6 +1078,315 @@ body.scene-tab-dragging { user-select: none; cursor: grabbing; }
 
 .app-settings-dialog .python-settings-section .environment-item {
   background: var(--surface-2);
+}
+
+.python-library-section {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.python-library-section > :not(.python-library-list) {
+  flex: 0 0 auto;
+}
+
+.python-library-header {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.python-library-header > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.python-library-header h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.python-library-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.python-library-refresh,
+.python-library-install-button,
+.python-library-error button {
+  flex: 0 0 auto;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.python-library-refresh:hover:not(:disabled),
+.python-library-error button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.python-library-refresh:disabled,
+.python-library-install-button:disabled,
+.python-library-error button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.python-library-install {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.python-library-install input {
+  min-width: 180px;
+  height: 36px;
+  flex: 1 1 240px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  outline: 0;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.python-library-install input:focus {
+  border-color: #2f9e8f;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #2f9e8f 18%, transparent);
+}
+
+.python-library-install input::placeholder,
+.python-library-search input::placeholder {
+  color: var(--muted);
+}
+
+.python-library-install-button {
+  height: 36px;
+  border-color: #2f9e8f;
+  background: #2f9e8f;
+  color: #f7fffd;
+}
+
+.python-library-install-button:hover:not(:disabled) {
+  background: #36ab99;
+}
+
+.python-library-preflight {
+  min-height: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 12px;
+  margin-top: -2px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.python-library-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.python-library-check.is-installed {
+  color: #2f7d5b;
+}
+
+.python-library-check.is-pending {
+  color: var(--muted);
+}
+
+.python-library-check-warning {
+  color: #a16207;
+}
+
+.python-library-toolbar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.python-library-search {
+  min-width: 0;
+  height: 32px;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.python-library-search:focus-within {
+  border-color: #2f9e8f;
+  color: #2f9e8f;
+}
+
+.python-library-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.python-library-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.python-library-list {
+  min-width: 0;
+  min-height: 160px;
+  flex: 1 1 0;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-color: color-mix(in srgb,var(--muted),transparent 18%) transparent;
+}
+
+.python-library-row {
+  min-width: 0;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 18px minmax(0,1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+}
+
+.python-library-row > svg {
+  color: var(--muted);
+}
+
+.python-library-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.python-library-version {
+  color: var(--muted);
+  font: 10px "Cascadia Code",Consolas,monospace;
+  white-space: nowrap;
+}
+
+.python-library-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.python-library-remove:hover:not(:disabled) {
+  border-color: color-mix(in srgb,#dc2626 28%,var(--border));
+  background: color-mix(in srgb,#dc2626 7%,transparent);
+  color: #b91c1c;
+}
+
+.python-library-remove:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.python-library-empty {
+  min-height: 112px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.python-library-empty strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.python-library-empty span {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.python-library-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--diagnostic-error), transparent 52%);
+  border-radius: 5px;
+  background: var(--diagnostic-error-bg);
+  color: var(--diagnostic-error);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.python-library-error span {
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 620px) {
+  .python-library-header {
+    flex-direction: column;
+  }
+
+  .python-library-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .python-library-count {
+    width: 100%;
+  }
 }
 
 .plugin-manager-dialog {
@@ -8249,3 +8559,30 @@ body.resizing-hardware-preview * {
   outline: 2px solid #2f9e8f;
   outline-offset: 2px;
 }
+
+.plugin-package-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.plugin-package-button:hover:not(:disabled) {
+  border-color: #2f9e78;
+  color: #58bd91;
+}
+
+.plugin-package-button:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+

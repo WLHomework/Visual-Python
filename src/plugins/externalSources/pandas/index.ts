@@ -104,7 +104,6 @@ export const pandasPlugin: VisualPythonPlugin = {
     version: "1.0.0",
     apiVersion: PLUGIN_API_VERSION,
     description: "使用 Pandas 创建、读取、查看、筛选、排序和导出表格数据。",
-    builtin: true,
     python: { packages: ["pandas", "openpyxl", "xlrd"] },
     agent: {
       description: "使用 Pandas 进行表格数据创建、读取、查看、筛选、排序、统计和 CSV 导出。",

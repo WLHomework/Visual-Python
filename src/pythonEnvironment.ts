@@ -9,6 +9,11 @@ export type PythonEnvironment = {
   virtual_env: boolean;
 };
 
+export type PythonInstalledPackage = {
+  name: string;
+  version: string;
+};
+
 const versionParts = (version: string): [number, number, number] | null => {
   const match = /^(\d+)\.(\d+)(?:\.(\d+))?/.exec(version);
   return match ? [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)] : null;

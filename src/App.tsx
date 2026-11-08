@@ -9,7 +9,7 @@ import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { OnMount } from "@monaco-editor/react";
 import type { CancellationToken as MonacoCancellationToken, editor as MonacoEditor, IRange as MonacoRange, languages as MonacoLanguages, Position as MonacoPosition } from "monaco-editor";
-import { AlertCircle, AlignLeft, ArrowLeft, Blocks, BookOpen, Box, Braces, Check, ChevronDown, ChevronRight, ChevronUp, ClipboardPaste, Cloud, Code2, Columns2, Copy, Cpu, Download, ExternalLink, FileCode2, FilePlus2, Film, FolderOpen, Image as ImageIcon, Link2, ListOrdered, ListTree, Mic2, Minus, PanelBottomClose, PanelBottomOpen, Pause, Play, Plug, Plus, Power, RefreshCw, Replace, RotateCcw, Save, SaveAll, Scissors, Search, Send, Settings, Sigma, SlidersHorizontal, Sparkles, Square, Terminal, TextSelect, Trash2, Undo2, Redo2, Unlink2, Upload, Usb, Volume2, X } from "lucide-react";
+import { AlertCircle, AlignLeft, ArrowLeft, Blocks, BookOpen, Box, Braces, Check, ChevronDown, ChevronRight, ChevronUp, ClipboardPaste, Cloud, Code2, Columns2, Copy, Cpu, Download, ExternalLink, FileCode2, FilePlus2, Film, FolderOpen, Image as ImageIcon, Link2, ListOrdered, ListTree, Mic2, Minus, Package, PanelBottomClose, PanelBottomOpen, Pause, Play, Plug, Plus, Power, RefreshCw, Replace, RotateCcw, Save, SaveAll, Scissors, Search, Send, Settings, Sigma, SlidersHorizontal, Sparkles, Square, Terminal, TextSelect, Trash2, Undo2, Redo2, Unlink2, Upload, Usb, Volume2, X } from "lucide-react";
 import { AiAssistantPanel, isFileDragPayload } from "./AiAssistantPanel";
 import { AiModelSettings } from "./AiModelSettings";
 import { FirmwareFlashDialog } from "./hardware/FirmwareFlashDialog";
@@ -77,7 +77,7 @@ import { buildBlockOutline, compactBlockOutline, filterBlockOutline, type BlockO
 import { installFunctionCallLinks } from "./functionCallLinks";
 import { subscribeFormulaEditor, type FormulaEditorRequest } from "./formulaEditorBridge";
 import { normalizeProjectFileName, projectFileBaseName } from "./projectNaming";
-import { projectRelativePath, setFileBlockPickerHandler, setLocalAudioPreviewHandler, type FileBlockPickerMode } from "./fileBlockPicker";
+import { installFileBlockPickerFields, projectRelativePath, setFileBlockPickerHandler, setLocalAudioPreviewHandler, type FileBlockPickerMode } from "./fileBlockPicker";
 import { projectResourceReference, resolveProjectResourceReference, type ProjectResource } from "./projectResources";
 import { createProjectId, parseDraftProject, parseProjectFile, type DraftProject, type ProjectFile } from "./projectFile";
 import { inferProfileFromCode, readLastCodeSession, writeLastCodeSession } from "./lastCodeSession";
@@ -88,9 +88,16 @@ import { ManimRenderAttempt, ManimRenderCancelledError } from "./manimRenderCanc
 import { diagnoseManimError, diagnoseManimStartupError, localAudioErrorSuggestion } from "./manimDiagnostics";
 import { findManagedAudioMetadataRanges } from "./managedAudioMetadata";
 import { readStoredPythonEnvironment, supportedPythonRangeLabel, type PythonEnvironment } from "./pythonEnvironment";
+import { PythonLibraryManager } from "./PythonLibraryManager";
 import { VoiceSampleTrimmer } from "./VoiceSampleTrimmer";
 import { TtsExpressionControls } from "./TtsExpressionControls";
 import { analyzeVoiceSample, bytesToBase64, createWaveformPeaks, encodeMonoPcmWav, mergeAudioChunks, pcmSignalLevel, resampleMonoPcm, trimMonoPcm, type VoiceSampleQuality } from "./voiceRecording";
+import numpyPluginEntry from "../examples/external-plugins/numpy/index.js?raw";
+import numpyPluginManifest from "../examples/external-plugins/numpy/plugin.json?raw";
+import pandasPluginEntry from "../examples/external-plugins/pandas/index.js?raw";
+import pandasPluginManifest from "../examples/external-plugins/pandas/plugin.json?raw";
+import matplotlibPluginEntry from "../examples/external-plugins/matplotlib/index.js?raw";
+import matplotlibPluginManifest from "../examples/external-plugins/matplotlib/plugin.json?raw";
 
 type RecentProject = { path: string; name: string; openedAt: number };
 type ManimRenderOutput = { type: "video" | "image"; scene: string; path: string; url: string; workDir: string; transparentBackground: boolean };
@@ -100,7 +107,7 @@ type OutputEntry = { id: number; stream: "stdout" | "stderr" | "system" | "input
 type PythonOutputEvent = { task_id: number; stream: OutputEntry["stream"]; data: string };
 type PythonFinishedEvent = { task_id: number; exit_code: number; stopped: boolean; timed_out: boolean };
 type PackageInstallOutputEvent = { stream: OutputEntry["stream"]; data: string };
-type PackageInstallFinishedEvent = { success: boolean; stopped: boolean; error?: string | null; packages: string[] };
+type PackageInstallFinishedEvent = { success: boolean; stopped: boolean; error?: string | null; packages: string[]; operation?: "install" | "uninstall" };
 type ManimOutputEvent = { task_id: number; stream: OutputEntry["stream"]; data: string };
 type ManimFinishedEvent = { task_id: number; success: boolean; stopped: boolean; scene: string; work_dir: string; output_type: "video" | "image"; transparent_background: boolean; played_animation_count?: number | null; output_path?: string | null; error?: string | null };
 type ManimStorageInfo = { path: string; sizeBytes: number; renderCount: number };
@@ -112,6 +119,12 @@ type VoiceRecordingSession = { context: AudioContext; stream: MediaStream; sourc
 type VoiceSampleAudioData = { samples: Float32Array; sampleRate: number };
 const ttsExpressionFrom = (value: TtsExpressionConfig): TtsExpressionConfig => ({ emotion: value.emotion, tone: value.tone, intonation: value.intonation, readingStyle: value.readingStyle, customInstruction: value.customInstruction });
 const ttsConfigForRole = (config: TtsConfig, role: VoiceoverRole): TtsConfig => ({ ...config, model: role.model, voice: role.voice, speed: role.speed, ...ttsExpressionFrom(role) });
+const bundledMathPlugins = [
+  { id: "visual-python.numpy", files: { "plugin.json": numpyPluginManifest, "index.js": numpyPluginEntry } },
+  { id: "visual-python.pandas", files: { "plugin.json": pandasPluginManifest, "index.js": pandasPluginEntry } },
+  { id: "visual-python.matplotlib", files: { "plugin.json": matplotlibPluginManifest, "index.js": matplotlibPluginEntry } },
+];
+const bundledMathPluginsSeedKey = "visual-python:bundled-math-plugins-seeded";
 const voiceCloneLanguages = [["zh", "中文"], ["en", "英文"], ["ja", "日文"], ["ko", "韩文"], ["fr", "法文"], ["de", "德文"], ["es", "西班牙文"], ["it", "意大利文"], ["pt", "葡萄牙文"], ["ru", "俄文"]] as const;
 const voiceCloneLanguageLabel = (language: string) => voiceCloneLanguages.find(([value]) => value === language)?.[1] ?? (language || "未知语言");
 const formatRemoteVoiceDate = (value: string) => {
@@ -968,6 +981,7 @@ export default function App() {
   const formatCodeAction = useRef<() => Promise<void>>(async () => {});
   const managedVoicePreviewRequest = useRef(0);
   const ttsPreviewAudio = useRef<HTMLAudioElement | null>(null);
+  const ttsPreviewAutoplay = useRef(false);
   const voiceoverPreviewAudio = useRef<HTMLAudioElement | null>(null);
   const voiceoverPreviewBlockId = useRef<string | null>(null);
   const remoteVoicePreviewAudio = useRef<HTMLAudioElement | null>(null);
@@ -1117,6 +1131,7 @@ export default function App() {
   const startupProjectRequest = useRef<Promise<string | null> | null>(null);
   const startupProjectOpened = useRef(false);
   const externalRestoreStarted = useRef(false);
+  const pluginsReady = useRef<Promise<void> | null>(null);
   const pluginDraftStoreRef = useRef<PluginDraftStore | null>(null);
   if (!pluginDraftStoreRef.current) {
     pluginDraftStoreRef.current = createPluginDraftStore(createPluginDraftStorePersistence(localStorage));
@@ -1178,6 +1193,7 @@ export default function App() {
   const [pluginRecords, setPluginRecords] = useState<PluginRecord[]>(() => pluginRegistry.getRecords());
   const [externalPlugins, setExternalPlugins] = useState<ExternalPluginDiscovery[]>([]);
   const [discoveringPlugins, setDiscoveringPlugins] = useState(false);
+  const [packagingPluginId, setPackagingPluginId] = useState<string | null>(null);
   const [externalPluginErrors, setExternalPluginErrors] = useState<Record<string, string>>({});
   const [trustedExternalPlugins, setTrustedExternalPlugins] = useState<Record<string, boolean>>(() => {
     try { return JSON.parse(localStorage.getItem("visual-python:trusted-external-plugins") || "{}"); } catch { return {}; }
@@ -1205,6 +1221,7 @@ export default function App() {
   const manimImageCaptureRequest = useRef<{ mode: "final" | "animation"; step: number } | null>(null);
   const manimRenderAttemptId = useRef(0);
   const manimRenderAttempt = useRef<ManimRenderAttempt | null>(null);
+  const checkedManimEnvironments = useRef(new Set<string>());
   const pendingOutput = useRef<OutputEntry[]>([]);
   const outputFlushTimer = useRef<number | null>(null);
 
@@ -3240,6 +3257,7 @@ export default function App() {
     setTestingTts(true);
     setTtsPreviewError("");
     setTtsPreviewUrl("");
+    ttsPreviewAutoplay.current = false;
     try {
       const normalizedConfig = saveTtsConfig(ttsConfig);
       setTtsConfigState(normalizedConfig);
@@ -3248,13 +3266,23 @@ export default function App() {
       setTtsHasApiKey(await invoke<boolean>("has_tts_api_key", { config: normalizedConfig }));
       if (managedVoicePreviewRequest.current !== requestId) return;
       setTtsApiKey("");
+      ttsPreviewAutoplay.current = true;
       setTtsPreviewUrl(convertFileSrc(result.path));
     } catch (error) {
+      ttsPreviewAutoplay.current = false;
       setTtsPreviewError(String(error));
     } finally {
       if (managedVoicePreviewRequest.current === requestId) setTestingTts(false);
     }
   }, [stopCompetingVoicePreviews, ttsApiKey, ttsConfig, ttsPreviewText, ttsStoragePath]);
+
+  useEffect(() => {
+    if (!ttsPreviewUrl || !ttsPreviewAutoplay.current) return;
+    ttsPreviewAutoplay.current = false;
+    const audio = ttsPreviewAudio.current;
+    if (!audio) return;
+    void audio.play().catch(() => {});
+  }, [ttsPreviewUrl]);
 
   const testVoiceoverRole = useCallback(async (role: VoiceoverRole) => {
     const text = role.previewText.trim() || ttsPreviewText.trim();
@@ -3654,6 +3682,9 @@ export default function App() {
         return next;
       });
       await setPluginEnabled(pluginId, true);
+      // External plugins cannot import host UI helpers, so install the shared
+      // file-picker fields after their blocks have been registered.
+      installFileBlockPickerFields();
       const activatedRecord = pluginRegistry.getRecord(pluginId);
       if (activatedRecord?.state === "error") throw new Error(activatedRecord.error || "插件激活失败");
       setExternalPluginErrors((current) => {
@@ -3682,23 +3713,55 @@ export default function App() {
     }
   }, [loadExternalPlugin, trustedExternalPlugins]);
 
+  const seedBundledMathPlugins = useCallback(async (entries: ExternalPluginDiscovery[]) => {
+    if (localStorage.getItem(bundledMathPluginsSeedKey)) return entries;
+    const installedIds = new Set(entries.map((entry) => entry.manifest?.id).filter(Boolean));
+    let installed = false;
+    let failed = false;
+    for (const plugin of bundledMathPlugins) {
+      if (installedIds.has(plugin.id)) continue;
+      try {
+        // These packages ship with the app. They use the same external-plugin
+        // loader as user-installed plugins, so block namespaces and manifests
+        // still go through the normal validation path.
+        await invoke<ExternalPluginDiscovery>("install_external_plugin_draft", { files: plugin.files });
+        installed = true;
+      } catch {
+        // A failed seed must not block startup. Retry on the next launch; the
+        // plugin also stays installable from the plugin manager.
+        failed = true;
+      }
+    }
+    if (!failed) localStorage.setItem(bundledMathPluginsSeedKey, "1");
+    if (!installed) return entries;
+    const discovery = await invoke<ExternalPluginDiscoveryResponse>("discover_external_plugins");
+    const seededIds = new Set(bundledMathPlugins.map((plugin) => plugin.id));
+    for (const entry of discovery.entries) {
+      const pluginId = entry.manifest?.id;
+      if (!pluginId || !seededIds.has(pluginId) || pluginRegistry.getRecord(pluginId)) continue;
+      await loadExternalPlugin(entry, { promptForTrust: false, trustConfirmed: true, silent: true });
+    }
+    return discovery.entries;
+  }, [loadExternalPlugin]);
+
   const discoverExternalPlugins = useCallback(async () => {
     setDiscoveringPlugins(true);
     try {
       const discovery = await invoke<ExternalPluginDiscoveryResponse>("discover_external_plugins");
-      setExternalPlugins(discovery.entries);
-      await restoreTrustedExternalPlugins(discovery.entries);
+      const entries = await seedBundledMathPlugins(discovery.entries);
+      setExternalPlugins(entries);
+      await restoreTrustedExternalPlugins(entries);
     } catch (error) {
       setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `Plugin discovery failed: ${String(error)}\n` }]);
     } finally {
       setDiscoveringPlugins(false);
     }
-  }, [restoreTrustedExternalPlugins]);
+  }, [restoreTrustedExternalPlugins, seedBundledMathPlugins]);
 
   useEffect(() => {
     if (externalRestoreStarted.current) return;
     externalRestoreStarted.current = true;
-    void discoverExternalPlugins();
+    pluginsReady.current = discoverExternalPlugins();
   }, [discoverExternalPlugins]);
 
   useEffect(() => {
@@ -3720,6 +3783,26 @@ export default function App() {
       setDiscoveringPlugins(false);
     }
   }, [discoverExternalPlugins, openConsolePanel]);
+
+  const packageExternalPlugin = useCallback(async (pluginId: string, pluginName: string, pluginVersion: string) => {
+    if (packagingPluginId) return;
+    const baseName = pluginName.replace(/[\\/:*?"<>|]/g, "-").trim() || pluginId;
+    const destination = await save({
+      title: "打包插件",
+      defaultPath: `${baseName}-${pluginVersion}.zip`,
+      filters: [{ name: "Visual Python Plugin", extensions: ["zip"] }],
+    });
+    if (!destination) return;
+    setPackagingPluginId(pluginId);
+    try {
+      const path = await invoke<string>("export_external_plugin_zip", { pluginId, destination });
+      showAppNotice(`插件已打包：${path}`);
+    } catch (error) {
+      showAppNotice(`插件打包失败：${String(error)}`);
+    } finally {
+      setPackagingPluginId(null);
+    }
+  }, [packagingPluginId, showAppNotice]);
 
   const collectPluginPythonPackages = useCallback(() => {
     const packages = new Set<string>();
@@ -3784,6 +3867,111 @@ export default function App() {
     }
   }, [openConsolePanel, packageStatus, pythonEnvironment, requestConfirmation, usePipMirror]);
 
+  const installPythonLibraries = useCallback(async (packages: string[]): Promise<boolean> => {
+    if (installingPackages) return false;
+    if (!pythonEnvironment) {
+      setSettingsOpen(true);
+      setPluginsOpen(false);
+      return false;
+    }
+    const requested = [...new Set(packages.map((item) => item.trim()).filter(Boolean))];
+    if (!requested.length) return false;
+    const mirrorArgs = usePipMirror ? ` -i ${pipMirrorUrl}` : "";
+    const command = `"${pythonEnvironment.path}" -m pip install${mirrorArgs} ${requested.join(" ")}`;
+    if (!(await requestConfirmation({ title: "安装 Python 库？", message: `将在当前 Python 环境中安装：${requested.join(", ")}`, detail: command, confirmLabel: "开始安装", tone: "primary" }))) return false;
+    setInstallingPackages(true);
+    setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `> ${command}\n\n` }]);
+    try {
+      await invoke("install_python_packages", { pythonPath: pythonEnvironment.path, packages: requested, indexUrl: usePipMirror ? pipMirrorUrl : null });
+      return true;
+    } catch (error) {
+      packageInstallStopping.current = false;
+      setInstallingPackages(false);
+      setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `Python 库安装失败：${String(error)}\n` }]);
+      openConsolePanel("output");
+      return false;
+    }
+  }, [installingPackages, openConsolePanel, pipMirrorUrl, pythonEnvironment, requestConfirmation, usePipMirror]);
+
+  const installManimPackage = useCallback(async (): Promise<boolean> => {
+    if (!pythonEnvironment || installingPackages) return false;
+    const mirrorArgs = usePipMirror ? ` -i ${pipMirrorUrl}` : "";
+    const command = `"${pythonEnvironment.path}" -m pip install${mirrorArgs} manim`;
+    openConsolePanel("output");
+    setInstallingPackages(true);
+    setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `> ${command}\n\n` }]);
+    try {
+      await invoke("install_python_packages", { pythonPath: pythonEnvironment.path, packages: ["manim"], indexUrl: usePipMirror ? pipMirrorUrl : null });
+      return true;
+    } catch (error) {
+      packageInstallStopping.current = false;
+      setInstallingPackages(false);
+      setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `Manim 安装失败：${String(error)}\n` }]);
+      openConsolePanel("output");
+      return false;
+    }
+  }, [installingPackages, openConsolePanel, pipMirrorUrl, pythonEnvironment, usePipMirror]);
+
+  useEffect(() => {
+    if (!profile.features.manim || !pythonEnvironment?.path) return;
+    const environmentPath = pythonEnvironment.path;
+    const environmentKey = environmentPath.toLowerCase();
+    if (checkedManimEnvironments.current.has(environmentKey)) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const [status] = await invoke<PythonPackageStatus[]>("check_python_packages", { pythonPath: environmentPath, packages: ["manim"] });
+          if (cancelled || status?.installed) {
+            if (status?.installed) checkedManimEnvironments.current.add(environmentKey);
+            return;
+          }
+          checkedManimEnvironments.current.add(environmentKey);
+          const confirmed = await requestConfirmation({
+            title: "未检测到 Manim",
+            message: "当前 Python 环境没有安装 Manim，Manim 动画将无法渲染。是否现在安装？",
+            detail: `"${environmentPath}" -m pip install${usePipMirror ? ` -i ${pipMirrorUrl}` : ""} manim`,
+            confirmLabel: "安装 Manim",
+            tone: "primary",
+          });
+          if (!confirmed || cancelled) return;
+          await installManimPackage();
+        } catch {
+          // 环境检测失败时保持安静，渲染阶段仍会给出具体诊断。
+        }
+      })();
+    }, 700);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [installManimPackage, pipMirrorUrl, profile.features.manim, pythonEnvironment?.path, requestConfirmation, usePipMirror]);
+
+  const uninstallPythonLibraries = useCallback(async (packages: string[]): Promise<boolean> => {
+    if (installingPackages) return false;
+    if (!pythonEnvironment) {
+      setSettingsOpen(true);
+      setPluginsOpen(false);
+      return false;
+    }
+    const requested = [...new Set(packages.map((item) => item.trim()).filter(Boolean))];
+    if (!requested.length) return false;
+    const command = `"${pythonEnvironment.path}" -m pip uninstall -y ${requested.join(" ")}`;
+    if (!(await requestConfirmation({ title: "卸载 Python 库？", message: `将从当前 Python 环境中卸载：${requested.join(", ")}`, detail: command, confirmLabel: "确认卸载", tone: "danger" }))) return false;
+    setInstallingPackages(true);
+    setOutput((entries) => [...entries, { id: outputId.current++, stream: "system", data: `> ${command}\n\n` }]);
+    try {
+      await invoke("uninstall_python_packages", { pythonPath: pythonEnvironment.path, packages: requested });
+      return true;
+    } catch (error) {
+      packageInstallStopping.current = false;
+      setInstallingPackages(false);
+      setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `Python 库卸载失败：${String(error)}\n` }]);
+      openConsolePanel("output");
+      return false;
+    }
+  }, [installingPackages, openConsolePanel, pythonEnvironment, requestConfirmation]);
+
   const choosePythonExecutable = useCallback(async () => {
     const path = await open({ multiple: false, filters: [{ name: "Python executable", extensions: ["exe"] }] });
     if (!path) return;
@@ -3841,18 +4029,20 @@ export default function App() {
         setInstallingPackages(false);
         packageInstallStopping.current = false;
         if (payload.stopped) {
-          enqueueOutput("system", "依赖安装已停止。\n");
+          const action = payload.operation === "uninstall" ? "卸载" : "安装";
+          enqueueOutput("system", `依赖${action}已停止。\n`);
           return;
         }
         if (payload.success) {
           const packageNames = payload.packages.length ? payload.packages.join(", ") : "Python";
-          const message = `已安装 ${packageNames} 依赖。`;
+          const message = payload.operation === "uninstall" ? `已卸载 ${packageNames}。` : `已安装 ${packageNames} 依赖。`;
           enqueueOutput("system", `${message}\n`);
           openConsolePanel("output");
           void checkPluginPythonPackages();
           return;
         }
-        const message = `依赖安装失败：${payload.error || "未知错误"}`;
+        const action = payload.operation === "uninstall" ? "卸载" : "安装";
+        const message = `依赖${action}失败：${payload.error || "未知错误"}`;
         enqueueOutput("stderr", `${message}\n`);
         openConsolePanel("output");
       }),
@@ -4074,6 +4264,7 @@ export default function App() {
 
   const loadProject = useCallback(async (path: string, options: { skipDirtyCheck?: boolean } = {}) => {
     if (!workspace.current) return;
+    await pluginsReady.current;
     invalidateAiWorkspace();
     if (!options.skipDirtyCheck && !(await confirmProjectReplacement())) return;
     let projectFileExists = false;
@@ -6239,6 +6430,13 @@ export default function App() {
     setOutput((entries) => [...entries, { id: outputId.current++, stream: "stderr", data: `${message}\n` }]);
     openConsolePanel("output");
   };
+  const selectAllCodeEditor = () => {
+    const editor = codeEditor.current;
+    const model = editor?.getModel();
+    if (!editor || !model) return;
+    editor.focus();
+    editor.setSelection(model.getFullModelRange());
+  };
   const copyCodeEditorSelection = async () => {
     const text = selectedEditorText();
     if (!text) return;
@@ -6602,7 +6800,7 @@ export default function App() {
       <button role="menuitem" disabled={!codeEditorContextMenu.hasSelection} onClick={() => runCodeEditorContextAction(cutCodeEditorSelection)}><Scissors size={15}/><span>剪切</span><kbd>Ctrl+X</kbd></button>
       <button role="menuitem" disabled={!codeEditorContextMenu.hasSelection} onClick={() => runCodeEditorContextAction(copyCodeEditorSelection)}><Copy size={15}/><span>复制</span><kbd>Ctrl+C</kbd></button>
       <button role="menuitem" onClick={() => runCodeEditorContextAction(pasteIntoCodeEditor)}><ClipboardPaste size={15}/><span>粘贴</span><kbd>Ctrl+V</kbd></button>
-      <button role="menuitem" onClick={() => runCodeEditorContextAction(() => codeEditor.current?.getAction("editor.action.selectAll")?.run())}><TextSelect size={15}/><span>全选</span><kbd>Ctrl+A</kbd></button>
+      <button role="menuitem" onClick={() => runCodeEditorContextAction(selectAllCodeEditor)}><TextSelect size={15}/><span>全选</span><kbd>Ctrl+A</kbd></button>
       <div className="console-context-separator"/>
       <button role="menuitem" disabled={formattingCode} onClick={() => runCodeEditorContextAction(() => formatCodeAction.current())}><AlignLeft size={15}/><span>{formattingCode ? "正在格式化" : "格式化 Python 代码"}</span><kbd>Shift+Alt+F</kbd></button>
     </div>}
@@ -6678,7 +6876,7 @@ export default function App() {
               <TtsExpressionControls value={ttsConfig} onChange={updateTtsConfig}/>
             </div>
           </div>
-          <div className="tts-preview"><label><span>全局试听文本 <small>使用上方默认模型、音色和语速</small></span><textarea value={ttsPreviewText} onChange={(event) => setTtsPreviewText(event.target.value)} maxLength={2000} placeholder="输入一段文字，试听默认配音效果"/></label><div className="tts-preview-footer"><button className="tts-test-button" onClick={() => void testTts()} disabled={testingTts || !ttsPreviewText.trim() || !ttsConfig.baseUrl.trim()}>{testingTts ? <RefreshCw size={16} className="spin"/> : <Play size={16}/>} {testingTts ? "正在合成" : "生成试听"}</button>{ttsPreviewUrl && <audio ref={ttsPreviewAudio} key={ttsPreviewUrl} src={ttsPreviewUrl} controls autoPlay onPlay={() => stopCompetingVoicePreviews("default")}/>}</div>{ttsPreviewError && <p role="alert">{ttsPreviewError}</p>}</div>
+          <div className="tts-preview"><label><span>全局试听文本 <small>使用上方默认模型、音色和语速</small></span><textarea value={ttsPreviewText} onChange={(event) => setTtsPreviewText(event.target.value)} maxLength={2000} placeholder="输入一段文字，试听默认配音效果"/></label><div className="tts-preview-footer"><button className="tts-test-button" onClick={() => void testTts()} disabled={testingTts || !ttsPreviewText.trim() || !ttsConfig.baseUrl.trim()}>{testingTts ? <RefreshCw size={16} className="spin"/> : <Play size={16}/>} {testingTts ? "正在合成" : "生成试听"}</button>{ttsPreviewUrl && <audio ref={ttsPreviewAudio} key={ttsPreviewUrl} src={ttsPreviewUrl} controls onPlay={() => stopCompetingVoicePreviews("default")}/>}</div>{ttsPreviewError && <p role="alert">{ttsPreviewError}</p>}</div>
           <div className="voiceover-section-divider" role="separator"/>
           <div className="voiceover-roles">
             <div className="voiceover-roles-header"><div><strong>配音角色</strong><small>为不同人物保存独立的音色与表达方式</small></div><div className="voiceover-role-file-actions"><button onClick={() => void importVoiceoverRoles()}><Upload size={15}/>导入</button><button onClick={() => void exportVoiceoverRoles()} disabled={!voiceoverRoles.length}><Download size={15}/>导出</button><button onClick={openVoiceCloneDialog} disabled={voiceoverRoles.length >= 20}><Mic2 size={15}/>复刻音色</button><button onClick={addVoiceoverRole} disabled={voiceoverRoles.length >= 20}><Plus size={15}/>添加角色</button></div></div>
@@ -6813,6 +7011,12 @@ export default function App() {
           const selected = pythonEnvironment?.path.toLowerCase() === environment.path.toLowerCase();
           return <button key={environment.path} className={`environment-item ${selected ? "selected" : ""}`} onClick={() => selectPythonEnvironment(environment)}><span className="environment-check">{selected && <Check size={15}/>}</span><span className="environment-info"><strong>Python {environment.version}</strong><span>{environment.implementation}{environment.virtual_env ? " · 虚拟环境" : " · 系统环境"}</span><code>{environment.path}</code></span></button>;
         }) : <div className="empty-environments"><Braces size={24}/><strong>未检测到支持的 Python</strong><span>请安装 {supportedPythonRangeLabel}，或手动选择 python.exe</span></div>}</div>
+        <PythonLibraryManager
+          pythonEnvironment={pythonEnvironment}
+          installing={installingPackages}
+          onInstall={installPythonLibraries}
+          onUninstall={uninstallPythonLibraries}
+        />
       </section>}
       </div></div>
     </section></div>}
@@ -6834,7 +7038,7 @@ export default function App() {
         const corePlugin = isCorePlugin(manifest.id);
         const externalDiscovery = manifest.builtin ? undefined : externalPlugins.find((entry) => entry.manifest?.id === manifest.id);
         const pluginError = record.error || externalPluginErrors[manifest.id];
-        return <article className={`plugin-card plugin-${record.state} ${corePlugin ? "plugin-core" : ""}`} key={manifest.id}>{externalDiscovery && <button className="plugin-delete" title="删除插件" disabled={record.state === "loading"} onClick={() => void deleteExternalPlugin(externalDiscovery)}><X size={12}/></button>}<div className="plugin-card-head"><span className="plugin-card-icon"><Blocks size={22}/></span>{!corePlugin && <button className={`plugin-toggle ${enabled ? "enabled" : ""}`} role="switch" aria-checked={enabled} aria-label={`${enabled ? "停用" : "启用"}${manifest.name}`} disabled={record.state === "loading"} onClick={() => void togglePlugin(record)}><span/></button>}</div><div className="plugin-card-body"><div><strong>{manifest.name}</strong><span className="plugin-tag">{manifest.builtin ? "内置" : "外部"}</span><span className={`plugin-state state-${record.state}`}>{pluginStateLabels[record.state]}</span></div><p>{manifest.description || "暂无描述"}</p>{renderPluginPackageStatus(manifest.python?.packages)}</div><div className="plugin-card-footer"><small>v{manifest.version} · API {manifest.apiVersion}{manifest.entry ? ` · ${manifest.entry}` : ""}</small></div>{pluginError && <code>{pluginError}</code>}</article>;
+        return <article className={`plugin-card plugin-${record.state} ${corePlugin ? "plugin-core" : ""}`} key={manifest.id}>{externalDiscovery && <button className="plugin-delete" title="删除插件" disabled={record.state === "loading"} onClick={() => void deleteExternalPlugin(externalDiscovery)}><X size={12}/></button>}<div className="plugin-card-head"><span className="plugin-card-icon"><Blocks size={22}/></span>{!corePlugin && <button className={`plugin-toggle ${enabled ? "enabled" : ""}`} role="switch" aria-checked={enabled} aria-label={`${enabled ? "停用" : "启用"}${manifest.name}`} disabled={record.state === "loading"} onClick={() => void togglePlugin(record)}><span/></button>}</div><div className="plugin-card-body"><div><strong>{manifest.name}</strong><span className="plugin-tag">{manifest.builtin ? "内置" : "外部"}</span><span className={`plugin-state state-${record.state}`}>{pluginStateLabels[record.state]}</span></div><p>{manifest.description || "暂无描述"}</p>{renderPluginPackageStatus(manifest.python?.packages)}</div><div className="plugin-card-footer"><small>v{manifest.version} · API {manifest.apiVersion}{manifest.entry ? ` · ${manifest.entry}` : ""}</small>{!manifest.builtin && <button className="plugin-package-button" title="打包为 ZIP，可分享给其他人" aria-label="打包插件" disabled={packagingPluginId === manifest.id} onClick={() => void packageExternalPlugin(manifest.id, manifest.name, manifest.version)}>{packagingPluginId === manifest.id ? <RefreshCw className="spin" size={13}/> : <Package size={13}/>}</button>}</div>{pluginError && <code>{pluginError}</code>}</article>;
       })}{externalPlugins.filter((entry) => !entry.manifest || !pluginRecords.some((record) => record.plugin.manifest.id === entry.manifest?.id)).map((entry) => {
         const manifest = entry.manifest;
         const externalRecord = manifest ? pluginRecords.find((record) => record.plugin.manifest.id === manifest.id) : undefined;
@@ -6842,7 +7046,7 @@ export default function App() {
         const externalTrusted = Boolean(manifest && trustedExternalPlugins[manifest.id]);
         const externalError = manifest ? externalPluginErrors[manifest.id] : undefined;
         const externalStateLabel = externalError ? "加载失败" : externalEnabled ? "已启用" : externalTrusted ? "已禁用" : "未信任";
-        return <article className={`plugin-card external-plugin-card ${entry.valid && !externalError ? "plugin-discovered" : "plugin-error"}`} key={entry.path}><button className="plugin-delete" title="删除插件" onClick={() => void deleteExternalPlugin(entry)}><X size={12}/></button><div className="plugin-card-head"><span className="plugin-card-icon"><Blocks size={22}/></span><button className={`plugin-toggle ${externalEnabled ? "enabled" : ""}`} role="switch" aria-checked={externalEnabled} aria-label={`${externalEnabled ? "停用" : "启用"}${manifest?.name || "外部插件"}`} disabled={!entry.valid || !manifest || externalRecord?.state === "loading"} onClick={() => void toggleExternalPlugin(entry)}><span/></button></div><div className="plugin-card-body"><div><strong>{manifest?.name || "无效插件"}</strong><span className="plugin-tag">外部</span><span className={`plugin-state ${entry.valid && !externalError ? (externalEnabled ? "state-active" : "state-disabled") : "state-error"}`}>{entry.valid ? externalStateLabel : "无效"}</span></div><p>{manifest?.description || entry.path}</p>{renderPluginPackageStatus(manifest?.python?.packages)}</div><div className="plugin-card-footer"><small>{manifest ? `v${manifest.version} · API ${manifest.apiVersion} · ${manifest.entry || "未声明入口"}` : entry.path}</small></div>{externalError && <code>{externalError}</code>}{entry.errors.map((error) => <code key={error}>{error}</code>)}</article>;
+        return <article className={`plugin-card external-plugin-card ${entry.valid && !externalError ? "plugin-discovered" : "plugin-error"}`} key={entry.path}><button className="plugin-delete" title="删除插件" onClick={() => void deleteExternalPlugin(entry)}><X size={12}/></button><div className="plugin-card-head"><span className="plugin-card-icon"><Blocks size={22}/></span><button className={`plugin-toggle ${externalEnabled ? "enabled" : ""}`} role="switch" aria-checked={externalEnabled} aria-label={`${externalEnabled ? "停用" : "启用"}${manifest?.name || "外部插件"}`} disabled={!entry.valid || !manifest || externalRecord?.state === "loading"} onClick={() => void toggleExternalPlugin(entry)}><span/></button></div><div className="plugin-card-body"><div><strong>{manifest?.name || "无效插件"}</strong><span className="plugin-tag">外部</span><span className={`plugin-state ${entry.valid && !externalError ? (externalEnabled ? "state-active" : "state-disabled") : "state-error"}`}>{entry.valid ? externalStateLabel : "无效"}</span></div><p>{manifest?.description || entry.path}</p>{renderPluginPackageStatus(manifest?.python?.packages)}</div><div className="plugin-card-footer"><small>{manifest ? `v${manifest.version} · API ${manifest.apiVersion} · ${manifest.entry || "未声明入口"}` : entry.path}</small>{manifest && <button className="plugin-package-button" title="打包为 ZIP，可分享给其他人" aria-label="打包插件" disabled={packagingPluginId === manifest.id} onClick={() => void packageExternalPlugin(manifest.id, manifest.name, manifest.version)}>{packagingPluginId === manifest.id ? <RefreshCw className="spin" size={13}/> : <Package size={13}/>}</button>}</div>{externalError && <code>{externalError}</code>}{entry.errors.map((error) => <code key={error}>{error}</code>)}</article>;
       })}</div></section>
       </div>
     </section></div>}

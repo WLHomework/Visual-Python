@@ -1,0 +1,24 @@
+{
+  "id": "visual-python.numpy",
+  "name": "NumPy",
+  "version": "1.1.0",
+  "apiVersion": "1",
+  "entry": "index.js",
+  "targets": [
+    "python"
+  ],
+  "description": "使用 NumPy 数组进行创建、变形、拼接、筛选、统计、数学计算和随机数处理。",
+  "python": {
+    "packages": [
+      "numpy"
+    ]
+  },
+  "agent": {
+    "description": "使用 NumPy 积木创建、整理、拼接、筛选和计算数组，并生成常用数学函数与随机数代码。",
+    "fileTypes": [
+      ".py",
+      ".vpy"
+    ],
+    "detect": "imports"
+  }
+}

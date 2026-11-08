@@ -1034,6 +1034,7 @@ struct PackageInstallFinished {
     stopped: bool,
     error: Option<String>,
     packages: Vec<String>,
+    operation: &'static str,
 }
 
 #[derive(Clone, Serialize)]
@@ -1199,6 +1200,12 @@ struct PythonEnvironment {
 struct PythonPackageStatus {
     name: String,
     installed: bool,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct PythonInstalledPackage {
+    name: String,
+    version: String,
 }
 
 fn validate_tts_url(value: &str) -> Result<String, String> {
@@ -5157,6 +5164,133 @@ fn read_external_plugin_files_from_dir(
     Ok(ExternalPluginFilesPayload { files, skipped })
 }
 
+fn export_external_plugin_zip_file(
+    plugin_id: &str,
+    plugins_dir: &Path,
+    destination: &Path,
+) -> Result<String, String> {
+    if !is_valid_plugin_id(plugin_id) {
+        return Err("invalid plugin id".into());
+    }
+    if destination.as_os_str().is_empty() {
+        return Err("destination path is required".into());
+    }
+    if !destination
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("zip"))
+    {
+        return Err("destination must be a .zip file".into());
+    }
+
+    let plugins_dir = fs::canonicalize(plugins_dir)
+        .map_err(|error| format!("plugins directory is unavailable: {error}"))?;
+    let requested_dir = plugins_dir.join(plugin_id);
+    let requested_metadata = fs::symlink_metadata(&requested_dir)
+        .map_err(|error| format!("plugin directory is unavailable: {error}"))?;
+    if requested_metadata.file_type().is_symlink() || !requested_metadata.is_dir() {
+        return Err("plugin directory must be a regular directory".into());
+    }
+    let plugin_dir = fs::canonicalize(&requested_dir)
+        .map_err(|error| format!("plugin directory is unavailable: {error}"))?;
+    if plugin_dir.parent() != Some(plugins_dir.as_path()) {
+        return Err("plugin directory is outside the plugins folder".into());
+    }
+
+    let manifest_text = fs::read_to_string(plugin_dir.join("plugin.json"))
+        .map_err(|error| format!("cannot read plugin.json: {error}"))?;
+    let manifest_value = serde_json::from_str::<Value>(&manifest_text)
+        .map_err(|error| format!("plugin.json is not valid JSON: {error}"))?;
+    let manifest =
+        validate_plugin_manifest_value(&manifest_value).map_err(|errors| errors.join("; "))?;
+    if manifest.id != plugin_id {
+        return Err("plugin manifest id does not match requested plugin id".into());
+    }
+    let entry = manifest
+        .entry
+        .as_deref()
+        .ok_or("entry must be provided for external plugins")?;
+    let entry_path = fs::canonicalize(plugin_dir.join(entry))
+        .map_err(|error| format!("plugin entry is unavailable: {error}"))?;
+    if !entry_path.starts_with(&plugin_dir) || !entry_path.is_file() {
+        return Err("plugin entry is outside the plugin folder".into());
+    }
+
+    let mut pending = vec![(plugin_dir.clone(), PathBuf::new())];
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
+    let mut total_bytes = 0_u64;
+    while let Some((directory, relative_dir)) = pending.pop() {
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| format!("cannot read plugin directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("cannot read plugin directory entry: {error}"))?;
+        for item in entries {
+            let metadata = fs::symlink_metadata(item.path())
+                .map_err(|error| format!("cannot inspect plugin file: {error}"))?;
+            if metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "plugin file cannot be a symlink: {}",
+                    item.path().display()
+                ));
+            }
+            let relative = relative_dir.join(item.file_name());
+            if metadata.is_dir() {
+                pending.push((item.path(), relative));
+                continue;
+            }
+            if !metadata.is_file() {
+                return Err(format!(
+                    "unsupported plugin file type: {}",
+                    item.path().display()
+                ));
+            }
+            total_bytes = total_bytes.saturating_add(metadata.len());
+            if total_bytes > MAX_PLUGIN_UNPACKED_BYTES {
+                return Err("plugin files are too large to package".into());
+            }
+            let name = relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            files.push((name, item.path()));
+        }
+    }
+    if files.len() > MAX_PLUGIN_ZIP_FILES {
+        return Err(format!(
+            "plugin has too many files to package: {}",
+            files.len()
+        ));
+    }
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+
+    if let Some(parent) = destination.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot create destination folder: {error}"))?;
+        }
+    }
+    let zip_file =
+        fs::File::create(destination).map_err(|error| format!("cannot create plugin zip: {error}"))?;
+    let mut writer = zip::ZipWriter::new(zip_file);
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, path) in files {
+        let bytes =
+            fs::read(&path).map_err(|error| format!("cannot read plugin file {name}: {error}"))?;
+        writer
+            .start_file(name, options)
+            .map_err(|error| format!("cannot write plugin zip entry: {error}"))?;
+        writer
+            .write_all(&bytes)
+            .map_err(|error| format!("cannot write plugin zip entry: {error}"))?;
+    }
+    writer
+        .finish()
+        .map_err(|error| format!("cannot finish plugin zip: {error}"))?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
 fn delete_external_plugin_dir(plugin_path: &Path, plugins_dir: &Path) -> Result<(), String> {
     let plugins_dir = fs::canonicalize(plugins_dir)
         .map_err(|error| format!("plugins directory is unavailable: {error}"))?;
@@ -6003,55 +6137,57 @@ print(json.dumps(result))
 }
 
 #[tauri::command]
-fn install_python_packages(
-    app: AppHandle,
-    tasks: State<PackageInstallTasks>,
+fn list_python_packages(
     python_path: Option<String>,
-    packages: Vec<String>,
-    index_url: Option<String>,
-) -> Result<(), String> {
-    let packages: Vec<String> = packages
-        .into_iter()
-        .map(|package| package.trim().to_owned())
-        .filter(|package| !package.is_empty())
-        .collect();
-    if packages.is_empty() {
-        return Ok(());
-    }
-    let mut active = tasks
-        .active
-        .lock()
-        .map_err(|_| "package install task state is unavailable")?;
-    if active.is_some() {
-        return Err("已有依赖安装任务正在运行".into());
-    }
+) -> Result<Vec<PythonInstalledPackage>, String> {
+    let script = r#"
+import importlib.metadata, json
+packages = {}
+for distribution in importlib.metadata.distributions():
+    name = (distribution.metadata.get("Name") or "").strip()
+    if not name:
+        continue
+    key = name.lower()
+    if key not in packages:
+        packages[key] = {"name": name, "version": (distribution.version or "").strip()}
+print(json.dumps(sorted(packages.values(), key=lambda item: item["name"].lower()), ensure_ascii=False))
+"#;
     let mut command = Command::new(python_path.as_deref().unwrap_or("python"));
     command
-        .args([
-            "-X",
-            "utf8",
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "--progress-bar",
-            "off",
-        ])
+        .args(["-X", "utf8", "-c", script])
         .env("PYTHONIOENCODING", "utf-8")
         .env("PYTHONUTF8", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(index_url) = index_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|url| !url.is_empty())
-    {
-        if !index_url.starts_with("https://") {
-            return Err("pip index url must start with https://".into());
-        }
-        command.args(["-i", index_url]);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let output = command
+        .output()
+        .map_err(|error| format!("cannot start Python: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
     }
-    command.args(&packages);
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("cannot parse Python package list: {error}"))
+}
+
+fn start_package_command(
+    app: AppHandle,
+    tasks: &PackageInstallTasks,
+    command: &mut Command,
+    packages: Vec<String>,
+    operation: &'static str,
+) -> Result<(), String> {
+    let mut active = tasks
+        .active
+        .lock()
+        .map_err(|_| "package task state is unavailable")?;
+    if active.is_some() {
+        return Err("已有依赖任务正在运行".into());
+    }
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000);
     let mut child = command
@@ -6092,10 +6228,87 @@ fn install_python_packages(
                 stopped: stopped_by_user,
                 error,
                 packages,
+                operation,
             },
         );
     });
     Ok(())
+}
+
+#[tauri::command]
+fn install_python_packages(
+    app: AppHandle,
+    tasks: State<PackageInstallTasks>,
+    python_path: Option<String>,
+    packages: Vec<String>,
+    index_url: Option<String>,
+) -> Result<(), String> {
+    let packages: Vec<String> = packages
+        .into_iter()
+        .map(|package| package.trim().to_owned())
+        .filter(|package| !package.is_empty())
+        .collect();
+    if packages.is_empty() {
+        return Ok(());
+    }
+    let mut command = Command::new(python_path.as_deref().unwrap_or("python"));
+    command
+        .args([
+            "-X",
+            "utf8",
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--progress-bar",
+            "off",
+        ])
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1");
+    if let Some(index_url) = index_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+    {
+        if !index_url.starts_with("https://") {
+            return Err("pip index url must start with https://".into());
+        }
+        command.args(["-i", index_url]);
+    }
+    command.args(&packages);
+    start_package_command(app, &tasks, &mut command, packages, "install")
+}
+
+#[tauri::command]
+fn uninstall_python_packages(
+    app: AppHandle,
+    tasks: State<PackageInstallTasks>,
+    python_path: Option<String>,
+    packages: Vec<String>,
+) -> Result<(), String> {
+    let packages: Vec<String> = packages
+        .into_iter()
+        .map(|package| package.trim().to_owned())
+        .filter(|package| !package.is_empty())
+        .collect();
+    if packages.is_empty() {
+        return Ok(());
+    }
+    let mut command = Command::new(python_path.as_deref().unwrap_or("python"));
+    command
+        .args([
+            "-X",
+            "utf8",
+            "-m",
+            "pip",
+            "uninstall",
+            "--yes",
+            "--disable-pip-version-check",
+        ])
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1")
+        .args(&packages);
+    start_package_command(app, &tasks, &mut command, packages, "uninstall")
 }
 
 #[tauri::command]
@@ -6200,6 +6413,20 @@ fn install_external_plugin_zip(
         .map_err(|error| error.to_string())?
         .join("plugins");
     install_external_plugin_zip_file(Path::new(&zip_path), &plugins_dir)
+}
+
+#[tauri::command]
+fn export_external_plugin_zip(
+    app: AppHandle,
+    plugin_id: String,
+    destination: String,
+) -> Result<String, String> {
+    let plugins_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("plugins");
+    export_external_plugin_zip_file(&plugin_id, &plugins_dir, Path::new(&destination))
 }
 
 #[tauri::command]
@@ -7249,12 +7476,15 @@ pub fn run() {
             detect_python,
             validate_python,
             check_python_packages,
+            list_python_packages,
             install_python_packages,
+            uninstall_python_packages,
             stop_package_install,
             discover_external_plugins,
             read_external_plugin_entry,
             read_external_plugin_files,
             install_external_plugin_zip,
+            export_external_plugin_zip,
             install_external_plugin_draft,
             delete_external_plugin,
             start_pyright_language_server,
@@ -8666,6 +8896,57 @@ mod tests {
         assert!(plugins_dir
             .join("visual-python.zip-demo")
             .join("index.js")
+            .exists());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn exports_external_plugin_zip_with_assets() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("visual-python-plugin-export-test-{suffix}"));
+        let plugins_dir = root.join("plugins");
+        let plugin_dir = plugins_dir.join("visual-python.package-demo");
+        fs::create_dir_all(plugin_dir.join("assets")).unwrap();
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{"id":"visual-python.package-demo","name":"Package Demo","version":"1.0.0","apiVersion":"1","entry":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(
+            plugin_dir.join("index.js"),
+            "export default { activate() {} };",
+        )
+        .unwrap();
+        fs::write(plugin_dir.join("assets/icon.bin"), [0_u8, 1, 2, 3]).unwrap();
+
+        let zip_path = root.join("package-demo.zip");
+        let exported =
+            export_external_plugin_zip_file("visual-python.package-demo", &plugins_dir, &zip_path)
+                .expect("exported plugin zip");
+        assert_eq!(exported, zip_path.to_string_lossy());
+        assert!(zip_path.exists());
+
+        {
+            let mut archive = zip::ZipArchive::new(fs::File::open(&zip_path).unwrap()).unwrap();
+            let names = (0..archive.len())
+                .map(|index| archive.by_index(index).unwrap().name().to_owned())
+                .collect::<Vec<_>>();
+            assert!(names.contains(&"plugin.json".to_owned()));
+            assert!(names.contains(&"index.js".to_owned()));
+            assert!(names.contains(&"assets/icon.bin".to_owned()));
+        }
+
+        let installed_plugins = root.join("installed");
+        let discovery = install_external_plugin_zip_file(&zip_path, &installed_plugins)
+            .expect("reinstalled exported plugin");
+        assert!(discovery.valid);
+        assert!(installed_plugins
+            .join("visual-python.package-demo")
+            .join("assets/icon.bin")
             .exists());
 
         fs::remove_dir_all(&root).unwrap();

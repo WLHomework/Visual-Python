@@ -94,7 +94,6 @@ export const numpyPlugin: VisualPythonPlugin = {
     version: "1.1.0",
     apiVersion: PLUGIN_API_VERSION,
     description: "使用 NumPy 数组进行创建、变形、拼接、筛选、统计、数学计算和随机数处理。",
-    builtin: true,
     python: { packages: ["numpy"] },
     agent: {
       description: "使用 NumPy 积木创建、整理、拼接、筛选和计算数组，并生成常用数学函数与随机数代码。",

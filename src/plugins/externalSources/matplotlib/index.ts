@@ -95,7 +95,6 @@ export const matplotlibPlugin: VisualPythonPlugin = {
     version: "1.0.0",
     apiVersion: PLUGIN_API_VERSION,
     description: "使用 Matplotlib 绘制和保存常见统计图、函数图像与数据图表。",
-    builtin: true,
     python: { packages: ["matplotlib"] },
     agent: {
       description: "使用 Matplotlib 创建图形、绘制常见图表、配置坐标轴和样式，并显示或保存结果。",
