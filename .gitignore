@@ -7,17 +7,67 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies and build output
 node_modules
 dist
 dist-ssr
+coverage
+.vite
+*.tsbuildinfo
 *.local
-src-tauri/resources/language-server/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.pypirc
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
+desktop.ini
+.history/
+.fleet/
+.zed/
+
+# Tauri generated resources
+src-tauri/resources/language-server/
+src-tauri/target/
+src-tauri/gen/
+
+# Local build and capture artifacts
+artifacts/
+promo/build/
+media/
+partial_movie_files/
+
+# Internal AI workspace
+.zcode/
+
+# Generated 3D scratch files
+/cuboid_*.step
+/cuboid_*.stl
+/cuboid_*.png
+
+# Editor/project files that should stay local
 *.suo
 *.ntvs*
 *.njsproj

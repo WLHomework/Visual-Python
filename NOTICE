@@ -1,0 +1,9 @@
+Visual Python
+Copyright 2026 Visual Python contributors
+
+This product includes software developed by OpenAI as part of the Codex
+project (https://github.com/openai/codex), licensed under the Apache
+License, Version 2.0.
+
+Third-party dependencies are listed in package-lock.json and
+src-tauri/Cargo.lock. Their respective licenses continue to apply.
